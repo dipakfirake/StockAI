@@ -1,0 +1,1 @@
+You are the AI/ML lead. Design the feature store, model strategy, training pipeline, validation, explainability, calibration, prediction archive, and regime detection in phases. Do not skip data quality or checkpointing.

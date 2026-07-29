@@ -1,0 +1,96 @@
+erDiagram
+    USERS {
+        uuid id PK
+        string email
+        string name
+        string hashed_password
+        bool is_active
+        timestamptz created_at
+    }
+
+    STOCKS {
+        uuid id PK
+        string symbol
+        string name
+        string exchange
+        string sector
+        string industry
+        bigint market_cap
+        string isin
+        bool is_active
+    }
+
+    CANDLES {
+        string symbol FK
+        string timeframe
+        timestamptz timestamp
+        numeric open
+        numeric high
+        numeric low
+        numeric close
+        bigint volume
+    }
+
+    WATCHLISTS {
+        uuid id PK
+        uuid user_id FK
+        string symbol
+        timestamptz added_at
+    }
+
+    ALERTS {
+        uuid id PK
+        uuid user_id FK
+        string symbol
+        string condition_type
+        numeric condition_value
+        string message
+        bool is_active
+        timestamptz triggered_at
+    }
+
+    PAPER_TRADES {
+        uuid id PK
+        uuid user_id FK
+        string symbol
+        string direction
+        int quantity
+        numeric entry_price
+        numeric exit_price
+        numeric commission
+        string status
+        numeric realized_pnl
+        timestamptz opened_at
+        timestamptz closed_at
+    }
+
+    SIGNALS {
+        uuid id PK
+        string symbol
+        string signal_type
+        string strength
+        text reason
+        json indicators_used
+        string timeframe
+        timestamptz generated_at
+    }
+
+    PREDICTIONS {
+        uuid id PK
+        string symbol
+        string horizon
+        string predicted_direction
+        json probabilities
+        numeric confidence
+        string model_version
+        json shap_values
+        string actual_outcome
+        timestamptz generated_at
+    }
+
+    USERS ||--o{ WATCHLISTS : "tracks"
+    USERS ||--o{ ALERTS : "creates"
+    USERS ||--o{ PAPER_TRADES : "executes"
+    STOCKS ||--o{ CANDLES : "has"
+    STOCKS ||--o{ SIGNALS : "generates"
+    STOCKS ||--o{ PREDICTIONS : "receives"

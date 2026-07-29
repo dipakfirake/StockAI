@@ -1,0 +1,60 @@
+{
+  "project": "AI Stock Research Platform",
+  "version": "0.1.0",
+  "last_updated": "2026-07-29T16:53:00+05:30",
+  "current_phase": "Phase 12 — Monetization/Subscriptions (Completed)",
+  "session": "Session X — Finalizing all features and documentation",
+
+  "completed": [
+    "Phase 1 — Product Definition",
+    "Phase 2 — MVP Design",
+    "Phase 3 — System Architecture + Full scaffold",
+    "Phase 4 — Market Data Layer",
+    "Phase 5 — Charts and Indicators",
+    "Phase 6 — Alerts and Scanners",
+    "Phase 7 — Paper Trading System",
+    "Phase 8 — Backtesting Engine",
+    "Phase 9 — Machine Learning Pipeline",
+    "Phase 10 — NLP News Sentiment Analysis",
+    "Phase 11 — Production Deployment (Docker + CI/CD)",
+    "Phase 12 — Monetization & Subscriptions"
+  ],
+
+  "in_progress": [
+    "Final bug fixes and polish"
+  ],
+
+  "next_tasks": [
+    "Gather user feedback",
+    "Expand advanced backtesting strategies",
+    "Refine SHAP explanations based on user studies"
+  ],
+
+  "architecture": {
+    "backend": "FastAPI + Python 3.11",
+    "frontend": "React 18 + Vite + TypeScript + Lightweight Charts",
+    "database": "PostgreSQL 15 + TimescaleDB (candles hypertable)",
+    "cache": "Redis 7",
+    "queue": "Celery 5.3 + Redis",
+    "charting": "TradingView Lightweight Charts v4",
+    "ai": "LightGBM + VADER/FinBERT NLP Sentiment"
+  },
+
+  "key_decisions": [
+    "DECISION-001: yfinance as primary data source",
+    "DECISION-002: TimescaleDB for time-series OHLCV",
+    "DECISION-003: Explainability mandatory — every AI output has SHAP",
+    "DECISION-004: Celery + Redis for periodic tasks (market hours check enforced)",
+    "DECISION-005: Paper trading slippage = 0.1%, commission = ₹20 flat",
+    "DECISION-006: No real trade execution ever",
+    "DECISION-007: Monetization via FREE and PRO tier subscriptions"
+  ],
+
+  "blockers": [],
+  "known_risks": [
+    "yfinance rate limits",
+    "NSE website structure changes for NLP and FII/DII data"
+  ],
+
+  "resume_instructions": "All major phases 1-12 are complete. System is ready for user beta testing."
+}

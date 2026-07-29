@@ -1,0 +1,267 @@
+/* AI Stock Research Platform — Global Styles */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ===== CSS Custom Properties ===== */
+:root {
+  --color-bg-primary: #0a0e1a;
+  --color-bg-secondary: #0f1629;
+  --color-bg-card: #131d35;
+  --color-bg-card-hover: #1a2540;
+  --color-border: #1e2d4a;
+  --color-border-light: #253557;
+
+  --color-text-primary: #e8edf8;
+  --color-text-secondary: #8b9dc3;
+  --color-text-muted: #4a5878;
+
+  --color-accent-blue: #3b82f6;
+  --color-accent-blue-hover: #2563eb;
+  --color-accent-purple: #8b5cf6;
+  --color-accent-cyan: #06b6d4;
+
+  --color-bullish: #10b981;
+  --color-bullish-dim: #065f46;
+  --color-bearish: #ef4444;
+  --color-bearish-dim: #7f1d1d;
+  --color-neutral: #f59e0b;
+  --color-neutral-dim: #78350f;
+
+  --color-buy: #10b981;
+  --color-sell: #ef4444;
+  --color-hold: #f59e0b;
+  --color-watch: #3b82f6;
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-glow-blue: 0 0 20px rgba(59, 130, 246, 0.15);
+  --shadow-glow-green: 0 0 20px rgba(16, 185, 129, 0.15);
+
+  --navbar-height: 64px;
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+}
+
+/* ===== Reset ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--color-accent-blue); text-decoration: none; }
+a:hover { color: var(--color-accent-blue-hover); }
+
+/* ===== Layout ===== */
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+.main-content {
+  margin-top: var(--navbar-height);
+  flex: 1;
+  padding: 24px;
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+  padding-top: calc(var(--navbar-height) + 24px);
+}
+
+/* ===== NavBar ===== */
+.navbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--navbar-height);
+  background: rgba(10, 14, 26, 0.95);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  z-index: 1000;
+  gap: 8px;
+}
+
+.navbar-brand {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-right: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.navbar-brand span { color: var(--color-accent-blue); }
+
+.navbar-link {
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.navbar-link:hover,
+.navbar-link.active {
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+.navbar-link.active { color: var(--color-accent-blue); }
+
+.navbar-search {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ===== Cards ===== */
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-normal);
+}
+
+.card:hover { border-color: var(--color-border-light); }
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* ===== Inputs ===== */
+.input {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  transition: border-color var(--transition-fast);
+  width: 100%;
+  outline: none;
+}
+
+.input:focus { border-color: var(--color-accent-blue); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+.input::placeholder { color: var(--color-text-muted); }
+
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.btn-primary { background: var(--color-accent-blue); color: #fff; }
+.btn-primary:hover { background: var(--color-accent-blue-hover); transform: translateY(-1px); }
+
+.btn-success { background: var(--color-bullish); color: #fff; }
+.btn-success:hover { background: #059669; }
+
+.btn-danger { background: var(--color-bearish); color: #fff; }
+.btn-danger:hover { background: #dc2626; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+.btn-ghost:hover { background: var(--color-bg-card-hover); color: var(--color-text-primary); }
+
+/* ===== Signal / Score Badges ===== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.badge-buy { background: var(--color-bullish-dim); color: var(--color-bullish); }
+.badge-sell { background: var(--color-bearish-dim); color: var(--color-bearish); }
+.badge-hold { background: var(--color-neutral-dim); color: var(--color-neutral); }
+.badge-watch { background: rgba(59,130,246,0.15); color: var(--color-accent-blue); }
+
+/* ===== Price change colors ===== */
+.positive { color: var(--color-bullish); }
+.negative { color: var(--color-bearish); }
+.neutral { color: var(--color-neutral); }
+
+/* ===== Grid utilities ===== */
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+/* ===== Page header ===== */
+.page-header { margin-bottom: 24px; }
+.page-title { font-size: 24px; font-weight: 700; color: var(--color-text-primary); }
+.page-subtitle { font-size: 14px; color: var(--color-text-secondary); margin-top: 4px; }
+
+/* ===== Loading / Empty states ===== */
+.loading { display: flex; justify-content: center; align-items: center; padding: 48px; color: var(--color-text-secondary); }
+.empty-state { text-align: center; padding: 48px; color: var(--color-text-muted); font-size: 14px; }
+
+/* ===== Table ===== */
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th { color: var(--color-text-muted); font-weight: 500; text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+.table td { padding: 12px; border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); }
+.table tr:hover td { background: var(--color-bg-card-hover); }
+
+/* ===== Monospace for prices ===== */
+.mono { font-family: var(--font-mono); }
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--color-bg-secondary); }
+::-webkit-scrollbar-thumb { background: var(--color-border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+
+/* ===== Responsive ===== */
+@media (max-width: 1024px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .main-content { padding: 16px; }
+}

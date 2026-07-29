@@ -1,0 +1,10 @@
+sequenceDiagram
+  participant User
+  participant WebApp
+  participant API
+  participant AI
+  User->>WebApp: Open stock
+  WebApp->>API: Request analysis
+  API->>AI: Request score
+  AI-->>API: Return probabilities
+  API-->>WebApp: Show result
