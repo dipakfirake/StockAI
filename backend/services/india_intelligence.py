@@ -15,7 +15,7 @@ This is the India-specific intelligence layer described in the MASTER_PROMPT.
 
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 
 from backend.data.ingestion.nse_scraper import nse_scraper
@@ -182,7 +182,7 @@ class IndiaIntelligenceService:
             "signals": signals,
             "detail": regime_data,
             "is_market_open": nse_scraper.is_market_open(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     @staticmethod

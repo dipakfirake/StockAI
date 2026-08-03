@@ -72,3 +72,18 @@ def test_signal_has_indicators_used():
     assert signals
     assert "indicators_used" in signals[0]
     assert isinstance(signals[0]["indicators_used"], dict)
+
+
+def test_daily_signal_includes_review_horizon():
+    """Chart signals disclose a timeframe-based, non-guaranteed review horizon."""
+    signal = SignalEngine.evaluate(make_indicators(rsi_14=25.0), "TEST", "1d")[0]
+    horizon = signal["holding_period"]
+    assert horizon["unit"] == "days"
+    assert horizon["min"] == 5
+    assert horizon["max"] == 20
+    assert "not a guarantee" in horizon["basis"]
+
+
+def test_intraday_signal_uses_sessions_for_review_horizon():
+    signal = SignalEngine.evaluate(make_indicators(rsi_14=25.0), "TEST", "15m")[0]
+    assert signal["holding_period"]["unit"] == "sessions"

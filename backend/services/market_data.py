@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import pandas as pd
@@ -32,6 +32,21 @@ class MarketDataService:
     def _normalise_symbol(symbol: str) -> str:
         """Ensure symbol has exchange suffix. Index symbols (^) are returned as-is."""
         symbol = symbol.upper().strip()
+        
+        # Map common index names to Yahoo Finance tickers
+        index_map = {
+            "NIFTY.NS": "^NSEI",
+            "NIFTY": "^NSEI",
+            "BANKNIFTY.NS": "^NSEBANK",
+            "BANKNIFTY": "^NSEBANK",
+            "SENSEX.BO": "^BSESN",
+            "SENSEX": "^BSESN",
+            "INDIAVIX": "^INDIAVIX",
+            "FINNIFTY.NS": "NIFTY_FIN_SERVICE.NS" # YF doesn't have finnifty easily, but just in case
+        }
+        if symbol in index_map:
+            return index_map[symbol]
+            
         # Index symbols like ^NSEI, ^BSESN, ^INDIAVIX don't need a suffix
         if symbol.startswith("^"):
             return symbol
@@ -48,6 +63,16 @@ class MarketDataService:
         if cached:
             logger.debug(f"Quote cache hit: {symbol}")
             return cached
+
+        # Attempt to get real-time NSE data first
+        try:
+            from backend.data.ingestion.nse_scraper import NSEScraper
+            rt_quote = await NSEScraper.fetch_realtime_quote(symbol)
+            if rt_quote:
+                await cache_set(cache_key, rt_quote, ttl=settings.CACHE_TTL_QUOTE)
+                return rt_quote
+        except Exception as e:
+            logger.debug(f"NSE Real-time fetch failed for {symbol}, falling back to yfinance: {e}")
 
         try:
             import requests
@@ -74,9 +99,10 @@ class MarketDataService:
                 logger.debug(f"fast_info failed for {symbol}: {e}")
                 last_price, prev_close, volume_avg, market_cap, year_high, year_low = 0, 0, 0, 0, 0, 0
 
-            # Fallback to history if fast_info provides zeroed data or failed
+            # Fallback to history if fast_info provides zeroed/stale reference data.
+            # Index feeds occasionally omit previous_close while still returning price.
             hist = pd.DataFrame()
-            if last_price == 0:
+            if last_price == 0 or prev_close == 0:
                 hist = await asyncio.to_thread(ticker.history, period="5d")
                 if not hist.empty:
                     hist = hist.fillna(0)
@@ -93,7 +119,9 @@ class MarketDataService:
                 "market_cap": market_cap,
                 "52w_high": year_high,
                 "52w_low": year_low,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "data_status": "provider_delayed_or_realtime",
+                "source": "Yahoo Finance provider feed",
             }
 
             await cache_set(cache_key, quote, ttl=settings.CACHE_TTL_QUOTE)
@@ -134,9 +162,9 @@ class MarketDataService:
         else:
             period_map = {
                 "1m": "7d", "5m": "60d", "15m": "60d", "30m": "60d",
-                "1h": "730d", "1d": "2y", "1w": "5y",
+                "1h": "730d", "1d": "max", "1w": "max", "1mo": "max"
             }
-            period = period_map.get(timeframe, "1y")
+            period = period_map.get(timeframe, "max")
             start_date = None
             end_date = None
 
@@ -287,6 +315,39 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"Failed to fetch info for {symbol}: {e}")
             return None
+
+
+    @staticmethod
+    async def fetch_news(symbol: str) -> list[dict]:
+        """Fetch recent news articles for a given symbol."""
+        symbol = MarketDataService._normalise_symbol(symbol)
+        cache_key = f"news:{symbol}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            import requests
+            session = requests.Session()
+            session.headers.update({"User-Agent": "Mozilla/5.0"})
+            ticker = await asyncio.to_thread(yf.Ticker, symbol, session=session)
+            news_items = await asyncio.to_thread(lambda: ticker.news)
+            
+            articles = []
+            for item in news_items[:10]:
+                articles.append({
+                    "title": item.get("title", ""),
+                    "publisher": item.get("publisher", ""),
+                    "link": item.get("link", ""),
+                    "providerPublishTime": item.get("providerPublishTime", 0),
+                    "type": item.get("type", "STORY")
+                })
+                
+            await cache_set(cache_key, articles, ttl=3600)  # 1 hour cache
+            return articles
+        except Exception as e:
+            logger.error(f"Failed to fetch news for {symbol}: {e}")
+            return []
 
 
 market_data_service = MarketDataService()

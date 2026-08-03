@@ -8,6 +8,9 @@ interface Index {
   price: number
   change: number
   change_pct: number
+  source?: string
+  data_status?: string
+  timestamp?: string
 }
 
 interface RegimeData {
@@ -131,6 +134,10 @@ export default function Dashboard() {
             <div className={idx.change_pct >= 0 ? 'positive' : 'negative'} style={{ fontSize: 14, marginTop: 4 }}>
               {idx.change_pct >= 0 ? '▲' : '▼'} {Math.abs(idx.change_pct).toFixed(2)}%
               &nbsp;({idx.change >= 0 ? '+' : ''}{idx.change?.toFixed(2)})
+            </div>
+            <div style={{ marginTop: 7, fontSize: 10, color: 'var(--color-text-muted)' }} title={idx.source}>
+              {idx.data_status === 'exchange_feed' ? 'Exchange feed' : 'Provider fallback'}
+              {idx.timestamp ? ` · ${idx.timestamp}` : ''}
             </div>
           </div>
         ))}

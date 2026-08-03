@@ -1,5 +1,6 @@
 """Watchlist API router."""
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, delete
@@ -28,11 +29,14 @@ async def get_watchlist(
     )
     items = result.scalars().all()
 
+    quotes = await asyncio.gather(
+        *(market_data_service.fetch_quote(item.symbol) for item in items),
+        return_exceptions=True,
+    )
     stocks = []
-    for item in items:
-        quote = await market_data_service.fetch_quote(item.symbol)
+    for item, quote in zip(items, quotes):
         entry = {"symbol": item.symbol, "added_at": item.added_at.isoformat()}
-        if quote:
+        if isinstance(quote, dict):
             entry.update({
                 "price": quote.get("price"),
                 "change": quote.get("change"),

@@ -1,6 +1,11 @@
 """Market overview, regime, and India Intelligence API router."""
 
-from fastapi import APIRouter, Depends, Query
+import asyncio
+
+from fastapi import APIRouter, Depends, Query, HTTPException
+from backend.core.logging_config import get_logger
+from backend.core.config import settings
+from backend.core.cache import cache_get, cache_set
 from backend.core.auth import get_current_user
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service
@@ -9,8 +14,10 @@ from backend.services.india_intelligence import india_intelligence
 from backend.data.ingestion.nse_scraper import nse_scraper
 from backend.services.advanced_indicators import advanced_indicators, AdvancedIndicators
 from backend.services.indicators import candles_to_df
+from backend.services.screener import screener_service
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 NIFTY_SYMBOL = "^NSEI"
 SENSEX_SYMBOL = "^BSESN"
@@ -141,7 +148,11 @@ async def get_market_events(current_user=Depends(get_current_user)):
 
 @router.get("/indices")
 async def get_market_indices(current_user=Depends(get_current_user)):
-    """Get live quotes for major Indian market indices."""
+    """Get exchange-preferred, source-labelled quotes for major Indian indices."""
+    cache_key = "market:indices:v2"
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
     symbols = {
         "Nifty 50": NIFTY_SYMBOL,
         "Sensex": SENSEX_SYMBOL,
@@ -150,17 +161,23 @@ async def get_market_indices(current_user=Depends(get_current_user)):
         "Nifty Midcap 100": "^CRSMID",
         "India VIX": "^INDIAVIX",
     }
-    indices = []
-    for name, sym in symbols.items():
+    official = await nse_scraper.fetch_index_quotes()
+
+    async def fetch_index(name: str, sym: str):
+        official_key = {"Nifty 50": "NIFTY 50", "Nifty Bank": "NIFTY BANK"}.get(name)
+        if official_key and official_key in official:
+            return {"name": name, "symbol": sym, **official[official_key]}
         try:
             quote = await market_data_service.fetch_quote(sym)
             if quote and quote.get("price", 0) > 0:
-                indices.append({"name": name, "symbol": sym, **quote})
-            else:
-                indices.append({"name": name, "symbol": sym, "price": None, "error": "Unavailable"})
+                return {"name": name, "symbol": sym, **quote}
         except Exception:
-            indices.append({"name": name, "symbol": sym, "price": None, "error": "Unavailable"})
-    return {"indices": indices}
+            pass
+        return {"name": name, "symbol": sym, "price": None, "error": "Unavailable"}
+    indices = await asyncio.gather(*(fetch_index(name, sym) for name, sym in symbols.items()))
+    result = {"indices": indices}
+    await cache_set(cache_key, result, ttl=settings.CACHE_TTL_INDEX_QUOTE)
+    return result
 
 
 @router.get("/advanced-indicators/{symbol}")
@@ -187,6 +204,8 @@ async def get_advanced_indicators(
     pivots = AdvancedIndicators.compute_pivot_levels(df)
     sr_levels = AdvancedIndicators.detect_support_resistance(df)
     patterns = AdvancedIndicators.detect_candlestick_patterns(df)
+    market_structure = AdvancedIndicators.compute_market_structure(df)
+    volatility_squeeze = AdvancedIndicators.compute_volatility_squeeze(df)
 
     supertrend_latest = None
     if st_df is not None and not st_df.empty and len(st_df) > 0:
@@ -209,6 +228,8 @@ async def get_advanced_indicators(
         "pivot_levels": pivots,
         "support_resistance": sr_levels,
         "candlestick_patterns": patterns,
+        "market_structure": market_structure,
+        "volatility_squeeze": volatility_squeeze,
     }
 
 @router.get("/heatmap")
@@ -259,6 +280,33 @@ async def get_options_chain(
         
         chain_data = options_engine.generate_chain(symbol.upper(), spot_price, current_vix)
         return chain_data
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to generate options chain for {symbol}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch options data")
+
+@router.get("/screener")
+async def get_swing_trade_screener(
+    sector: str = Query(None, description="Optional sector or universe to screen (e.g. NIFTY50)"),
+    current_user=Depends(get_current_user)
+):
+    """
+    Run the AI Swing Trade Screener across a predefined universe.
+    Combines Technicals, Fundamentals, and NLP News Sentiment to find trade setups.
+    """
+    try:
+        # We can implement a caching layer here if this is hit frequently
+        cache_key = f"screener_results_{sector or 'default'}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
+        results = await screener_service.run_screener()
+        
+        # Cache for 1 hour to prevent API rate limits
+        await cache_set(cache_key, results, ttl=3600)
+        return results
+    except Exception as e:
+        logger.error(f"Screener failed: {e}")
+        raise HTTPException(status_code=500, detail="Screener execution failed")

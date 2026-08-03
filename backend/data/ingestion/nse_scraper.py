@@ -14,12 +14,13 @@ NSE official website: https://www.nseindia.com/
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 
 import aiohttp
 from backend.core.logging_config import get_logger
 from backend.core.cache import cache_get, cache_set
+from backend.services.time_sync import time_sync
 
 logger = get_logger(__name__)
 
@@ -67,10 +68,10 @@ class NSEScraper:
 
     @staticmethod
     def is_market_open(dt: Optional[datetime] = None) -> bool:
-        """Check if NSE market is open at the given datetime (IST)."""
+        """Check if NSE market is open at the given datetime (IST), using synced time to prevent Docker drift."""
         import pytz
         tz = pytz.timezone("Asia/Kolkata")
-        now = dt or datetime.now(tz)
+        now = dt or time_sync.get_true_now(tz)
         if hasattr(now, "tzinfo") and now.tzinfo is None:
             now = tz.localize(now)
 
@@ -132,13 +133,97 @@ class NSEScraper:
                 "sentiment": sentiment,
                 "regime_signal": regime_signal,
                 "interpretation": f"India VIX at {vix:.1f} — {sentiment.replace('_', ' ').title()}",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             await cache_set(cache_key, result, ttl=300)  # 5 min cache
             return result
         except Exception as e:
             logger.error(f"Failed to fetch India VIX: {e}")
             return None
+
+    @staticmethod
+    async def fetch_realtime_quote(symbol: str) -> Optional[dict]:
+        """Fetch 100% real-time quote directly from NSE to bypass Yahoo Finance 15m delay."""
+        if not symbol.endswith(".NS") and "." in symbol:
+            return None  # Only attempt for NSE stocks, not BSE (.BO) or indices
+            
+        clean_symbol = symbol.replace('.NS', '').upper()
+        
+        try:
+            session = await NSEScraper.get_session()
+            url = f"{NSE_API_URL}/quote-equity?symbol={clean_symbol}"
+            
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    if "priceInfo" in data:
+                        price_info = data["priceInfo"]
+                        last_price = float(price_info.get("lastPrice", 0))
+                        prev_close = float(price_info.get("previousClose", 0))
+                        
+                        if last_price > 0:
+                            return {
+                                "symbol": symbol,
+                                "price": round(last_price, 2),
+                                "previous_close": round(prev_close, 2),
+                                "change": round(last_price - prev_close, 2),
+                                "change_pct": round(float(price_info.get("pChange", 0)), 2),
+                                "volume": int(data.get("preOpenMarket", {}).get("totalTradedVolume", 0) or 0),
+                                "market_cap": 0, # NSE doesn't provide this here
+                                "52w_high": float(price_info.get("weekHighLow", {}).get("max", 0) or 0),
+                                "52w_low": float(price_info.get("weekHighLow", {}).get("min", 0) or 0),
+                                "timestamp": data.get("metadata", {}).get("lastUpdateTime") or time_sync.get_true_now().isoformat(),
+                                "data_status": "realtime",
+                                "source": "NSE Real-Time API",
+                            }
+                return None
+        except Exception as e:
+            logger.debug(f"Failed to fetch real-time quote for {symbol} from NSE: {e}")
+            return None
+
+    @staticmethod
+    async def fetch_index_quotes() -> dict[str, dict]:
+        """Fetch official NSE index values when the public NSE endpoint is available."""
+        cache_key = "nse:index_quotes"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+        try:
+            session = await NSEScraper.get_session()
+            async with session.get(f"{NSE_API_URL}/allIndices", timeout=10) as response:
+                if response.status != 200:
+                    logger.warning("NSE index endpoint returned status %s", response.status)
+                    return {}
+                payload = await response.json()
+            output: dict[str, dict] = {}
+            for item in payload.get("data", []):
+                name = str(item.get("index", "")).upper()
+                if name not in {"NIFTY 50", "NIFTY BANK"}:
+                    continue
+                try:
+                    price = float(item.get("last", 0) or 0)
+                    previous_close = float(item.get("previousClose", 0) or 0)
+                    change = float(item.get("variation", price - previous_close) or 0)
+                    change_pct = float(item.get("percentChange", (change / previous_close * 100 if previous_close else 0)) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if price <= 0:
+                    continue
+                output[name] = {
+                    "price": round(price, 2),
+                    "previous_close": round(previous_close, 2),
+                    "change": round(change, 2),
+                    "change_pct": round(change_pct, 2),
+                    "timestamp": item.get("lastUpdateTime") or datetime.now(timezone.utc).isoformat(),
+                    "data_status": "exchange_feed",
+                    "source": "NSE public index feed",
+                }
+            await cache_set(cache_key, output, ttl=15)
+            return output
+        except Exception as exc:
+            logger.warning("Official NSE index feed unavailable: %s", exc)
+            return {}
 
     @staticmethod
     async def fetch_market_breadth() -> Optional[dict]:
@@ -201,7 +286,7 @@ class NSEScraper:
                 "pct_above_200ema": round(above_200ema / total * 100, 1) if total > 0 else 0,
                 "breadth_signal": "bullish" if advancing > declining else "bearish",
                 "sample_size": total,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             await cache_set(cache_key, result, ttl=1800)  # 30 min cache
             return result
@@ -308,7 +393,7 @@ class NSEScraper:
                         "quantity_traded": security_info.get("quantityTraded", 0),
                         "delivery_quantity": security_info.get("deliveryQuantity", 0),
                         "delivery_percentage": security_info.get("deliveryToTradedQuantity", 0),
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     }
                     await cache_set(cache_key, result, ttl=3600)
                     return result
@@ -348,7 +433,7 @@ class NSEScraper:
                 "symbol": symbol,
                 "dividends": sorted(dividends, key=lambda x: x["date"], reverse=True),
                 "splits": sorted(splits, key=lambda x: x["date"], reverse=True),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             await cache_set(cache_key, result, ttl=86400)  # 24 hour cache
             return result

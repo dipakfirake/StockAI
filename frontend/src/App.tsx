@@ -19,7 +19,7 @@ import AIAssistantWidget from './components/AIAssistantWidget'
 export default function App() {
   return (
     <AuthProvider>
-      <Router>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <div className="app">
           <NavBar />
           <main className="main-content">

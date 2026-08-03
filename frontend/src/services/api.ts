@@ -42,8 +42,10 @@ export const stocksApi = {
   getInfo: (symbol: string) => api.get(`/stocks/${symbol}/info`),
   getPatterns: (symbol: string, timeframe = '1d', limit = 250) =>
     api.get(`/stocks/${symbol}/patterns`, { params: { timeframe, limit } }),
+  getInsight: (symbol: string, timeframe = '1d') =>
+    api.get(`/stocks/${symbol}/insight`, { params: { timeframe } }),
   scanMarket: (rule: string) => api.get(`/scanner/nifty50`, { params: { rule } }),
-  customScan: (data: { universe: string, conditions: any[] }) => api.post(`/scanner/custom`, data),
+  customScan: (data: { universe: string; timeframe?: string; conditions: Array<{ indicator: string; operator: string; value: number | string }> }) => api.post(`/scanner/custom`, data),
 }
 
 // ===== Watchlist endpoints =====
@@ -56,7 +58,7 @@ export const watchlistApi = {
 // ===== Alert endpoints =====
 export const alertsApi = {
   list: () => api.get('/alerts'),
-  create: (data: { symbol: string; condition_type: string; condition_value: number; message?: string }) =>
+  create: (data: { symbol: string; condition_type: string; condition_value: number; message?: string; priority?: 'HIGH' | 'MEDIUM' | 'LOW'; delivery_method?: 'IN_APP' | 'EMAIL' | 'BOTH' }) =>
     api.post('/alerts', data),
   delete: (alertId: string) => api.delete(`/alerts/${alertId}`),
   deactivate: (alertId: string) => api.put(`/alerts/${alertId}/deactivate`),

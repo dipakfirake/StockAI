@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { paperTradingApi } from '../services/api'
-import { TrendingUp, TrendingDown, X } from 'lucide-react'
+import { paperTradingApi, stocksApi } from '../services/api'
+import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards } from 'lucide-react'
 
 export default function PaperTradingPage() {
   const [trades, setTrades] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [quote, setQuote] = useState<any>(null)
   
   const [form, setForm] = useState({ 
     symbol: '', 
@@ -20,6 +21,14 @@ export default function PaperTradingPage() {
   })
 
   useEffect(() => { loadTrades() }, [])
+  useEffect(() => {
+    const symbol = form.symbol.trim()
+    if (!symbol) { setQuote(null); return }
+    const timer = window.setTimeout(async () => {
+      try { setQuote((await stocksApi.getQuote(symbol)).data) } catch { setQuote(null) }
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [form.symbol])
 
   async function loadTrades() {
     try {
@@ -61,6 +70,10 @@ export default function PaperTradingPage() {
   const closedTrades = trades.filter(t => t.status === 'CLOSED')
   const totalPnL = closedTrades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0)
   const totalSTT = closedTrades.reduce((sum, t) => sum + (t.stt_tax || 0), 0)
+  const quantity = Number(form.quantity) || 0
+  const referencePrice = form.order_type === 'LIMIT' ? Number(form.limit_price) : form.order_type === 'SL' ? Number(form.stop_price) : quote?.price || 0
+  const orderValue = referencePrice * quantity
+  const maxRisk = form.stop_loss ? Math.abs(referencePrice - Number(form.stop_loss)) * quantity : 0
 
   return (
     <div>
@@ -84,7 +97,7 @@ export default function PaperTradingPage() {
 
       {/* Place Order Form */}
       <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-title" style={{ marginBottom: 16 }}>Place Paper Order</div>
+        <div className="card-title" style={{ marginBottom: 16 }}><WalletCards size={16} style={{ marginRight: 6 }} />Order Ticket <span className="badge badge-watch" style={{ marginLeft: 8 }}>Paper only</span></div>
         <form onSubmit={handlePlace} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div>
             <label className="form-label">Symbol</label>
@@ -146,6 +159,15 @@ export default function PaperTradingPage() {
             {submitting ? 'Placing…' : `PLACE ORDER`}
           </button>
         </form>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginTop: 16 }}>
+          {[
+            ['Live reference', quote ? `₹${quote.price.toLocaleString('en-IN')}` : 'Enter a symbol'],
+            ['Estimated order value', orderValue ? `₹${orderValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'],
+            ['Maximum loss to stop', maxRisk ? `₹${maxRisk.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'Set a stop loss'],
+            ['Price update', quote?.timestamp ? new Date(quote.timestamp).toLocaleTimeString('en-IN') : '—'],
+          ].map(([label, value]) => <div key={label} style={{ background: 'var(--color-bg-secondary)', borderRadius: 8, padding: '9px 11px' }}><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{label}</div><div className="mono" style={{ marginTop: 2, fontWeight: 600 }}>{value}</div></div>)}
+        </div>
+        {form.direction === 'SELL' && form.product_type === 'DELIVERY' && <div style={{ display: 'flex', gap: 6, marginTop: 12, color: 'var(--color-neutral)', fontSize: 12 }}><ShieldCheck size={15} />Delivery short selling is not supported. Select Intraday.</div>}
         <style>{`
           .form-label { font-size: 11px; color: var(--color-text-muted); margin-bottom: 4px; display: block; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
         `}</style>

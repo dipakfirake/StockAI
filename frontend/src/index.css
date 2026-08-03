@@ -125,6 +125,11 @@ a:hover { color: var(--color-accent-blue-hover); }
 
 .navbar-link.active { color: var(--color-accent-blue); }
 
+.nav-links { display: flex; flex: 1; align-items: center; min-width: 0; }
+.nav-actions { display: flex; align-items: center; gap: 15px; margin-left: auto; }
+.nav-menu-button { display: none; background: transparent; color: var(--color-text-secondary); border: 0; padding: 8px; cursor: pointer; }
+.market-status { display: inline-flex; align-items: center; gap: 5px; color: var(--color-bullish); font-size: 12px; white-space: nowrap; }
+
 .navbar-search {
   margin-left: auto;
   display: flex;
@@ -260,8 +265,21 @@ a:hover { color: var(--color-accent-blue-hover); }
 @media (max-width: 1024px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .navbar { padding: 0 16px; }
+  .navbar-brand { margin-right: 12px; }
+  .nav-menu-button { display: inline-flex; }
+  .nav-links { display: none; position: absolute; top: var(--navbar-height); left: 0; right: 0; padding: 12px 16px; background: rgba(10, 14, 26, .98); border-bottom: 1px solid var(--color-border); box-shadow: var(--shadow-card); flex-direction: column; align-items: stretch; }
+  .nav-links.is-open { display: flex; }
+  .navbar-link { padding: 10px 12px; }
+  .market-status { display: none; }
+  .nav-actions { gap: 8px; }
 }
 @media (max-width: 640px) {
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
   .main-content { padding: 16px; }
+  .navbar { height: 56px; }
+  :root { --navbar-height: 56px; }
+  .navbar-brand { font-size: 16px; }
+  .nav-actions > div:last-child span { display: none; }
+  .nav-actions .navbar-search { display: none; }
 }

@@ -15,7 +15,16 @@ async def update_admin_password():
             await db.commit()
             print("Admin password updated to 'admin'.")
         else:
-            print("Admin user not found.")
+            user = User(
+                email="admin@stockai.com",
+                name="StockAI Admin",
+                hashed_password=hash_password("admin"),
+                subscription_tier="PRO",
+                is_active=True,
+            )
+            db.add(user)
+            await db.commit()
+            print("Admin user created: admin@stockai.com / admin")
 
 if __name__ == "__main__":
     asyncio.run(update_admin_password())

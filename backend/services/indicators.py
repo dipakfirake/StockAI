@@ -179,6 +179,10 @@ class IndicatorService:
             df["stoch_k"] = stoch.stoch()
             df["stoch_d"] = stoch.stoch_signal()
 
+            # CCI
+            cci = ta.trend.CCIIndicator(high=df["High"], low=df["Low"], close=df["Close"], window=20)
+            df["cci_20"] = cci.cci()
+
             # Volume SMA
             df["vol_sma_20"] = ta.trend.SMAIndicator(close=df["Volume"], window=20).sma_indicator()
             
@@ -227,6 +231,7 @@ class IndicatorService:
                 "adx_14": _safe(latest.get("adx_14")),
                 "stoch_k": _safe(latest.get("stoch_k")),
                 "stoch_d": _safe(latest.get("stoch_d")),
+                "cci_20": _safe(latest.get("cci_20")),
                 "vol_sma_20": _safe(latest.get("vol_sma_20"), ndigits=0),
                 "supertrend": {
                     "value": _safe(latest.get("supertrend")),
@@ -269,10 +274,14 @@ class IndicatorService:
         df = candles_to_df(candles)
         try:
             df["rsi_14"] = ta.momentum.RSIIndicator(close=df["Close"], window=14).rsi()
-            df["macd_hist"] = ta.trend.MACD(close=df["Close"]).macd_diff()
+            macd_indicator = ta.trend.MACD(close=df["Close"])
+            df["macd_hist"] = macd_indicator.macd_diff()
+            df["macd"] = macd_indicator.macd()
+            df["macd_signal"] = macd_indicator.macd_signal()
             df["ema_9"] = ta.trend.EMAIndicator(close=df["Close"], window=9).ema_indicator()
             df["ema_21"] = ta.trend.EMAIndicator(close=df["Close"], window=21).ema_indicator()
             df["ema_50"] = ta.trend.EMAIndicator(close=df["Close"], window=50).ema_indicator()
+            df["cci_20"] = ta.trend.CCIIndicator(high=df["High"], low=df["Low"], close=df["Close"], window=20).cci()
             
             # Premium Indicators
             st_df = calculate_supertrend(df)
@@ -292,9 +301,12 @@ class IndicatorService:
                     "volume": int(row["Volume"]),
                     "rsi_14": round(float(row["rsi_14"]), 2) if pd.notna(row.get("rsi_14")) else None,
                     "macd_hist": round(float(row["macd_hist"]), 4) if pd.notna(row.get("macd_hist")) else None,
+                    "macd": round(float(row["macd"]), 4) if pd.notna(row.get("macd")) else None,
+                    "macd_signal": round(float(row["macd_signal"]), 4) if pd.notna(row.get("macd_signal")) else None,
                     "ema_9": round(float(row["ema_9"]), 4) if pd.notna(row.get("ema_9")) else None,
                     "ema_21": round(float(row["ema_21"]), 4) if pd.notna(row.get("ema_21")) else None,
                     "ema_50": round(float(row["ema_50"]), 4) if pd.notna(row.get("ema_50")) else None,
+                    "cci_20": round(float(row["cci_20"]), 4) if pd.notna(row.get("cci_20")) else None,
                     "supertrend": round(float(row["supertrend"]), 4) if pd.notna(row.get("supertrend")) else None,
                     "supertrend_dir": int(row["supertrend_dir"]) if pd.notna(row.get("supertrend_dir")) else 0,
                     "vwap": round(float(row["vwap"]), 4) if pd.notna(row.get("vwap")) else None,

@@ -13,6 +13,7 @@ interface Signal {
   strength: string
   reason: string
   score: number
+  holding_period?: { label: string; basis: string }
 }
 
 interface AIScore {
@@ -53,6 +54,7 @@ export default function ChartPage() {
 
   // Chart Containers
   const chartContainerRef = useRef<HTMLDivElement>(null)
+  const legendRef = useRef<HTMLDivElement>(null)
   const rsiContainerRef = useRef<HTMLDivElement>(null)
   const macdContainerRef = useRef<HTMLDivElement>(null)
 
@@ -86,6 +88,8 @@ export default function ChartPage() {
   const [patterns, setPatterns] = useState<any[]>([])
   const [quote, setQuote] = useState<any>(null)
   const [info, setInfo] = useState<any>(null)
+  const [risk, setRisk] = useState<any>(null)
+  const [swingTrade, setSwingTrade] = useState<any>(null)
   const [loading, setLoading] = useState(false)
 
   // Raw data store to quickly toggle Heikin Ashi without refetching
@@ -140,6 +144,36 @@ export default function ChartPage() {
     vwapSeriesRef.current = vwapSeries;
     (chartRef as any).supertrendSeries = supertrendSeries;
     volumeSeriesRef.current = volumeSeries;
+
+    chart.subscribeCrosshairMove((param) => {
+      if (
+        param.point === undefined ||
+        !param.time ||
+        param.point.x < 0 ||
+        param.point.x > chartContainerRef.current!.clientWidth ||
+        param.point.y < 0 ||
+        param.point.y > chartContainerRef.current!.clientHeight
+      ) {
+        if (legendRef.current) legendRef.current.style.display = 'none';
+      } else {
+        const data = param.seriesData.get(candleSeries) as any;
+        const vol = param.seriesData.get(volumeSeries) as any;
+        if (data && legendRef.current) {
+          legendRef.current.style.display = 'block';
+          const isBullish = data.close >= data.open;
+          const color = isBullish ? '#10b981' : '#ef4444';
+          legendRef.current.innerHTML = `
+            <div style="font-size: 13px; display: flex; gap: 12px; color: #8b9dc3;">
+              <span>O: <span style="color: ${color}">${data.open.toFixed(2)}</span></span>
+              <span>H: <span style="color: ${color}">${data.high.toFixed(2)}</span></span>
+              <span>L: <span style="color: ${color}">${data.low.toFixed(2)}</span></span>
+              <span>C: <span style="color: ${color}">${data.close.toFixed(2)}</span></span>
+              ${vol ? `<span>V: <span style="color: #cbd5e1">${vol.value.toLocaleString('en-IN')}</span></span>` : ''}
+            </div>
+          `;
+        }
+      }
+    });
 
     // 2. RSI Sub-chart
     const rsiChart = createChart(rsiContainerRef.current, {
@@ -255,6 +289,9 @@ export default function ChartPage() {
          const vwapData: LineData[] = []
          const rsiData: LineData[] = []
          const supertrendData: LineData[] = []
+         const macdHistData: HistogramData[] = []
+         const macdData: LineData[] = []
+         const macdSignalData: LineData[] = []
          const obMarkers: any[] = []
 
          candlesToUse.forEach((c: any) => {
@@ -264,6 +301,9 @@ export default function ChartPage() {
            if (c.vwap !== null && c.vwap !== undefined) vwapData.push({ time, value: c.vwap })
            if (c.rsi_14 !== null && c.rsi_14 !== undefined) rsiData.push({ time, value: c.rsi_14 })
            if (c.supertrend !== null && c.supertrend !== undefined) supertrendData.push({ time, value: c.supertrend })
+           if (c.macd_hist !== null && c.macd_hist !== undefined) macdHistData.push({ time, value: c.macd_hist, color: c.macd_hist >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)' })
+           if (c.macd !== null && c.macd !== undefined) macdData.push({ time, value: c.macd })
+           if (c.macd_signal !== null && c.macd_signal !== undefined) macdSignalData.push({ time, value: c.macd_signal })
            
            if (c.order_block === 'bullish_ob') {
              obMarkers.push({ time, position: 'belowBar', color: '#10b981', shape: 'arrowUp', text: 'Bullish OB' })
@@ -276,6 +316,10 @@ export default function ChartPage() {
          ema21SeriesRef.current.setData(ema21Data)
          vwapSeriesRef.current.setData(vwapData)
          rsiSeriesRef.current.setData(rsiData)
+         
+         if (macdSeriesRef.current) macdSeriesRef.current.setData(macdHistData)
+         if (macdLineSeriesRef.current) macdLineSeriesRef.current.setData(macdData)
+         if (macdSignalSeriesRef.current) macdSignalSeriesRef.current.setData(macdSignalData)
          if ((chartRef.current as any).supertrendSeries) {
            (chartRef.current as any).supertrendSeries.setData(supertrendData)
          }
@@ -327,27 +371,24 @@ export default function ChartPage() {
   async function loadChartData() {
     setLoading(true)
     try {
-      const [candleRes, signalRes, aiRes, quoteRes, indRes, sentimentRes, patternRes, infoRes] = await Promise.allSettled([
-        stocksApi.getCandles(symbol, timeframe, 300),
-        stocksApi.getSignals(symbol, timeframe),
-        stocksApi.getAIScore(symbol, timeframe),
-        stocksApi.getQuote(symbol),
-        stocksApi.getIndicators(symbol, timeframe),
+      const [insightRes, sentimentRes, infoRes] = await Promise.allSettled([
+        stocksApi.getInsight(symbol, timeframe),
         aiApi.sentiment(symbol),
-        stocksApi.getPatterns(symbol, timeframe),
         stocksApi.getInfo(symbol),
       ])
 
-      if (candleRes.status === 'fulfilled') {
-        setRawCandles(candleRes.value.data.candles)
+      if (insightRes.status === 'fulfilled') {
+        const insight = insightRes.value.data
+        setRawCandles(insight.candles || [])
+        setSignals(insight.signals || [])
+        setAiScore(insight.ai_score)
+        setQuote(insight.quote)
+        setIndicators(insight.indicators)
+        setPatterns(insight.patterns || [])
+        setRisk(insight.risk)
+        setSwingTrade(insight.swing_trade)
       }
-
-      if (signalRes.status === 'fulfilled') setSignals(signalRes.value.data.signals || [])
-      if (aiRes.status === 'fulfilled') setAiScore(aiRes.value.data)
-      if (quoteRes.status === 'fulfilled') setQuote(quoteRes.value.data)
-      if (indRes.status === 'fulfilled') setIndicators(indRes.value.data.indicators)
       if (sentimentRes.status === 'fulfilled') setSentiment(sentimentRes.value.data)
-      if (patternRes.status === 'fulfilled') setPatterns(patternRes.value.data.patterns)
       if (infoRes.status === 'fulfilled') setInfo(infoRes.value.data)
 
     } catch (err) {
@@ -361,7 +402,7 @@ export default function ChartPage() {
   useEffect(() => {
     if (!symbol) return
 
-    const token = localStorage.getItem('token')
+    const token = localStorage.getItem('auth_token')
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
 
@@ -372,8 +413,13 @@ export default function ChartPage() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        if (data.type === 'market_update' && data.symbol === symbol) {
-          setQuote(prev => prev ? { ...prev, price: data.price, change: data.change, change_percent: data.change_percent } : prev)
+        if (data.type === 'market_update' && data.symbol.replace(/\.NS$/, '') === symbol.replace(/\.NS$/, '')) {
+          setQuote((prev: any) => prev ? {
+            ...prev,
+            price: data.price,
+            change: data.change,
+            change_pct: data.change_pct,
+          } : prev)
         }
       } catch (err) {
         console.error(err)
@@ -438,7 +484,7 @@ export default function ChartPage() {
               ₹{quote.price?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
               {quote.change !== undefined && (
                 <span style={{ fontSize: 16, marginLeft: 8, color: quote.change >= 0 ? '#10b981' : '#ef4444' }}>
-                  {quote.change > 0 ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_percent?.toFixed(2)}%)
+                  {quote.change > 0 ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_pct?.toFixed(2)}%)
                 </span>
               )}
             </div>
@@ -469,12 +515,42 @@ export default function ChartPage() {
       )}
 
       {/* Main Chart + Sub-charts */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
-        {loading && <div className="loading">Loading chart data…</div>}
-        <div ref={chartContainerRef} style={{ width: '100%', borderBottom: '1px solid #1e2d4a' }} />
-        <div ref={rsiContainerRef} style={{ width: '100%', borderBottom: '1px solid #1e2d4a' }} />
+      <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+        <div ref={chartContainerRef} style={{ width: '100%', position: 'relative' }}>
+          <div 
+            ref={legendRef} 
+            style={{ 
+              position: 'absolute', 
+              top: 12, 
+              left: 12, 
+              zIndex: 10, 
+              display: 'none',
+              pointerEvents: 'none',
+            }} 
+          />
+        </div>
+        <div ref={rsiContainerRef} style={{ width: '100%', borderTop: '1px solid var(--color-border)' }} />
         <div ref={macdContainerRef} style={{ width: '100%' }} />
       </div>
+
+      {risk && risk.level !== 'UNKNOWN' && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <span className="card-title"><Activity size={15} style={{ marginRight: 6 }} />Risk &amp; Return — selected range</span>
+            <span className={`badge ${risk.level === 'HIGH' ? 'badge-sell' : risk.level === 'MEDIUM' ? 'badge-hold' : 'badge-buy'}`}>{risk.level} risk</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: 12 }}>
+            {[
+              ['Period return', `${risk.period_return_pct >= 0 ? '+' : ''}${risk.period_return_pct}%`],
+              ['Annualized volatility', `${risk.annualized_volatility_pct}%`],
+              ['Downside volatility', `${risk.downside_volatility_pct}%`],
+              ['Maximum drawdown', `${risk.max_drawdown_pct}%`],
+              ['Data points', risk.observations],
+            ].map(([label, value]) => <div key={String(label)} style={{ background: 'var(--color-bg-secondary)', padding: '10px 12px', borderRadius: 8 }}><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{label}</div><div className="mono" style={{ fontWeight: 600, marginTop: 2 }}>{value}</div></div>)}
+          </div>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 12 }}>{risk.methodology}</p>
+        </div>
+      )}
 
       <div className="grid-2" style={{ gap: 16 }}>
         {/* Signal Panel */}
@@ -488,6 +564,13 @@ export default function ChartPage() {
               Strength: <strong style={{ color: 'var(--color-text-primary)' }}>{signal.strength}</strong>
               &nbsp;· Score: <strong style={{ color: signal.score > 0 ? 'var(--color-bullish)' : signal.score < 0 ? 'var(--color-bearish)' : 'var(--color-neutral)' }}>{signal.score > 0 ? '+' : ''}{signal.score}</strong>
             </div>
+            {signal.holding_period && (
+              <div style={{ marginBottom: 8, padding: '8px 10px', background: 'var(--color-bg-secondary)', borderRadius: 6, fontSize: 12 }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>Suggested review horizon: </span>
+                <strong>{signal.holding_period.label}</strong>
+                <span style={{ color: 'var(--color-text-muted)' }}> · {signal.holding_period.basis}</span>
+              </div>
+            )}
             <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.6, background: 'var(--color-bg-secondary)', padding: 12, borderRadius: 8 }}>
               {signal.reason}
             </div>
@@ -593,9 +676,9 @@ export default function ChartPage() {
         <div className="card" style={{ gridColumn: '1 / -1', position: 'relative', overflow: 'hidden' }}>
           <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span className="card-title"><Activity size={15} style={{ marginRight: 6 }} />Real-time News Sentiment (NLP)</span>
-            {sentiment && (
-              <span className={`badge ${sentiment.overall_sentiment === 'BULLISH' ? 'badge-buy' : sentiment.overall_sentiment === 'BEARISH' ? 'badge-sell' : 'badge-hold'}`}>
-                {sentiment.overall_sentiment} (Score: {sentiment.compound_score})
+            {sentiment && sentiment.sentiment && (
+              <span className={`badge ${sentiment.sentiment.overall_sentiment === 'BULLISH' ? 'badge-buy' : sentiment.sentiment.overall_sentiment === 'BEARISH' ? 'badge-sell' : 'badge-hold'}`}>
+                {sentiment.sentiment.overall_sentiment} (Score: {sentiment.sentiment.compound_score})
               </span>
             )}
           </div>
@@ -609,7 +692,7 @@ export default function ChartPage() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {sentiment?.scored_articles?.map((article: any, i: number) => (
+              {sentiment?.sentiment?.scored_articles?.map((article: any, i: number) => (
                 <div key={i} style={{ padding: '12px', border: '1px solid var(--color-border)', borderRadius: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                     <a href={article.link} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', textDecoration: 'none' }}>
@@ -627,6 +710,59 @@ export default function ChartPage() {
             </div>
           )}
         </div>
+        
+        {/* Swing Trade Analysis */}
+        {swingTrade && !swingTrade.error && (
+          <div className="card" style={{ gridColumn: '1 / -1', position: 'relative', overflow: 'hidden' }}>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border)', paddingBottom: 12, marginBottom: 16 }}>
+              <span className="card-title" style={{ fontSize: 16, fontWeight: 600 }}>
+                Swing Trade Analysis
+              </span>
+              <span className={`badge ${swingTrade.action === 'BUY' ? 'badge-buy' : swingTrade.action === 'SELL' ? 'badge-sell' : 'badge-hold'}`} style={{ fontSize: 14, padding: '4px 12px' }}>
+                {swingTrade.action} (Score: {swingTrade.total_score?.toFixed(1)})
+              </span>
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+              <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Expected Duration</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>{swingTrade.trade_plan?.estimated_hold_time}</div>
+              </div>
+              <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Potential Gain</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-bullish)' }}>+{swingTrade.trade_plan?.expected_gain_pct?.toFixed(2)}%</div>
+              </div>
+              <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Max Risk (Stop Loss)</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-bearish)' }}>-{swingTrade.trade_plan?.risk_pct?.toFixed(2)}%</div>
+              </div>
+              <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Stop Loss Level</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{swingTrade.trade_plan?.stop_loss?.toFixed(2)}</div>
+              </div>
+              <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Target Price</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{swingTrade.trade_plan?.target_price?.toFixed(2)}</div>
+              </div>
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
+               <div style={{ textAlign: 'center' }}>
+                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Technical Score</div>
+                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.technical?.toFixed(1)} / 100</div>
+               </div>
+               <div style={{ textAlign: 'center', borderLeft: '1px solid var(--color-border)', borderRight: '1px solid var(--color-border)' }}>
+                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Fundamental Score</div>
+                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.fundamental?.toFixed(1)} / 100</div>
+               </div>
+               <div style={{ textAlign: 'center' }}>
+                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>News Sentiment</div>
+                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.sentiment?.toFixed(1)} / 100</div>
+               </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   )

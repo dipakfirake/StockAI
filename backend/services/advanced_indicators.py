@@ -151,6 +151,47 @@ class AdvancedIndicators:
         }
 
     @staticmethod
+    def compute_market_structure(df: pd.DataFrame, lookback: int = 20) -> dict:
+        """Original market-structure summary based on recent swing highs/lows."""
+        if len(df) < lookback:
+            return {"state": "INSUFFICIENT_DATA"}
+        recent = df.tail(lookback)
+        midpoint = max(2, lookback // 2)
+        first, second = recent.iloc[:midpoint], recent.iloc[midpoint:]
+        higher_high = float(second["High"].max()) > float(first["High"].max())
+        higher_low = float(second["Low"].min()) > float(first["Low"].min())
+        lower_high = float(second["High"].max()) < float(first["High"].max())
+        lower_low = float(second["Low"].min()) < float(first["Low"].min())
+        state = "BULLISH" if higher_high and higher_low else "BEARISH" if lower_high and lower_low else "RANGE"
+        return {
+            "state": state,
+            "range_high": round(float(recent["High"].max()), 4),
+            "range_low": round(float(recent["Low"].min()), 4),
+            "breakout_level": round(float(recent["High"].max()), 4),
+            "breakdown_level": round(float(recent["Low"].min()), 4),
+            "lookback_bars": lookback,
+        }
+
+    @staticmethod
+    def compute_volatility_squeeze(df: pd.DataFrame, window: int = 20) -> dict:
+        """Original Bollinger/Keltner compression signal; not a vendor indicator."""
+        if len(df) < window + 1:
+            return {"state": "INSUFFICIENT_DATA"}
+        close = df["Close"]
+        basis = close.rolling(window).mean()
+        std = close.rolling(window).std(ddof=0)
+        bb_width = (4 * std / basis * 100).iloc[-1]
+        atr = ta.volatility.AverageTrueRange(df["High"], df["Low"], close, window=window).average_true_range().iloc[-1]
+        kc_width = (4 * atr / basis.iloc[-1] * 100) if basis.iloc[-1] else 0
+        momentum = close.iloc[-1] - close.iloc[-window]
+        return {
+            "state": "SQUEEZE" if bb_width < kc_width else "EXPANDING",
+            "bb_width_pct": round(float(bb_width), 3),
+            "keltner_width_pct": round(float(kc_width), 3),
+            "momentum": "UP" if momentum > 0 else "DOWN" if momentum < 0 else "FLAT",
+        }
+
+    @staticmethod
     def detect_support_resistance(df: pd.DataFrame, window: int = 20, min_touches: int = 2) -> dict:
         """
         Auto-detect support and resistance levels.

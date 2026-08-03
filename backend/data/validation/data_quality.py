@@ -46,9 +46,9 @@ def validate_candles(df: pd.DataFrame, symbol: str = "") -> pd.DataFrame:
         df = df[~invalid_vol]
 
     # No future timestamps
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
     if df.index.tz is not None:
-        now = pd.Timestamp.utcnow()
+        now = pd.Timestamp.now(tz="UTC")
     future = df.index > now
     if future.any():
         issues.append(f"{future.sum()} rows with future timestamps")

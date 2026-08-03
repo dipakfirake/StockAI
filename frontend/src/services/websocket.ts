@@ -9,10 +9,11 @@ class AlertWebSocket {
   private handlers: AlertHandler[] = []
   private reconnectDelay = 3000
   private shouldReconnect = true
+  private pingTimer: number | null = null
 
   connect(token: string) {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${protocol}://${window.location.host}/ws/alerts?token=${token}`
+    const url = `${protocol}://${window.location.host}/ws?token=${encodeURIComponent(token)}`
 
     this.ws = new WebSocket(url)
 
@@ -42,7 +43,8 @@ class AlertWebSocket {
   }
 
   private ping() {
-    setInterval(() => {
+    if (this.pingTimer !== null) window.clearInterval(this.pingTimer)
+    this.pingTimer = window.setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send('ping')
       }
@@ -55,6 +57,8 @@ class AlertWebSocket {
 
   disconnect() {
     this.shouldReconnect = false
+    if (this.pingTimer !== null) window.clearInterval(this.pingTimer)
+    this.pingTimer = null
     this.ws?.close()
   }
 }

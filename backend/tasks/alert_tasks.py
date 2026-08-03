@@ -1,18 +1,36 @@
 """Alert evaluation Celery task — periodic alert condition checking."""
 
 import asyncio
+import smtplib
+from email.message import EmailMessage
 from backend.celery_app import celery_app
 from backend.core.logging_config import get_logger
+from backend.core.config import settings
 from backend.data.ingestion.nse_scraper import nse_scraper
 
 logger = get_logger(__name__)
 
-def mock_send_email(to_email: str, subject: str, body: str, priority: str):
-    """Mock SMTP email sender."""
-    prefix = f"[SMTP MOCK - PRIORITY: {priority}]"
-    logger.info(f"{prefix} Sending email to {to_email}")
-    logger.info(f"{prefix} Subject: {subject}")
-    logger.info(f"{prefix} Body: {body}")
+def send_high_priority_email(to_email: str, subject: str, body: str) -> bool:
+    """Send SMTP mail only when it has been explicitly configured."""
+    if not settings.SMTP_HOST or not settings.SMTP_FROM_EMAIL:
+        logger.warning("HIGH alert email skipped: SMTP is not configured")
+        return False
+    message = EmailMessage()
+    message["From"] = settings.SMTP_FROM_EMAIL
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body)
+    try:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as client:
+            if settings.SMTP_USE_TLS:
+                client.starttls()
+            if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
+                client.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+            client.send_message(message)
+        return True
+    except (OSError, smtplib.SMTPException) as exc:
+        logger.error(f"Could not send HIGH alert email: {exc}")
+        return False
 
 
 @celery_app.task(name="backend.tasks.alert_tasks.evaluate_all_alerts")
@@ -43,6 +61,7 @@ async def _evaluate_alerts_async():
     from sqlalchemy import select
     from backend.core.database import AsyncSessionLocal
     from backend.models.alert import Alert
+    from backend.models.user import User
     from backend.services.market_data import market_data_service
     from backend.services.indicators import indicator_service
     from backend.api.websocket import broadcast_alert
@@ -183,16 +202,17 @@ async def _evaluate_alerts_async():
                         db.add(notif)
                     
                     # 2. WebSockets
-                    await broadcast_alert(payload)
+                    await broadcast_alert(payload, user_id=str(alert.user_id))
                     
                     # 3. Email (SMTP) - Only send for HIGH priority "main" alerts
                     if getattr(alert, 'delivery_method', 'IN_APP') in ('EMAIL', 'BOTH') and alert.priority == 'HIGH':
-                        mock_send_email(
-                            to_email="user@example.com",
+                        user = await db.get(User, alert.user_id)
+                        if user:
+                            send_high_priority_email(
+                            to_email=user.email,
                             subject=f"Stock Alert: {alert.symbol} Triggered {alert.condition_type}",
                             body=user_msg,
-                            priority=alert.priority
-                        )
+                            )
                     
                     logger.info(f"Alert triggered: {alert.symbol} {alert.condition_type} = {current_value}")
 

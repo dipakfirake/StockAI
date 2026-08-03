@@ -9,8 +9,53 @@ from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service
 from backend.services.signals import signal_engine
 from backend.services.ai_engine import ai_engine_service
+from backend.services.risk_analysis import analyse_risk
 
 router = APIRouter()
+
+
+@router.get("/{symbol}/insight")
+async def get_stock_insight(
+    symbol: str,
+    timeframe: str = Query("1d"),
+    current_user=Depends(get_current_user),
+):
+    """One live, UI-ready view of price action, risk, technicals and recent news."""
+    from backend.data.ingestion.news_scraper import fetch_stock_news
+    from backend.services.screener import screener_service
+
+    quote, candles, news, swing_trade = await __import__("asyncio").gather(
+        market_data_service.fetch_quote(symbol),
+        market_data_service.fetch_candles(symbol, timeframe, limit=10000),
+        fetch_stock_news(symbol),
+        screener_service._analyze_symbol(symbol),
+    )
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"No quote data found for {symbol}")
+    indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
+    series_candles = indicator_service.compute_for_candles_series(candles)
+    patterns = []
+    if len(series_candles) >= 10:
+        from backend.services.indicators import candles_to_df, detect_candlestick_patterns
+        patterns = [
+            {"timestamp": timestamp.isoformat(), "pattern": pattern}
+            for timestamp, pattern in detect_candlestick_patterns(candles_to_df(series_candles)).dropna().items()
+        ][-10:]
+    return {
+        "symbol": quote["symbol"],
+        "timeframe": timeframe,
+        "as_of": quote["timestamp"],
+        "quote": quote,
+        "swing_trade": swing_trade,
+        "candles": series_candles,
+        "risk": analyse_risk(series_candles),
+        "indicators": indicators,
+        "signals": signal_engine.evaluate(indicators, quote["symbol"], timeframe) if indicators else [],
+        "ai_score": ai_engine_service.score(indicators, quote["symbol"]) if indicators else None,
+        "patterns": patterns,
+        "news": news,
+        "data_note": "Prices are provider-delayed when the exchange or upstream source does not supply a live tick.",
+    }
 
 
 @router.get("/search")
@@ -72,7 +117,7 @@ async def get_signals(
     if len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data to compute signals")
     indicators = indicator_service.compute_all(candles)
-    signals = signal_engine.evaluate(indicators, symbol)
+    signals = signal_engine.evaluate(indicators, symbol, timeframe)
     return {"symbol": symbol, "timeframe": timeframe, "signals": signals}
 
 
@@ -126,4 +171,3 @@ async def get_patterns(
         })
         
     return {"symbol": symbol, "timeframe": timeframe, "patterns": result}
-

@@ -19,18 +19,28 @@ async def get_redis() -> redis.Redis:
 
 
 async def cache_get(key: str):
-    r = await get_redis()
-    value = await r.get(key)
-    if value:
-        return json.loads(value)
+    try:
+        r = await get_redis()
+        value = await r.get(key)
+        if value:
+            return json.loads(value)
+    except (redis.RedisError, json.JSONDecodeError) as exc:
+        # Caching is an optimization: a Redis outage must not take down market data.
+        logger.warning("Cache read unavailable for %s: %s", key, exc)
     return None
 
 
 async def cache_set(key: str, value, ttl: int = 60):
-    r = await get_redis()
-    await r.setex(key, ttl, json.dumps(value, default=str))
+    try:
+        r = await get_redis()
+        await r.setex(key, ttl, json.dumps(value, default=str))
+    except (redis.RedisError, TypeError, ValueError) as exc:
+        logger.warning("Cache write unavailable for %s: %s", key, exc)
 
 
 async def cache_delete(key: str):
-    r = await get_redis()
-    await r.delete(key)
+    try:
+        r = await get_redis()
+        await r.delete(key)
+    except redis.RedisError as exc:
+        logger.warning("Cache delete unavailable for %s: %s", key, exc)

@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { useState } from 'react'
 import {
   LayoutDashboard,
   CandlestickChart,
@@ -9,7 +10,7 @@ import {
   TrendingUp,
   Search,
   Crown,
-  LogOut
+  LogOut, Menu, X, Radio
 } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import StockSearchBox from './StockSearchBox'
@@ -29,6 +30,7 @@ const links = [
 
 export default function NavBar() {
   const { user, logout } = useAuth()
+  const [menuOpen, setMenuOpen] = useState(false)
 
   return (
     <nav className="navbar" style={{ display: 'flex', alignItems: 'center' }}>
@@ -37,12 +39,16 @@ export default function NavBar() {
         AI<span>Stock</span>
       </div>
       
-      <div style={{ display: 'flex', flex: 1 }}>
+      <button className="nav-menu-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Toggle navigation">
+        {menuOpen ? <X size={20} /> : <Menu size={20} />}
+      </button>
+      <div className={`nav-links${menuOpen ? ' is-open' : ''}`}>
         {links.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
+            onClick={() => setMenuOpen(false)}
           >
             <Icon size={15} style={{ marginRight: 4, verticalAlign: 'middle' }} />
             {label}
@@ -51,7 +57,8 @@ export default function NavBar() {
       </div>
 
       {user && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+        <div className="nav-actions">
+          <span className="market-status"><Radio size={12} /> Live research</span>
           <StockSearchBox width={250} placeholder="Search symbol or company..." />
           {user.subscription_tier === 'FREE' ? (
             <NavLink to="/pricing" style={{ 

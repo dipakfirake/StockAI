@@ -15,7 +15,7 @@ export default function AlertsPage() {
   const [alerts, setAlerts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ symbol: '', condition_type: 'PRICE_ABOVE', condition_value: '', message: '' })
+  const [form, setForm] = useState({ symbol: '', condition_type: 'PRICE_ABOVE', condition_value: '', message: '', priority: 'MEDIUM' as 'HIGH' | 'MEDIUM' | 'LOW', delivery_method: 'IN_APP' as 'IN_APP' | 'EMAIL' | 'BOTH' })
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => { loadAlerts() }, [])
@@ -36,9 +36,11 @@ export default function AlertsPage() {
         condition_type: form.condition_type,
         condition_value: parseFloat(form.condition_value),
         message: form.message || undefined,
+        priority: form.priority,
+        delivery_method: form.delivery_method,
       })
       setShowForm(false)
-      setForm({ symbol: '', condition_type: 'PRICE_ABOVE', condition_value: '', message: '' })
+      setForm({ symbol: '', condition_type: 'PRICE_ABOVE', condition_value: '', message: '', priority: 'MEDIUM', delivery_method: 'IN_APP' })
       await loadAlerts()
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to create alert')
@@ -76,6 +78,18 @@ export default function AlertsPage() {
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Symbol</label>
               <input className="input" placeholder="RELIANCE.NS" required value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Priority</label>
+              <select className="input" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value as typeof form.priority })}>
+                <option value="LOW">Low — in-app</option><option value="MEDIUM">Medium — in-app</option><option value="HIGH">High — can email</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Delivery</label>
+              <select className="input" value={form.delivery_method} onChange={e => setForm({ ...form, delivery_method: e.target.value as typeof form.delivery_method })}>
+                <option value="IN_APP">In-app notification</option><option value="EMAIL">Email (HIGH only)</option><option value="BOTH">In-app + email (HIGH only)</option>
+              </select>
             </div>
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Condition</label>

@@ -25,6 +25,8 @@ class CreateAlertRequest(BaseModel):
     condition_type: str
     condition_value: float
     message: str | None = None
+    priority: str = "MEDIUM"
+    delivery_method: str = "IN_APP"
 
 
 @router.get("")
@@ -61,6 +63,10 @@ async def create_alert(
     """Create a new alert."""
     if request.condition_type not in VALID_CONDITIONS:
         raise HTTPException(status_code=400, detail=f"Invalid condition_type. Valid: {VALID_CONDITIONS}")
+    if request.priority not in {"HIGH", "MEDIUM", "LOW"}:
+        raise HTTPException(status_code=400, detail="priority must be HIGH, MEDIUM, or LOW")
+    if request.delivery_method not in {"IN_APP", "EMAIL", "BOTH"}:
+        raise HTTPException(status_code=400, detail="delivery_method must be IN_APP, EMAIL, or BOTH")
 
     alert = Alert(
         user_id=current_user.id,
@@ -68,6 +74,8 @@ async def create_alert(
         condition_type=request.condition_type,
         condition_value=request.condition_value,
         message=request.message,
+        priority=request.priority,
+        delivery_method=request.delivery_method,
         is_active=True,
     )
     db.add(alert)

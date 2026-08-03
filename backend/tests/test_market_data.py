@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+from types import SimpleNamespace
 import pandas as pd
 from datetime import datetime
 
@@ -77,3 +78,31 @@ async def test_fetch_quote_returns_cache_hit(mock_cache_get):
     result = await MarketDataService.fetch_quote("RELIANCE.NS")
     assert result == cached_quote
     mock_cache_get.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("backend.services.market_data.cache_get", return_value=None)
+@patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
+async def test_fetch_quote_uses_history_when_previous_close_missing(mock_cache_set, mock_cache_get):
+    """Missing index reference closes must not result in invalid 0% change data."""
+    history = pd.DataFrame(
+        {"Close": [100.0, 103.0]}, index=pd.DatetimeIndex([datetime(2024, 1, 1), datetime(2024, 1, 2)])
+    )
+    fast_info = SimpleNamespace(
+        last_price=103.0,
+        previous_close=0.0,
+        three_month_average_volume=0,
+        market_cap=0,
+        year_high=110.0,
+        year_low=90.0,
+    )
+    with patch("backend.services.market_data.yf.Ticker") as mock_ticker:
+        instance = MagicMock()
+        instance.fast_info = fast_info
+        instance.history.return_value = history
+        mock_ticker.return_value = instance
+        quote = await MarketDataService.fetch_quote("^NSEI")
+
+    assert quote["previous_close"] == 100.0
+    assert quote["change"] == 3.0
+    assert quote["change_pct"] == 3.0

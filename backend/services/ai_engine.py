@@ -39,8 +39,8 @@ class AIEngineService:
         Returns probabilities, confidence, and SHAP-style explanation.
         """
         if self.model is None or not all(k in indicators for k in ['rsi_14', 'macd', 'ema_9', 'ema_21', 'ema_50', 'bb']):
-            return self._neutral_response(symbol)
-
+            return self._neutral_response(symbol, indicators)
+        
         try:
             # Extract features matching the training script
             feature_vector = [
@@ -106,7 +106,7 @@ class AIEngineService:
             }
         except Exception as e:
             logger.error(f"Error in ML scoring for {symbol}: {e}")
-            return self._neutral_response(symbol)
+            return self._neutral_response(symbol, indicators)
 
     def _compute_bb_width(self, bb: dict) -> float:
         upper = bb.get('upper', 0)
@@ -114,14 +114,55 @@ class AIEngineService:
         if lower == 0: return 0
         return (upper - lower) / lower
 
-    def _neutral_response(self, symbol: str) -> dict:
+    def _neutral_response(self, symbol: str, indicators: dict = None) -> dict:
+        if indicators is None:
+            indicators = {}
+            
+        # Probabilistic Z-Score Fallback Model
+        rsi = indicators.get('rsi_14', 50)
+        ema9 = indicators.get('ema_9', 0)
+        ema21 = indicators.get('ema_21', 0)
+        
+        # Calculate approximate Z-scores
+        z_rsi = (rsi - 50) / 15.0
+        z_ema = 1.5 if (ema9 and ema21 and ema9 > ema21) else -1.5 if (ema9 and ema21) else 0.0
+        
+        total_z = (z_rsi + z_ema) / 2.0
+        
+        # Sigmoid to get probability
+        import math
+        prob_up = 1.0 / (1.0 + math.exp(-total_z))
+        prob_down = 1.0 - prob_up
+        
+        if prob_up > 0.60:
+            direction = "BUY"
+        elif prob_down > 0.60:
+            direction = "SELL"
+        else:
+            direction = "HOLD"
+            
+        probs = {
+            "buy": round(prob_up, 4), 
+            "hold": round(1.0 - abs(prob_up - prob_down), 4), 
+            "sell": round(prob_down, 4)
+        }
+        
+        # Normalize probs
+        total = sum(probs.values())
+        probs = {k: round(v/total, 4) for k, v in probs.items()}
+        
+        confidence = max(probs.values())
+
         return {
             "symbol": symbol,
-            "score": "HOLD",
-            "probabilities": {"buy": 0.20, "hold": 0.60, "sell": 0.20},
-            "confidence": 0.60,
-            "model": "lightgbm_fallback",
-            "explanation": [{"feature": "Data Missing", "value": 0, "contribution": 0, "direction": "neutral", "reason": "Insufficient indicator data for ML model"}],
+            "score": direction,
+            "probabilities": probs,
+            "confidence": round(confidence, 4),
+            "model": "probabilistic_zscore_fallback",
+            "explanation": [
+                {"feature": "RSI_Z", "value": round(z_rsi, 2), "contribution": abs(z_rsi), "direction": "bullish" if z_rsi > 0 else "bearish", "reason": "RSI momentum probability"},
+                {"feature": "EMA_Z", "value": round(z_ema, 2), "contribution": abs(z_ema), "direction": "bullish" if z_ema > 0 else "bearish", "reason": "Short-term trend probability"}
+            ],
         }
 
 ai_engine_service = AIEngineService()

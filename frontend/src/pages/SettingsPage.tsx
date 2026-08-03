@@ -1,11 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Save, AlertCircle } from 'lucide-react'
-
-// Dummy auth usage. Need token for real calls.
-import { useAuth } from '../AuthContext'
+import api from '../services/api'
 
 export default function SettingsPage() {
-  const { token } = useAuth()
   const [settings, setSettings] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(false)
 
@@ -16,13 +13,8 @@ export default function SettingsPage() {
   async function fetchSettings() {
     setLoading(true)
     try {
-      const res = await fetch('/api/settings/', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setSettings(data)
-      }
+      const res = await api.get('/settings/')
+      setSettings(res.data)
     } catch (err) {
       console.error(err)
     } finally {
@@ -30,8 +22,17 @@ export default function SettingsPage() {
     }
   }
 
-  // A real implementation would also have a saveSettings endpoint 
-  // that sends updated values back to the backend.
+  async function saveSettings() {
+    setLoading(true)
+    try {
+      const res = await api.put('/settings/', { values: settings })
+      setSettings(res.data)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div>
@@ -65,7 +66,7 @@ export default function SettingsPage() {
               </div>
             ))}
             
-            <button className="btn btn-primary" style={{ alignSelf: 'flex-start', marginTop: 16 }}>
+            <button onClick={saveSettings} className="btn btn-primary" style={{ alignSelf: 'flex-start', marginTop: 16 }}>
               <Save size={16} /> Save Configuration
             </button>
           </div>

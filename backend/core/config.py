@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     CACHE_TTL_QUOTE: int = 60          # 1 minute
     CACHE_TTL_DAILY_CANDLES: int = 3600 # 1 hour
     CACHE_TTL_INTRADAY: int = 60       # 1 minute
+    CACHE_TTL_INDEX_QUOTE: int = 15    # 15 seconds; indices change faster than reference data
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
@@ -51,6 +52,14 @@ class Settings(BaseSettings):
     # AI / ML
     MODEL_VERSION: str = "rule_based_v1"
     SHAP_MAX_FEATURES: int = 10
+
+    # SMTP is intentionally reserved for HIGH-priority alert delivery.
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM_EMAIL: str | None = None
+    SMTP_USE_TLS: bool = True
 
 
 settings = Settings()
