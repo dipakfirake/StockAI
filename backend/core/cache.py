@@ -8,13 +8,25 @@ from backend.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+import asyncio
 _redis_client: redis.Redis | None = None
-
+_redis_loop_id: int | None = None
 
 async def get_redis() -> redis.Redis:
-    global _redis_client
-    if _redis_client is None:
+    global _redis_client, _redis_loop_id
+    try:
+        current_loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        current_loop_id = None
+
+    if _redis_client is None or _redis_loop_id != current_loop_id:
+        if _redis_client is not None:
+            try:
+                await _redis_client.aclose()
+            except Exception:
+                pass
         _redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        _redis_loop_id = current_loop_id
     return _redis_client
 
 

@@ -25,6 +25,7 @@ class User(Base):
     watchlists: Mapped[list["Watchlist"]] = relationship("Watchlist", back_populates="user", cascade="all, delete-orphan")
     alerts: Mapped[list["Alert"]] = relationship("Alert", back_populates="user", cascade="all, delete-orphan")
     paper_trades: Mapped[list["PaperTrade"]] = relationship("PaperTrade", back_populates="user", cascade="all, delete-orphan")
+    preferences: Mapped[list["UserPreference"]] = relationship("UserPreference", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email}>"

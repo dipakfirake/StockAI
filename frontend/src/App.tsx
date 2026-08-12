@@ -13,14 +13,17 @@ import LoginPage from './pages/LoginPage'
 import PricingPage from './pages/PricingPage'
 import SettingsPage from './pages/SettingsPage'
 import { AuthProvider } from './AuthContext'
+import { ThemeProvider } from './ThemeContext'
 
 import AIAssistantWidget from './components/AIAssistantWidget'
+import { ToastContainer } from './components/Toast'
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <div className="app">
+    <ThemeProvider>
+      <AuthProvider>
+        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <div className="app">
           <NavBar />
           <main className="main-content">
             <Routes>
@@ -40,8 +43,10 @@ export default function App() {
             </Routes>
           </main>
           <AIAssistantWidget />
+          <ToastContainer />
         </div>
       </Router>
-    </AuthProvider>
+      </AuthProvider>
+    </ThemeProvider>
   )
 }

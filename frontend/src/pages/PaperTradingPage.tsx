@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { paperTradingApi, stocksApi } from '../services/api'
-import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards } from 'lucide-react'
+import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle } from 'lucide-react'
+import StockSearchBox from '../components/StockSearchBox'
 
 export default function PaperTradingPage() {
   const [trades, setTrades] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [quote, setQuote] = useState<any>(null)
+  const [activeTab, setActiveTab] = useState<'POSITIONS' | 'ORDERS' | 'HISTORY'>('POSITIONS')
+  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   
   const [form, setForm] = useState({ 
     symbol: '', 
@@ -21,6 +24,7 @@ export default function PaperTradingPage() {
   })
 
   useEffect(() => { loadTrades() }, [])
+  
   useEffect(() => {
     const symbol = form.symbol.trim()
     if (!symbol) { setQuote(null); return }
@@ -54,6 +58,7 @@ export default function PaperTradingPage() {
       })
       await loadTrades()
       setForm({ ...form, symbol: '', limit_price: '', stop_price: '', target_price: '', stop_loss: '' })
+      setIsOrderModalOpen(false)
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to place trade')
     } finally { setSubmitting(false) }
@@ -69,163 +74,163 @@ export default function PaperTradingPage() {
   const openTrades = trades.filter(t => t.status === 'OPEN')
   const closedTrades = trades.filter(t => t.status === 'CLOSED')
   const totalPnL = closedTrades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0)
-  const totalSTT = closedTrades.reduce((sum, t) => sum + (t.stt_tax || 0), 0)
+  
+  // Kite style header calculation
+  const totalInvested = openTrades.reduce((sum, t) => sum + (parseFloat(t.entry_price) * t.quantity), 0)
+  const currentOpenValue = openTrades.reduce((sum, t) => sum + ((t.current_price || parseFloat(t.entry_price)) * t.quantity), 0)
+  const openPnL = openTrades.reduce((sum, t) => sum + (t.unrealized_pnl || 0), 0)
+
   const quantity = Number(form.quantity) || 0
   const referencePrice = form.order_type === 'LIMIT' ? Number(form.limit_price) : form.order_type === 'SL' ? Number(form.stop_price) : quote?.price || 0
   const orderValue = referencePrice * quantity
-  const maxRisk = form.stop_loss ? Math.abs(referencePrice - Number(form.stop_loss)) * quantity : 0
 
   return (
-    <div>
-      <div className="page-header">
-        <h1 className="page-title">Advanced Paper Trading</h1>
-        <p className="page-subtitle">Simulate real markets with slippage, ₹20 commission, STT taxes (0.1% delivery), and auto-execution limits/stops.</p>
+    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+      {/* Dashboard Top Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, borderBottom: '1px solid var(--color-border)', paddingBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 40 }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Total Realized P&L</div>
+            <div style={{ fontSize: 28, fontWeight: 500 }} className={totalPnL >= 0 ? 'positive' : 'negative'}>
+              {totalPnL >= 0 ? '+' : ''}₹{totalPnL.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Day's Open P&L</div>
+            <div style={{ fontSize: 28, fontWeight: 500 }} className={openPnL >= 0 ? 'positive' : 'negative'}>
+              {openPnL >= 0 ? '+' : ''}₹{openPnL.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Invested</div>
+            <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--color-text-primary)', marginTop: 8 }}>
+              ₹{totalInvested.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Current Value</div>
+            <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--color-text-primary)', marginTop: 8 }}>
+              ₹{currentOpenValue.toFixed(2)}
+            </div>
+          </div>
+        </div>
+        <button 
+          className="btn btn-primary" 
+          onClick={() => setIsOrderModalOpen(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <PlusCircle size={16} /> Place Order
+        </button>
       </div>
 
-      {/* Summary */}
-      <div className="grid-4" style={{ marginBottom: 20 }}>
-        <div className="card"><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Open / Pending</div><div style={{ fontSize: 24, fontWeight: 700 }}>{openTrades.length} / {pendingTrades.length}</div></div>
-        <div className="card"><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Realized PnL</div><div style={{ fontSize: 24, fontWeight: 700 }} className={totalPnL >= 0 ? 'positive' : 'negative'}>₹{totalPnL.toFixed(2)}</div></div>
-        <div className="card"><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>STT Tax Paid</div><div style={{ fontSize: 24, fontWeight: 700, color: 'var(--color-text-muted)' }}>₹{totalSTT.toFixed(2)}</div></div>
-        <div className="card">
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Win Rate</div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>
-            {closedTrades.length ? Math.round(closedTrades.filter(t => t.realized_pnl > 0).length / closedTrades.length * 100) : 0}%
-          </div>
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 30, borderBottom: '1px solid var(--color-border-light)', marginBottom: 20 }}>
+        <div 
+          onClick={() => setActiveTab('POSITIONS')}
+          style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 500, borderBottom: activeTab === 'POSITIONS' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'POSITIONS' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
+        >
+          <Briefcase size={16} style={{ display: 'inline', marginRight: 6, verticalAlign: '-3px' }}/> Positions ({openTrades.length})
+        </div>
+        <div 
+          onClick={() => setActiveTab('ORDERS')}
+          style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 500, borderBottom: activeTab === 'ORDERS' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'ORDERS' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
+        >
+          <Clock size={16} style={{ display: 'inline', marginRight: 6, verticalAlign: '-3px' }}/> Orders ({pendingTrades.length})
+        </div>
+        <div 
+          onClick={() => setActiveTab('HISTORY')}
+          style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 500, borderBottom: activeTab === 'HISTORY' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'HISTORY' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
+        >
+          History ({closedTrades.length})
         </div>
       </div>
 
-      {/* Place Order Form */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-title" style={{ marginBottom: 16 }}><WalletCards size={16} style={{ marginRight: 6 }} />Order Ticket <span className="badge badge-watch" style={{ marginLeft: 8 }}>Paper only</span></div>
-        <form onSubmit={handlePlace} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div>
-            <label className="form-label">Symbol</label>
-            <input className="input" placeholder="e.g. RELIANCE.NS" required value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })} style={{ width: 140 }} />
-          </div>
-          <div>
-            <label className="form-label">Product Type</label>
-            <select className="input" value={form.product_type} onChange={e => setForm({ ...form, product_type: e.target.value })} style={{ width: 120 }}>
-              <option value="INTRADAY">INTRADAY</option>
-              <option value="DELIVERY">DELIVERY</option>
-            </select>
-          </div>
-          <div>
-            <label className="form-label">Direction</label>
-            <select className="input" value={form.direction} onChange={e => setForm({ ...form, direction: e.target.value })} style={{ width: 120 }}>
-              <option value="BUY">BUY</option>
-              <option value="SELL">SELL (Short)</option>
-            </select>
-          </div>
-          <div>
-            <label className="form-label">Order Type</label>
-            <select className="input" value={form.order_type} onChange={e => setForm({ ...form, order_type: e.target.value })} style={{ width: 120 }}>
-              <option value="MARKET">MARKET</option>
-              <option value="LIMIT">LIMIT</option>
-              <option value="SL">SL (Stop Loss)</option>
-            </select>
-          </div>
-          <div>
-            <label className="form-label">Quantity</label>
-            <input className="input" type="number" min="1" required value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} style={{ width: 80 }} />
-          </div>
-
-          {form.order_type === 'LIMIT' && (
-            <div>
-              <label className="form-label">Limit Price</label>
-              <input className="input" type="number" step="0.05" required value={form.limit_price} onChange={e => setForm({ ...form, limit_price: e.target.value })} style={{ width: 100 }} />
-            </div>
-          )}
-
-          {form.order_type === 'SL' && (
-            <div>
-              <label className="form-label">Stop Price (Trigger)</label>
-              <input className="input" type="number" step="0.05" required value={form.stop_price} onChange={e => setForm({ ...form, stop_price: e.target.value })} style={{ width: 100 }} />
-            </div>
-          )}
-
-          <div>
-            <label className="form-label">Target (Optional)</label>
-            <input className="input" type="number" step="0.05" value={form.target_price} onChange={e => setForm({ ...form, target_price: e.target.value })} style={{ width: 100 }} />
-          </div>
-          
-          <div>
-            <label className="form-label">Stop Loss (Optional)</label>
-            <input className="input" type="number" step="0.05" value={form.stop_loss} onChange={e => setForm({ ...form, stop_loss: e.target.value })} style={{ width: 100 }} />
-          </div>
-
-          <button type="submit" disabled={submitting} className={`btn ${form.direction === 'BUY' ? 'btn-success' : 'btn-danger'}`} style={{ height: 38 }}>
-            {form.direction === 'BUY' ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
-            {submitting ? 'Placing…' : `PLACE ORDER`}
-          </button>
-        </form>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginTop: 16 }}>
-          {[
-            ['Live reference', quote ? `₹${quote.price.toLocaleString('en-IN')}` : 'Enter a symbol'],
-            ['Estimated order value', orderValue ? `₹${orderValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'],
-            ['Maximum loss to stop', maxRisk ? `₹${maxRisk.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'Set a stop loss'],
-            ['Price update', quote?.timestamp ? new Date(quote.timestamp).toLocaleTimeString('en-IN') : '—'],
-          ].map(([label, value]) => <div key={label} style={{ background: 'var(--color-bg-secondary)', borderRadius: 8, padding: '9px 11px' }}><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{label}</div><div className="mono" style={{ marginTop: 2, fontWeight: 600 }}>{value}</div></div>)}
-        </div>
-        {form.direction === 'SELL' && form.product_type === 'DELIVERY' && <div style={{ display: 'flex', gap: 6, marginTop: 12, color: 'var(--color-neutral)', fontSize: 12 }}><ShieldCheck size={15} />Delivery short selling is not supported. Select Intraday.</div>}
-        <style>{`
-          .form-label { font-size: 11px; color: var(--color-text-muted); margin-bottom: 4px; display: block; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
-        `}</style>
-      </div>
-
-      {/* Pending Orders */}
-      {pendingTrades.length > 0 && (
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div className="card-header"><span className="card-title" style={{ color: '#f59e0b' }}>Pending Orders (Limit / SL)</span></div>
-          <table className="table">
-            <thead><tr><th>Symbol</th><th>Direction</th><th>Product</th><th>Type</th><th>Qty</th><th>Price Level</th><th>Target/SL</th><th>Action</th></tr></thead>
+      {/* Content based on Active Tab */}
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        {activeTab === 'POSITIONS' && (
+          <table className="table" style={{ margin: 0 }}>
+            <thead style={{ background: 'var(--color-bg-card-hover)' }}>
+              <tr>
+                <th>Product</th><th>Instrument</th><th>Qty.</th><th>Avg. Cost</th><th>LTP</th><th>Current Value</th><th>P&L</th><th>Action</th>
+              </tr>
+            </thead>
             <tbody>
-              {pendingTrades.map(t => (
+              {openTrades.length === 0 ? (
+                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>You don't have any open positions yet</td></tr>
+              ) : openTrades.map(t => (
                 <tr key={t.trade_id}>
-                  <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
-                  <td><span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction}</span></td>
                   <td><span className="badge badge-secondary">{t.product_type}</span></td>
-                  <td><span className="badge badge-secondary">{t.order_type}</span></td>
-                  <td>{t.quantity}</td>
-                  <td className="mono">
-                    {t.order_type === 'LIMIT' ? `LMT: ₹${t.limit_price?.toFixed(2)}` : `SL: ₹${t.stop_price?.toFixed(2)}`}
+                  <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
+                  <td className={t.direction === 'BUY' ? 'positive' : 'negative'}>{t.direction === 'BUY' ? t.quantity : `-${t.quantity}`}</td>
+                  <td className="mono">{parseFloat(t.entry_price).toFixed(2)}</td>
+                  <td className="mono">{t.current_price ? t.current_price.toFixed(2) : '—'}</td>
+                  <td className="mono">{t.current_price ? (t.current_price * t.quantity).toFixed(2) : '—'}</td>
+                  <td className={t.unrealized_pnl >= 0 ? 'positive mono' : 'negative mono'} style={{ fontWeight: 500 }}>
+                    {t.unrealized_pnl !== undefined ? `${t.unrealized_pnl >= 0 ? '+' : ''}${t.unrealized_pnl.toFixed(2)}` : '—'}
                   </td>
-                  <td className="mono" style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                    {t.target_price && `Tgt: ₹${t.target_price?.toFixed(2)} `}
-                    {t.stop_loss && `SL: ₹${t.stop_loss?.toFixed(2)}`}
+                  <td>
+                    <button className="btn btn-secondary" style={{ padding: '4px 12px', fontSize: 12, border: '1px solid var(--color-border)' }} onClick={() => handleClose(t.trade_id)}>
+                      Exit
+                    </button>
                   </td>
-                  <td><button className="btn btn-secondary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => handleClose(t.trade_id)}><X size={13} /> Cancel</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
 
-      {/* Open Trades */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-header"><span className="card-title">Open Positions</span></div>
-        {openTrades.length === 0 && <div className="empty-state">No open positions</div>}
-        {openTrades.length > 0 && (
-          <table className="table">
-            <thead><tr><th>Symbol</th><th>Direction</th><th>Product</th><th>Qty</th><th>Entry</th><th>Target/SL</th><th>Current</th><th>Unrealized PnL</th><th>Action</th></tr></thead>
+        {activeTab === 'ORDERS' && (
+          <table className="table" style={{ margin: 0 }}>
+            <thead style={{ background: 'var(--color-bg-card-hover)' }}>
+              <tr>
+                <th>Time</th><th>Type</th><th>Instrument</th><th>Product</th><th>Qty.</th><th>Status</th><th>Action</th>
+              </tr>
+            </thead>
             <tbody>
-              {openTrades.map(t => (
+              {pendingTrades.length === 0 ? (
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>You don't have any pending orders</td></tr>
+              ) : pendingTrades.map(t => (
+                <tr key={t.trade_id}>
+                  <td style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{new Date(t.created_at).toLocaleTimeString()}</td>
+                  <td>
+                    <span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction} {t.order_type}</span>
+                  </td>
+                  <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
+                  <td><span className="badge badge-secondary">{t.product_type}</span></td>
+                  <td>{t.quantity}</td>
+                  <td><span className="badge badge-watch">OPEN</span></td>
+                  <td>
+                    <button className="btn btn-secondary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => handleClose(t.trade_id)}>
+                      Cancel
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {activeTab === 'HISTORY' && (
+          <table className="table" style={{ margin: 0 }}>
+            <thead style={{ background: 'var(--color-bg-card-hover)' }}>
+              <tr>
+                <th>Instrument</th><th>Direction</th><th>Qty.</th><th>Avg. Cost</th><th>Exit Price</th><th>Realized P&L</th><th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {closedTrades.length === 0 ? (
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>No trade history</td></tr>
+              ) : closedTrades.slice(0, 30).map(t => (
                 <tr key={t.trade_id}>
                   <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
                   <td><span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction}</span></td>
-                  <td><span className="badge badge-secondary">{t.product_type}</span></td>
                   <td>{t.quantity}</td>
-                  <td className="mono">₹{parseFloat(t.entry_price).toFixed(2)}</td>
-                  <td className="mono" style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                    {t.target_price && `Tgt: ₹${t.target_price?.toFixed(2)} `}
-                    {t.stop_loss && `SL: ₹${t.stop_loss?.toFixed(2)}`}
+                  <td className="mono">{t.entry_price ? parseFloat(t.entry_price).toFixed(2) : '—'}</td>
+                  <td className="mono">{t.exit_price ? parseFloat(t.exit_price).toFixed(2) : '—'}</td>
+                  <td className={t.realized_pnl >= 0 ? 'positive mono' : 'negative mono'} style={{ fontWeight: 600 }}>
+                    {t.realized_pnl !== undefined ? `${t.realized_pnl >= 0 ? '+' : ''}${t.realized_pnl.toFixed(2)}` : '—'}
                   </td>
-                  <td className="mono">{t.current_price ? `₹${t.current_price.toFixed(2)}` : '—'}</td>
-                  <td className={t.unrealized_pnl >= 0 ? 'positive mono' : 'negative mono'}>
-                    {t.unrealized_pnl !== undefined ? `${t.unrealized_pnl >= 0 ? '+' : ''}₹${t.unrealized_pnl.toFixed(2)}` : '—'}
-                  </td>
-                  <td><button className="btn btn-danger" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => handleClose(t.trade_id)}><X size={13} /> Exit</button></td>
+                  <td style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{t.closed_at ? new Date(t.closed_at).toLocaleDateString() : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -233,32 +238,109 @@ export default function PaperTradingPage() {
         )}
       </div>
 
-      {/* Closed Trades */}
-      {closedTrades.length > 0 && (
-        <div className="card">
-          <div className="card-header"><span className="card-title">Trade History (Closed / Cancelled)</span></div>
-          <table className="table">
-            <thead><tr><th>Symbol</th><th>Direction</th><th>Product</th><th>Qty</th><th>Entry</th><th>Exit</th><th>STT</th><th>Net PnL</th><th>Closed At</th></tr></thead>
-            <tbody>
-              {closedTrades.slice(0, 30).map(t => (
-                <tr key={t.trade_id}>
-                  <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
-                  <td><span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction}</span></td>
-                  <td><span className="badge badge-secondary">{t.product_type}</span></td>
-                  <td>{t.quantity}</td>
-                  <td className="mono">{t.entry_price ? `₹${parseFloat(t.entry_price).toFixed(2)}` : '—'}</td>
-                  <td className="mono">{t.exit_price ? `₹${parseFloat(t.exit_price).toFixed(2)}` : '—'}</td>
-                  <td className="mono" style={{ color: 'var(--color-text-muted)' }}>₹{t.stt_tax?.toFixed(2) || '0.00'}</td>
-                  <td className={t.realized_pnl >= 0 ? 'positive mono' : 'negative mono'} style={{ fontWeight: 600 }}>
-                    {t.realized_pnl !== undefined ? `${t.realized_pnl >= 0 ? '+' : ''}₹${t.realized_pnl.toFixed(2)}` : '—'}
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{t.closed_at ? new Date(t.closed_at).toLocaleDateString('en-IN') : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Floating Order Modal */}
+      {isOrderModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="card" style={{ width: 450, padding: 0, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+            
+            {/* Modal Header */}
+            <div style={{ 
+              background: form.direction === 'BUY' ? 'var(--color-buy)' : 'var(--color-sell)', 
+              color: 'white', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' 
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontWeight: 600 }}>{form.direction} {form.symbol || 'Instrument'}</h3>
+                <div style={{ fontSize: 12, opacity: 0.9, marginTop: 4 }}>
+                  {form.product_type} • {form.order_type}
+                </div>
+              </div>
+              <button onClick={() => setIsOrderModalOpen(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: 20 }}>
+              <form onSubmit={handlePlace}>
+                <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input type="radio" checked={form.direction === 'BUY'} onChange={() => setForm({...form, direction: 'BUY'})} /> BUY
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input type="radio" checked={form.direction === 'SELL'} onChange={() => setForm({...form, direction: 'SELL'})} /> SELL
+                  </label>
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <label className="form-label">Search Symbol</label>
+                  <StockSearchBox 
+                    placeholder="e.g. RELIANCE.NS" 
+                    width="100%" 
+                    autoNavigate={false} 
+                    clearOnSelect={false}
+                    value={form.symbol} 
+                    onChange={(val) => setForm({ ...form, symbol: val })} 
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <label className="form-label">Product</label>
+                    <select className="input" value={form.product_type} onChange={e => setForm({ ...form, product_type: e.target.value })} style={{ width: '100%' }}>
+                      <option value="INTRADAY">MIS (Intraday)</option>
+                      <option value="DELIVERY">CNC (Delivery)</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label className="form-label">Order Type</label>
+                    <select className="input" value={form.order_type} onChange={e => setForm({ ...form, order_type: e.target.value })} style={{ width: '100%' }}>
+                      <option value="MARKET">Market</option>
+                      <option value="LIMIT">Limit</option>
+                      <option value="SL">SL (Stop Loss)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
+                  <div style={{ flex: 1 }}>
+                    <label className="form-label">Quantity</label>
+                    <input className="input" type="number" min="1" required value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} style={{ width: '100%' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label className="form-label">Price</label>
+                    <input className="input" type="number" step="0.05" disabled={form.order_type === 'MARKET'} required={form.order_type === 'LIMIT'} value={form.limit_price} onChange={e => setForm({ ...form, limit_price: e.target.value })} style={{ width: '100%' }} placeholder={form.order_type === 'MARKET' ? 'Market' : '0.00'} />
+                  </div>
+                </div>
+                
+                {form.order_type === 'SL' && (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="form-label">Trigger Price</label>
+                    <input className="input" type="number" step="0.05" required value={form.stop_price} onChange={e => setForm({ ...form, stop_price: e.target.value })} style={{ width: '100%' }} />
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--color-border-light)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                    <div>Margin Required: <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>₹{orderValue ? orderValue.toFixed(2) : '0.00'}</span></div>
+                    {quote?.price && <div>LTP: <span className="mono">₹{quote.price.toFixed(2)}</span></div>}
+                  </div>
+                  
+                  <button type="submit" disabled={submitting} className={`btn`} style={{ 
+                    background: form.direction === 'BUY' ? 'var(--color-buy)' : 'var(--color-sell)', 
+                    color: 'white', padding: '10px 24px', fontWeight: 600 
+                  }}>
+                    {submitting ? 'Placing…' : form.direction}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       )}
+
+      <style>{`
+        .form-label { font-size: 11px; color: var(--color-text-muted); margin-bottom: 6px; display: block; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+      `}</style>
     </div>
   )
 }

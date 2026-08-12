@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { stocksApi } from '../services/api'
 import api from '../services/api'
 import { Search, Filter, Activity, BarChart2, Plus, Trash2 } from 'lucide-react'
+import { useLocalStorage } from '../hooks/useLocalStorage'
 
 const SCANNER_RULES = [
   { id: 'RSI_OVERSOLD', name: 'RSI Oversold (< 30)', desc: 'Stocks where RSI is below 30 (Potential Reversal)' },
@@ -20,10 +21,11 @@ const SECTORS = [
 ]
 
 export default function ScannerPage() {
-  const [selectedRule, setSelectedRule] = useState(SCANNER_RULES[0].id)
-  const [selectedSector, setSelectedSector] = useState(SECTORS[0].id)
-  const [scanMode, setScanMode] = useState<'basic' | 'custom'>('basic')
-  const [timeframe, setTimeframe] = useState('1d')
+  // Persisted filter state — restores on page revisit
+  const [selectedRule, setSelectedRule] = useLocalStorage('scanner_rule', SCANNER_RULES[0].id)
+  const [selectedSector, setSelectedSector] = useLocalStorage('scanner_sector', SECTORS[0].id)
+  const [scanMode, setScanMode] = useLocalStorage<'basic' | 'custom'>('scanner_mode', 'basic')
+  const [timeframe, setTimeframe] = useLocalStorage('scanner_timeframe', '1d')
   const [customConditions, setCustomConditions] = useState([{ indicator: 'rsi_14', operator: '<', value: '30' }])
 
   const [results, setResults] = useState<any[]>([])

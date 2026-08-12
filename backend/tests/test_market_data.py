@@ -62,6 +62,36 @@ async def test_fetch_candles_returns_list(mock_cache_set, mock_cache_get):
 @pytest.mark.asyncio
 @patch("backend.services.market_data.cache_get", return_value=None)
 @patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
+async def test_fetch_candles_bse_dual_fetch_fallback(mock_cache_set, mock_cache_get):
+    """BSE (.BO) stocks should attempt .NS first, then fallback to .BO without auto_adjust if .NS is empty."""
+    mock_df_empty = pd.DataFrame()
+    mock_df_valid = pd.DataFrame({
+        "Open": [100.0], "High": [105.0], "Low": [99.0], "Close": [103.0], "Volume": [1000000]
+    }, index=pd.DatetimeIndex([datetime(2024, 1, 2)]))
+
+    with patch("backend.services.market_data.yf.Ticker") as mock_ticker:
+        mock_instance = MagicMock()
+        # First call (for .NS) returns empty, Second call (for .BO) returns valid
+        mock_instance.history.side_effect = [mock_df_empty, mock_df_valid]
+        mock_ticker.return_value = mock_instance
+
+        # We request .BO
+        result = await MarketDataService.fetch_candles("SMESTOCK.BO", "1d", 10)
+
+        # The ticker should have been initialized twice: first for SMESTOCK.NS, then SMESTOCK.BO
+        assert mock_ticker.call_count == 2
+        calls = mock_ticker.call_args_list
+        assert calls[0][0][0] == "SMESTOCK.NS"
+        assert calls[1][0][0] == "SMESTOCK.BO"
+        
+        # Verify the fallback succeeded and returned data
+        assert len(result) == 1
+        assert result[0]["close"] == 103.0
+
+
+@pytest.mark.asyncio
+@patch("backend.services.market_data.cache_get", return_value=None)
+@patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
 async def test_fetch_candles_invalid_timeframe(mock_cache_set, mock_cache_get):
     """Invalid timeframe should raise ValueError."""
     with pytest.raises(ValueError, match="Invalid timeframe"):

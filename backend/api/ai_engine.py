@@ -65,15 +65,30 @@ async def ai_chat(
     
     response = "I am your AI Stock Assistant. I can analyze technicals and give trading insights."
     
-    if "market" in msg or "nifty" in msg or "regime" in msg:
-        from backend.services.india_intelligence import india_intelligence
-        regime = await india_intelligence.get_comprehensive_regime()
-        response = f"Currently, the market is in a {regime['combined_regime']} phase with a score of {regime['regime_score']}. Breadth is {regime['market_breadth']['breadth_signal']}."
-        
+    if any(k in msg for k in ["market", "nifty", "regime", "up", "down", "why", "today", "breadth"]):
+        try:
+            from backend.services.india_intelligence import india_intelligence
+            regime = await india_intelligence.get_comprehensive_regime()
+            
+            phase = regime.get('regime', 'UNKNOWN')
+            conf = int(regime.get('confidence', 0) * 100)
+            breadth = regime.get('detail', {}).get('market_breadth', {}).get('breadth_signal', 'neutral')
+            
+            response = f"Currently, the broader market is in a **{phase}** phase (Confidence: {conf}%). "
+            response += f"Market breadth is **{breadth}**. "
+            
+            if "why" in msg or "up" in msg or "down" in msg:
+                signals = regime.get("signals", [])
+                if signals:
+                    response += "\n\nKey drivers today:\n"
+                    for s in signals:
+                        response += f"- **{s['source']}** ({s['direction']}): {s['detail']}\n"
+        except Exception as e:
+            response = "I'm currently unable to fetch the real-time market regime data. Please try again in a moment."
     elif "buy" in msg or "sell" in msg or "score" in msg or "analyze" in msg or "view" in msg or "should" in msg:
         import re
         if not symbol:
-            clean_msg = re.sub(r'\b(should|i|buy|or|not|sell|analyze|score|for|view|the|stock)\b', '', msg.replace("?", "")).strip()
+            clean_msg = re.sub(r'\b(should|i|buy|buying|or|not|sell|selling|analyze|score|for|view|the|stock|is|are|best|good|now|days|today|tomorrow|what|about|think|how|does|look|of|a|an|it|to)\b', '', msg.replace("?", "")).strip()
             if clean_msg:
                 search_results = await market_data_service.search_stocks(clean_msg)
                 if search_results:

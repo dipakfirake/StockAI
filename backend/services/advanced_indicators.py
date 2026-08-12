@@ -180,7 +180,7 @@ class AdvancedIndicators:
         close = df["Close"]
         basis = close.rolling(window).mean()
         std = close.rolling(window).std(ddof=0)
-        bb_width = (4 * std / basis * 100).iloc[-1]
+        bb_width = (4 * std / basis * 100).iloc[-1] if basis.iloc[-1] else 0
         atr = ta.volatility.AverageTrueRange(df["High"], df["Low"], close, window=window).average_true_range().iloc[-1]
         kc_width = (4 * atr / basis.iloc[-1] * 100) if basis.iloc[-1] else 0
         momentum = close.iloc[-1] - close.iloc[-window]

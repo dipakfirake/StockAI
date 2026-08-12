@@ -54,11 +54,21 @@ class NSEScraper:
     All methods cache results aggressively to avoid hammering the NSE site.
     """
     _session: Optional[aiohttp.ClientSession] = None
+    _session_loop_id: Optional[int] = None
     
     @classmethod
     async def get_session(cls) -> aiohttp.ClientSession:
-        if cls._session is None or cls._session.closed:
+        current_loop_id = id(asyncio.get_running_loop())
+        if cls._session is None or cls._session.closed or cls._session_loop_id != current_loop_id:
+            if cls._session and not cls._session.closed:
+                # Detach connector if bound to a closed/different loop
+                try:
+                    cls._session.connector._close()
+                except Exception:
+                    pass
+            
             cls._session = aiohttp.ClientSession(headers=NSE_HEADERS)
+            cls._session_loop_id = current_loop_id
             # Fetch base URL once to acquire cookies required for API access
             try:
                 await cls._session.get(NSE_BASE_URL, timeout=10)
@@ -199,7 +209,7 @@ class NSEScraper:
             output: dict[str, dict] = {}
             for item in payload.get("data", []):
                 name = str(item.get("index", "")).upper()
-                if name not in {"NIFTY 50", "NIFTY BANK"}:
+                if name not in {"NIFTY 50", "NIFTY BANK", "NIFTY IT", "NIFTY MIDCAP 100", "INDIA VIX"}:
                     continue
                 try:
                     price = float(item.get("last", 0) or 0)

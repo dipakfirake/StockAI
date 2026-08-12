@@ -72,3 +72,28 @@ async def _eod_processing_async():
         await asyncio.sleep(1.5)
             
     logger.info(f"EOD: Re-ingested {total_inserted} candles and pre-computed indicators")
+
+
+@celery_app.task(name="backend.tasks.market_tasks.analyze_market_bulk")
+def analyze_market_bulk():
+    """Run the AI Screener on a large basket of stocks and cache the results."""
+    logger.info("Running bulk market analysis...")
+    try:
+        results = asyncio.run(_analyze_market_bulk_async())
+        return {"status": "Bulk analysis complete", "stocks_analyzed": len(results)}
+    except Exception as e:
+        logger.error(f"Bulk analysis failed: {e}")
+        return {"error": str(e)}
+
+async def _analyze_market_bulk_async():
+    from backend.services.screener import ScreenerService
+    from backend.core.cache import cache_set
+    from backend.data.ingestion.yfinance_ingestion import NSE_NIFTY50_SYMBOLS
+    
+    # Run the screener on a large subset (using NIFTY 50 for stability, can be expanded to 500)
+    screener_results = await ScreenerService.run_screener(NSE_NIFTY50_SYMBOLS)
+    
+    # Save the entire massive JSON payload to Redis
+    await cache_set("screener:bulk:latest", screener_results, ttl=3600)
+    logger.info(f"Bulk analysis finished for {len(screener_results)} stocks and cached to Redis")
+    return screener_results

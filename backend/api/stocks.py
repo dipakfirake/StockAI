@@ -24,11 +24,15 @@ async def get_stock_insight(
     from backend.data.ingestion.news_scraper import fetch_stock_news
     from backend.services.screener import screener_service
 
-    quote, candles, news, swing_trade = await __import__("asyncio").gather(
+    # Fetch maximum possible history for all charts
+    fetch_limit = 10000
+
+    quote, candles, news, swing_trade, events = await __import__("asyncio").gather(
         market_data_service.fetch_quote(symbol),
-        market_data_service.fetch_candles(symbol, timeframe, limit=10000),
+        market_data_service.fetch_candles(symbol, timeframe, limit=fetch_limit),
         fetch_stock_news(symbol),
         screener_service._analyze_symbol(symbol),
+        market_data_service.fetch_corporate_events(symbol)
     )
     if not quote:
         raise HTTPException(status_code=404, detail=f"No quote data found for {symbol}")
@@ -37,10 +41,13 @@ async def get_stock_insight(
     patterns = []
     if len(series_candles) >= 10:
         from backend.services.indicators import candles_to_df, detect_candlestick_patterns
-        patterns = [
-            {"timestamp": timestamp.isoformat(), "pattern": pattern}
-            for timestamp, pattern in detect_candlestick_patterns(candles_to_df(series_candles)).dropna().items()
-        ][-10:]
+        try:
+            patterns = [
+                {"timestamp": timestamp.isoformat(), "pattern": pattern}
+                for timestamp, pattern in detect_candlestick_patterns(candles_to_df(series_candles)).dropna().items()
+            ]
+        except Exception:
+            patterns = []
     return {
         "symbol": quote["symbol"],
         "timeframe": timeframe,
@@ -53,6 +60,7 @@ async def get_stock_insight(
         "signals": signal_engine.evaluate(indicators, quote["symbol"], timeframe) if indicators else [],
         "ai_score": ai_engine_service.score(indicators, quote["symbol"]) if indicators else None,
         "patterns": patterns,
+        "events": events,
         "news": news,
         "data_note": "Prices are provider-delayed when the exchange or upstream source does not supply a live tick.",
     }

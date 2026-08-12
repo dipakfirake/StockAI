@@ -15,10 +15,10 @@ from backend.core.cache import cache_get, cache_set
 
 logger = get_logger(__name__)
 
-VALID_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h", "1d", "1w"}
+VALID_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h", "1d", "1w", "1mo"}
 YFINANCE_INTERVAL_MAP = {
     "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
-    "1h": "1h", "1d": "1d", "1w": "1wk",
+    "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"
 }
 
 
@@ -88,7 +88,7 @@ class MarketDataService:
                     except: return 0
                 
                 # Try fast_info first
-                data = await asyncio.to_thread(lambda: ticker.fast_info)
+                data = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.fast_info), timeout=5.0)
                 last_price = _sf(getattr(data, "last_price", 0))
                 prev_close = _sf(getattr(data, "previous_close", 0))
                 volume_avg = int(_sf(getattr(data, "three_month_average_volume", 0)))
@@ -103,18 +103,28 @@ class MarketDataService:
             # Index feeds occasionally omit previous_close while still returning price.
             hist = pd.DataFrame()
             if last_price == 0 or prev_close == 0:
-                hist = await asyncio.to_thread(ticker.history, period="5d")
+                try:
+                    hist = await asyncio.wait_for(asyncio.to_thread(ticker.history, period="5d"), timeout=5.0)
+                except Exception:
+                    pass
                 if not hist.empty:
-                    hist = hist.fillna(0)
+                    hist = hist.ffill().bfill().fillna(0)
                     last_price = float(hist["Close"].iloc[-1])
                     prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else last_price
+
+            if prev_close <= 0:
+                calc_change = 0.0
+                calc_change_pct = 0.0
+            else:
+                calc_change = last_price - prev_close
+                calc_change_pct = (calc_change / prev_close) * 100
 
             quote = {
                 "symbol": symbol,
                 "price": round(last_price, 2),
                 "previous_close": round(prev_close, 2),
-                "change": round(last_price - prev_close, 2),
-                "change_pct": round(((last_price - prev_close) / prev_close * 100) if prev_close else 0, 2),
+                "change": round(calc_change, 2),
+                "change_pct": round(calc_change_pct, 2),
                 "volume": volume_avg,
                 "market_cap": market_cap,
                 "52w_high": year_high,
@@ -128,8 +138,7 @@ class MarketDataService:
             return quote
 
         except Exception as e:
-            logger.error(f"Failed to fetch quote for {symbol}: {e}")
-            await cache_set(cache_key, {"error": "unavailable"}, ttl=60)
+            logger.error(f"Failed to fetch quote for {symbol}: {e}.")
             return None
 
     @staticmethod
@@ -147,7 +156,7 @@ class MarketDataService:
         if timeframe not in VALID_TIMEFRAMES:
             raise ValueError(f"Invalid timeframe '{timeframe}'. Valid: {VALID_TIMEFRAMES}")
 
-        symbol = MarketDataService._normalise_symbol(symbol)
+        symbol = MarketDataService._normalise_symbol(symbol)        
         cache_key = f"candles:{symbol}:{timeframe}:{limit}"
         cached = await cache_get(cache_key)
         if cached:
@@ -160,6 +169,8 @@ class MarketDataService:
         if start_date and end_date:
             period = None
         else:
+            # Strictly valid yfinance periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
+            # Intraday limits: 1m max 7d, 2m-90m max 60d, 1h max 730d
             period_map = {
                 "1m": "7d", "5m": "60d", "15m": "60d", "30m": "60d",
                 "1h": "730d", "1d": "max", "1w": "max", "1mo": "max"
@@ -168,34 +179,52 @@ class MarketDataService:
             start_date = None
             end_date = None
 
+        # Dual-fetch strategy for robust India market data:
+        # 1. Try fetching .NS equivalent if it's a .BO stock (NSE data is cleaner for auto_adjust)
+        # 2. If it fails (e.g., BSE-only stock), fallback to the original symbol with auto_adjust=False
+        
+        yf_symbol_primary = symbol.replace('.BO', '.NS') if symbol.endswith('.BO') else symbol
+        
         try:
             import requests
             session = requests.Session()
             session.headers.update({
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             })
-            ticker = await asyncio.to_thread(yf.Ticker, symbol, session=session)
-            kwargs = {
-                "interval": yf_interval,
-                "auto_adjust": True,
-            }
-            if period:
-                kwargs["period"] = period
-            else:
-                kwargs["start"] = start_date
-                kwargs["end"] = end_date
-                
-            df: pd.DataFrame = await asyncio.to_thread(
-                ticker.history,
-                **kwargs
-            )
-
-            if df.empty:
-                logger.warning(f"No candle data returned for {symbol} {timeframe}")
-                await cache_set(cache_key, [], ttl=60)
-                return []
             
-            df = df.fillna(0)
+            # Primary Fetch (NSE / original)
+            ticker = await asyncio.to_thread(yf.Ticker, yf_symbol_primary, session=session)
+            kwargs = {"interval": yf_interval, "auto_adjust": True}
+            if period: kwargs["period"] = period
+            else: kwargs["start"] = start_date; kwargs["end"] = end_date
+                
+            df: pd.DataFrame = await asyncio.wait_for(asyncio.to_thread(ticker.history, **kwargs), timeout=15.0)
+            
+            if df.empty and yf_symbol_primary != symbol:
+                # Fallback Fetch (BSE-only stock)
+                logger.debug(f"Primary fetch failed for {yf_symbol_primary}, trying original {symbol} without auto_adjust")
+                ticker = await asyncio.to_thread(yf.Ticker, symbol, session=session)
+                kwargs["auto_adjust"] = False
+                df = await asyncio.wait_for(asyncio.to_thread(ticker.history, **kwargs), timeout=15.0)
+                
+            if df.empty:
+                # Direct Chart API Fallback (bypasses quoteSummary 404s)
+                try:
+                    logger.debug(f"Ticker history empty for {yf_symbol_primary}, trying yf.download fallback")
+                    dl_kwargs = {"interval": yf_interval, "progress": False}
+                    if period: dl_kwargs["period"] = period
+                    else: dl_kwargs["start"] = start_date; dl_kwargs["end"] = end_date
+                    df = await asyncio.wait_for(asyncio.to_thread(yf.download, yf_symbol_primary, **dl_kwargs), timeout=15.0)
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.get_level_values(0)
+                except Exception as dl_err:
+                    logger.debug(f"yf.download fallback failed: {dl_err}")
+                
+            if df.empty:
+                logger.warning(f"Empty candle data returned for {symbol} {timeframe}. Raising error to trigger mock fallback.")
+                raise ValueError("Insufficient dataframe returned by yfinance")
+            
+            df = df.ffill().bfill().fillna(0)
 
             df = df.tail(limit)
             candles = []
@@ -214,8 +243,54 @@ class MarketDataService:
             return candles
 
         except Exception as e:
-            logger.error(f"Failed to fetch candles for {symbol} {timeframe}: {e}")
-            await cache_set(cache_key, [], ttl=60)
+            logger.warning(f"yfinance failed for {symbol} {timeframe}: {e}. Trying Jugaad NSE Fallback...")
+            
+            # --- JUGAAD NSE FALLBACK ---
+            # If Yahoo Finance is blocked, we scrape directly from the NSE India website using their unofficial API.
+            try:
+                import requests
+                from datetime import datetime, timedelta
+                session = requests.Session()
+                # NSE requires strict browser headers to bypass block
+                session.headers.update({
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "*/*",
+                    "Accept-Language": "en-US,en;q=0.5",
+                    "Origin": "https://www.nseindia.com",
+                    "Referer": "https://www.nseindia.com/"
+                })
+                # First hit homepage to get cookies
+                session.get("https://www.nseindia.com", timeout=10)
+                
+                # Fetch historical data
+                nse_symbol = symbol.replace('.NS', '').replace('.BO', '')
+                url = f"https://www.nseindia.com/api/historical/cm/equity?symbol={nse_symbol}&series=[%22EQ%22]&from={(datetime.now()-timedelta(days=180)).strftime('%d-%m-%Y')}&to={datetime.now().strftime('%d-%m-%Y')}"
+                res = session.get(url, timeout=10)
+                if res.status_code == 200:
+                    data = res.json().get('data', [])
+                    if data:
+                        candles = []
+                        # NSE returns newest first, so we reverse it
+                        for row in reversed(data):
+                            try:
+                                ts = datetime.strptime(row['CH_TIMESTAMP'], '%Y-%m-%d').isoformat()
+                                candles.append({
+                                    "timestamp": ts,
+                                    "open": float(row['CH_OPENING_PRICE']),
+                                    "high": float(row['CH_TRADE_HIGH_PRICE']),
+                                    "low": float(row['CH_TRADE_LOW_PRICE']),
+                                    "close": float(row['CH_CLOSING_PRICE']),
+                                    "volume": int(row['CH_TOT_TRADED_QTY'])
+                                })
+                            except Exception:
+                                pass
+                        if candles:
+                            logger.info(f"Successfully used Jugaad NSE Fallback for {symbol}")
+                            await cache_set(cache_key, candles[-limit:], ttl=3600)
+                            return candles[-limit:]
+            except Exception as nse_e:
+                logger.error(f"Jugaad NSE Fallback also failed for {symbol}: {nse_e}")
+                
             return []
 
     @staticmethod
@@ -244,6 +319,28 @@ class MarketDataService:
                     }
                     for s in local_stocks
                 ]
+
+        fallback_symbols = [
+            {"symbol": "RELIANCE.NS", "name": "Reliance Industries", "exchange": "NSE", "type": "EQUITY"},
+            {"symbol": "TCS.NS", "name": "Tata Consultancy Services", "exchange": "NSE", "type": "EQUITY"},
+            {"symbol": "INFY.NS", "name": "Infosys", "exchange": "NSE", "type": "EQUITY"},
+            {"symbol": "HDFCBANK.NS", "name": "HDFC Bank", "exchange": "NSE", "type": "EQUITY"},
+            {"symbol": "ICICIBANK.NS", "name": "ICICI Bank", "exchange": "NSE", "type": "EQUITY"},
+        ]
+        normalized_query = query_upper.replace(".NS", "").replace("^", "").strip()
+        if normalized_query:
+            matches = [
+                {
+                    "symbol": item["symbol"].replace(".NS", ""),
+                    "name": item["name"],
+                    "exchange": item["exchange"],
+                    "type": item["type"],
+                }
+                for item in fallback_symbols
+                if normalized_query in item["symbol"].replace(".NS", "").upper() or normalized_query in item["name"].upper()
+            ]
+            if matches:
+                return matches
 
         # Fallback to yfinance
         try:
@@ -277,14 +374,10 @@ class MarketDataService:
             session = requests.Session()
             session.headers.update({"User-Agent": "Mozilla/5.0"})
             ticker = await asyncio.to_thread(yf.Ticker, symbol, session=session)
-            info = await asyncio.to_thread(lambda: ticker.info)
+            info = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.info), timeout=5.0)
             
-            # Fetch balance sheet and financials if available
-            try:
-                bs = await asyncio.to_thread(lambda: ticker.balance_sheet)
-                fin = await asyncio.to_thread(lambda: ticker.financials)
-            except Exception:
-                bs, fin = None, None
+            # Removed extremely slow balance_sheet and financials fetches (they were unused anyway)
+
 
             result = {
                 "symbol": symbol,
@@ -313,8 +406,29 @@ class MarketDataService:
             await cache_set(cache_key, result, ttl=3600 * 6)  # 6 hours
             return result
         except Exception as e:
-            logger.error(f"Failed to fetch info for {symbol}: {e}")
-            return None
+            logger.error(f"Failed to fetch info for {symbol}: {e}.")
+            return {
+                "symbol": symbol,
+                "name": symbol.replace(".NS", "").replace("^", ""),
+                "sector": "N/A",
+                "industry": "N/A",
+                "market_cap": 0,
+                "pe_ratio": None,
+                "forward_pe": None,
+                "eps": None,
+                "dividend_yield": None,
+                "description": "Detailed company information is not available for this symbol.",
+                "roe": None,
+                "roa": None,
+                "book_value": None,
+                "price_to_book": None,
+                "debt_to_equity": None,
+                "total_revenue": None,
+                "revenue_growth": None,
+                "ebitda": None,
+                "free_cashflow": None,
+                "current_ratio": None,
+            }
 
 
     @staticmethod
@@ -331,7 +445,7 @@ class MarketDataService:
             session = requests.Session()
             session.headers.update({"User-Agent": "Mozilla/5.0"})
             ticker = await asyncio.to_thread(yf.Ticker, symbol, session=session)
-            news_items = await asyncio.to_thread(lambda: ticker.news)
+            news_items = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.news), timeout=5.0)
             
             articles = []
             for item in news_items[:10]:
@@ -346,8 +460,65 @@ class MarketDataService:
             await cache_set(cache_key, articles, ttl=3600)  # 1 hour cache
             return articles
         except Exception as e:
-            logger.error(f"Failed to fetch news for {symbol}: {e}")
+            logger.error(f"Failed to fetch news for {symbol}: {e}.")
             return []
+            
+    @staticmethod
+    async def fetch_corporate_events(symbol: str) -> dict:
+        """Fetch corporate events: upcoming earnings date and recent dividends/splits."""
+        symbol = MarketDataService._normalise_symbol(symbol)
+        cache_key = f"events:v2:{symbol}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
+        events = {"earnings_date": None, "dividends": []}
+        try:
+            import requests
+            session = requests.Session()
+            session.headers.update({"User-Agent": "Mozilla/5.0"})
+            ticker = await asyncio.to_thread(yf.Ticker, symbol, session=session)
+            
+            # Fetch Calendar for Earnings Date
+            try:
+                cal = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.calendar), timeout=5.0)
+                if isinstance(cal, dict) and "Earnings Date" in cal:
+                    dates = cal["Earnings Date"]
+                    if len(dates) > 0:
+                        events["earnings_date"] = str(dates[0])
+                elif hasattr(cal, "empty") and not cal.empty:
+                    # Older yfinance returns DataFrame
+                    events["earnings_date"] = str(cal.iloc[0, 0])
+            except Exception as e:
+                logger.debug(f"Failed to fetch calendar for {symbol}: {e}")
+
+            # Fetch Dividends
+            try:
+                divs = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.dividends), timeout=5.0)
+                if not divs.empty:
+                    # Get last 2 years of dividends
+                    import pandas as pd
+                    two_years_ago = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=730)
+                    
+                    if divs.index.tz is None:
+                        two_years_ago = two_years_ago.tz_localize(None)
+                    else:
+                        two_years_ago = two_years_ago.tz_convert(divs.index.tz)
+                        
+                    recent_divs = divs[divs.index > two_years_ago]
+                    for date, amount in recent_divs.items():
+                        events["dividends"].append({
+                            "date": date.isoformat() if hasattr(date, 'isoformat') else str(date),
+                            "amount": float(amount)
+                        })
+            except Exception as e:
+                logger.debug(f"Failed to fetch dividends for {symbol}: {e}")
+                
+            await cache_set(cache_key, events, ttl=86400) # cache for 24h
+            return events
+        except Exception as e:
+            logger.error(f"Failed to fetch events for {symbol}: {e}")
+            return events
 
 
 market_data_service = MarketDataService()

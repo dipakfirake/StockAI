@@ -26,7 +26,15 @@ TRUSTED_SOURCES = [
     "Bloomberg",
     "Financial Express",
     "BQ Prime",
-    "Zee Business"
+    "Zee Business",
+    "The Hindu Business Line",
+    "BusinessLine",
+    "Capital Market",
+    "Trendlyne",
+    "Screener",
+    "Business Today",
+    "Yahoo Finance",
+    "Investing.com"
 ]
 
 async def fetch_stock_news(symbol: str) -> list[dict]:
@@ -38,14 +46,14 @@ async def fetch_stock_news(symbol: str) -> list[dict]:
     query = quote_plus(f'"{clean_symbol}" stock AND NSE')
     rss_url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
     
-    cache_key = f"news_v2:{clean_symbol}"
+    cache_key = f"news_v3:{clean_symbol}"
     cached = await cache_get(cache_key)
     if cached:
         return cached
 
     try:
         # Run feedparser in a thread since it does blocking HTTP requests
-        feed = await asyncio.to_thread(feedparser.parse, rss_url)
+        feed = await asyncio.wait_for(asyncio.to_thread(feedparser.parse, rss_url), timeout=5.0)
         
         articles = []
         now = datetime.now(timezone.utc)

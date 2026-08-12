@@ -4,7 +4,7 @@ const BASE_URL = '/api'
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000,
+  timeout: 60000,
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -124,6 +124,14 @@ export const authApi = {
     api.post('/auth/register', { email, password, name }),
   me: () => api.get('/auth/me'),
   upgrade: () => api.post('/auth/upgrade'),
+}
+
+// ===== User Preferences endpoints =====
+export const preferencesApi = {
+  /** Load all saved preferences for the logged-in user */
+  get: () => api.get<Record<string, any>>('/preferences/'),
+  /** Bulk-upsert preferences. Only allow-listed keys are stored. */
+  set: (preferences: Record<string, any>) => api.put('/preferences/', { preferences }),
 }
 
 export default api

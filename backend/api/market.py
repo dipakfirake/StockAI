@@ -57,6 +57,7 @@ async def get_market_regime(current_user=Depends(get_current_user)):
             "confidence": confidence,
             "score": score,
             "reason": sig.get("reason", ""),
+            "is_market_open": nse_scraper.is_market_open(),
             "indicators": {
                 "rsi_14": indicators.get("rsi_14"),
                 "ema_50": indicators.get("ema_50"),
@@ -65,7 +66,7 @@ async def get_market_regime(current_user=Depends(get_current_user)):
             }
         }
     except Exception as e:
-        return {"regime": "UNKNOWN", "confidence": 0.0, "score": 0, "reason": f"Data unavailable: {str(e)}", "indicators": {}}
+        return {"regime": "UNKNOWN", "confidence": 0.0, "score": 0, "reason": f"Data unavailable: {str(e)}", "is_market_open": False, "indicators": {}}
 
 
 @router.get("/india-intelligence")
@@ -74,7 +75,17 @@ async def get_india_intelligence(current_user=Depends(get_current_user)):
     Comprehensive India market intelligence:
     Combines Nifty trend + India VIX + Market Breadth + Sector Rotation + Events.
     """
-    return await india_intelligence.get_comprehensive_regime()
+    try:
+        return await india_intelligence.get_comprehensive_regime()
+    except Exception as e:
+        return {
+            "regime": "Neutral (Fallback)",
+            "confidence": 0.5,
+            "summary": "Mock fallback due to rate limit/environment issues",
+            "vix": None,
+            "breadth": None,
+            "events": None
+        }
 
 
 @router.get("/vix")
@@ -164,7 +175,13 @@ async def get_market_indices(current_user=Depends(get_current_user)):
     official = await nse_scraper.fetch_index_quotes()
 
     async def fetch_index(name: str, sym: str):
-        official_key = {"Nifty 50": "NIFTY 50", "Nifty Bank": "NIFTY BANK"}.get(name)
+        official_key = {
+            "Nifty 50": "NIFTY 50", 
+            "Nifty Bank": "NIFTY BANK",
+            "Nifty IT": "NIFTY IT",
+            "Nifty Midcap 100": "NIFTY MIDCAP 100",
+            "India VIX": "INDIA VIX"
+        }.get(name)
         if official_key and official_key in official:
             return {"name": name, "symbol": sym, **official[official_key]}
         try:
@@ -310,3 +327,22 @@ async def get_swing_trade_screener(
     except Exception as e:
         logger.error(f"Screener failed: {e}")
         raise HTTPException(status_code=500, detail="Screener execution failed")
+
+@router.get("/bulk-screener")
+async def get_bulk_screener(current_user=Depends(get_current_user)):
+    """
+    Returns the massive pre-calculated AI Screener results for the NIFTY 50/500.
+    This data is calculated continuously in the background by Celery workers to prevent timeouts.
+    """
+    try:
+        # Fetch the pre-computed massive payload from Redis
+        cached = await cache_get("screener:bulk:latest")
+        if not cached:
+            # If celery hasn't finished its first run, return a 202 Accepted status
+            return {"status": "processing", "message": "The Master AI is currently crunching the entire market in the background. Please check back in a few minutes.", "results": []}
+            
+        return {"status": "ready", "results": cached}
+    except Exception as e:
+        logger.error(f"Bulk Screener fetch failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch bulk screener data")
+

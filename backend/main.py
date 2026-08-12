@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from backend.core.config import settings
 from backend.core.database import create_db_tables
 from backend.core.logging_config import setup_logging
-from backend.api import stocks, alerts, paper_trading, backtesting, ai_engine, portfolio, watchlist, auth, market, scanner, ml, settings as api_settings, notifications
+from backend.api import stocks, alerts, paper_trading, backtesting, ai_engine, portfolio, watchlist, auth, market, scanner, ml, settings as api_settings, notifications, preferences
 from backend.api.websocket import ws_router
 
 
@@ -75,6 +75,7 @@ app.include_router(scanner.router, prefix="/api/scanner", tags=["Scanner"])
 app.include_router(ml.router, prefix="/api/ml", tags=["Machine Learning"])
 app.include_router(api_settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
+app.include_router(preferences.router, prefix="/api/preferences", tags=["Preferences"])
 app.include_router(ws_router)
 
 

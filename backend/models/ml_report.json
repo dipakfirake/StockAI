@@ -1,0 +1,18 @@
+{
+    "LargeCap_and_Indices": {
+        "model": "LargeCap_Universal",
+        "total_candles_trained": 5558,
+        "cv_splits": 4,
+        "avg_validation_auc": 0.59,
+        "avg_validation_accuracy": 0.526,
+        "regime_tested": "10+ Years (2015-2026): Includes Demonetization, COVID Crash, Russia-Ukraine War, Middle East Crises, Rate Hikes & ATH Bull Rallies"
+    },
+    "Small_Mid_PennyCap": {
+        "model": "SmallCap_Momentum",
+        "total_candles_trained": 5531,
+        "cv_splits": 4,
+        "avg_validation_auc": 0.59,
+        "avg_validation_accuracy": 0.548,
+        "regime_tested": "10+ Years (2015-2026): Includes Demonetization, COVID Crash, Russia-Ukraine War, Middle East Crises, Rate Hikes & ATH Bull Rallies"
+    }
+}

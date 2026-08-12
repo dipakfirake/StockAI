@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { alertsApi } from '../services/api'
 import { Bell, PlusCircle, Trash2, BellOff } from 'lucide-react'
+import StockSearchBox from '../components/StockSearchBox'
 
 const CONDITION_TYPES = [
   { value: 'PRICE_ABOVE', label: 'Price Above' },
@@ -77,7 +78,14 @@ export default function AlertsPage() {
           <form onSubmit={handleCreate} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Symbol</label>
-              <input className="input" placeholder="RELIANCE.NS" required value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })} />
+              <StockSearchBox 
+                placeholder="RELIANCE.NS" 
+                width="100%" 
+                autoNavigate={false} 
+                clearOnSelect={false}
+                value={form.symbol} 
+                onChange={(val) => setForm({ ...form, symbol: val })} 
+              />
             </div>
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Priority</label>

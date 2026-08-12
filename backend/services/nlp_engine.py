@@ -26,10 +26,11 @@ class NLPEngineService:
         }
         self.analyzer.lexicon.update(custom_lexicon)
 
-    def analyze_headlines(self, articles: list[dict]) -> dict:
+    def analyze_headlines(self, articles: list[dict], events: dict = None) -> dict:
         """
         Analyze sentiment for a list of news articles.
         Returns aggregate sentiment metrics and individual article scores.
+        Corporate events (dividends/earnings) adjust the baseline compound score.
         """
         if not articles:
             return {
@@ -63,10 +64,27 @@ class NLPEngineService:
 
         avg_compound = total_compound / len(articles)
         
-        if avg_compound >= 0.15:
-            overall = "BULLISH"
-        elif avg_compound <= -0.15:
-            overall = "BEARISH"
+        # Overlay Corporate Event Sentiment
+        if events:
+            # Good/Stable event: recent dividends
+            if events.get("dividends"):
+                avg_compound = min(1.0, avg_compound + 0.15)
+            
+            # Risk event: upcoming earnings (uncertainty)
+            if events.get("earnings_date"):
+                try:
+                    from datetime import datetime, timezone
+                    edate = datetime.fromisoformat(events["earnings_date"][:10]).replace(tzinfo=timezone.utc)
+                    if 0 < (edate - datetime.now(timezone.utc)).days <= 14:
+                        # Uncertainty dampens extreme sentiment towards neutral
+                        avg_compound *= 0.8
+                except:
+                    pass
+
+        if avg_compound >= 0.05:
+            overall = "POSITIVE"
+        elif avg_compound <= -0.05:
+            overall = "NEGATIVE"
         else:
             overall = "NEUTRAL"
 

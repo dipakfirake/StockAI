@@ -48,6 +48,11 @@ celery_app.conf.beat_schedule = {
         "schedule": 30.0,
         "options": {"expires": 25},
     },
+    # Bulk Market Analysis: every 15 minutes during market hours
+    "bulk-market-analysis": {
+        "task": "backend.tasks.market_tasks.analyze_market_bulk",
+        "schedule": 900.0, # 15 minutes
+    },
     # Paper Trading evaluation: every 60 seconds
     "evaluate-paper-trades": {
         "task": "backend.tasks.trading_tasks.evaluate_paper_trades",

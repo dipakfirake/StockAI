@@ -9,6 +9,7 @@ from backend.models.paper_trade import PaperTrade
 from backend.models.settings import SystemSettings
 from backend.models.notification import Notification
 from backend.models.prediction_archive import PredictionArchive
+from backend.models.user_preference import UserPreference
 
 __all__ = [
     "User",
@@ -22,4 +23,5 @@ __all__ = [
     "SystemSettings",
     "Notification",
     "PredictionArchive",
+    "UserPreference",
 ]

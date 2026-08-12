@@ -100,6 +100,32 @@ The absolute easiest way to get StockAI running locally is via Docker Compose.
    
    *Login with:* `admin@stockai.com` / `admin`
 
+## 🧪 Frontend E2E Testing
+
+The frontend includes Playwright end-to-end tests in `frontend/e2e`. On Windows, the Playwright config uses `npm.cmd` to start the Vite dev server correctly.
+
+1. Open a terminal in the `frontend/` folder.
+2. Install dependencies if needed:
+   ```bash
+   npm.cmd install
+   ```
+3. Start the backend server in a separate terminal if it is not already running:
+   ```bash
+   cd ..\backend
+   python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+   ```
+4. Run the Playwright suite:
+   ```bash
+   cd ..\frontend
+   npm.cmd run test:e2e
+   ```
+5. View the report after tests complete:
+   ```bash
+   frontend\playwright-report\index.html
+   ```
+
+> The E2E tests require the backend API to be available at `http://127.0.0.1:8000` and the frontend dev server at `http://localhost:5173`.
+
 ---
 
 ## 📂 Project Architecture

@@ -53,7 +53,8 @@ class LSTMRegimePredictor:
 
         if not TORCH_AVAILABLE:
             # Mock mode: simple momentum heuristic
-            momentum = df["Close"].iloc[-1] / df["Close"].iloc[-30] - 1
+            past_close = df["Close"].iloc[-30]
+            momentum = (df["Close"].iloc[-1] / past_close - 1) if past_close != 0 else 0.0
             if momentum > 0.05:
                 return {"regime": "BULLISH", "confidence": min(0.5 + momentum * 2, 0.95)}
             elif momentum < -0.05:

@@ -48,86 +48,101 @@ def calculate_supertrend(df: pd.DataFrame, period: int = 7, multiplier: float = 
     basic_upperband = hl2 + (multiplier * atr)
     basic_lowerband = hl2 - (multiplier * atr)
     
-    final_upperband = pd.Series(index=df.index, dtype=float)
-    final_lowerband = pd.Series(index=df.index, dtype=float)
-    supertrend = pd.Series(index=df.index, dtype=float)
-    supertrend_dir = pd.Series(index=df.index, dtype=int)
+    final_upperband = np.zeros(len(df))
+    final_lowerband = np.zeros(len(df))
+    supertrend = np.zeros(len(df))
+    supertrend_dir = np.zeros(len(df), dtype=int)
     
-    final_upperband.iloc[0] = basic_upperband.iloc[0]
-    final_lowerband.iloc[0] = basic_lowerband.iloc[0]
-    supertrend.iloc[0] = final_upperband.iloc[0]
-    supertrend_dir.iloc[0] = 1
+    basic_upper = basic_upperband.values
+    basic_lower = basic_lowerband.values
+    close_prices = df['Close'].values
+    
+    final_upperband[0] = basic_upper[0]
+    final_lowerband[0] = basic_lower[0]
+    supertrend[0] = final_upperband[0]
+    supertrend_dir[0] = 1
     
     for i in range(1, len(df)):
-        if basic_upperband.iloc[i] < final_upperband.iloc[i-1] or df['Close'].iloc[i-1] > final_upperband.iloc[i-1]:
-            final_upperband.iloc[i] = basic_upperband.iloc[i]
+        if basic_upper[i] < final_upperband[i-1] or close_prices[i-1] > final_upperband[i-1]:
+            final_upperband[i] = basic_upper[i]
         else:
-            final_upperband.iloc[i] = final_upperband.iloc[i-1]
+            final_upperband[i] = final_upperband[i-1]
             
-        if basic_lowerband.iloc[i] > final_lowerband.iloc[i-1] or df['Close'].iloc[i-1] < final_lowerband.iloc[i-1]:
-            final_lowerband.iloc[i] = basic_lowerband.iloc[i]
+        if basic_lower[i] > final_lowerband[i-1] or close_prices[i-1] < final_lowerband[i-1]:
+            final_lowerband[i] = basic_lower[i]
         else:
-            final_lowerband.iloc[i] = final_lowerband.iloc[i-1]
+            final_lowerband[i] = final_lowerband[i-1]
             
-        if supertrend.iloc[i-1] == final_upperband.iloc[i-1] and df['Close'].iloc[i] <= final_upperband.iloc[i]:
-            supertrend.iloc[i] = final_upperband.iloc[i]
-            supertrend_dir.iloc[i] = -1
-        elif supertrend.iloc[i-1] == final_upperband.iloc[i-1] and df['Close'].iloc[i] > final_upperband.iloc[i]:
-            supertrend.iloc[i] = final_lowerband.iloc[i]
-            supertrend_dir.iloc[i] = 1
-        elif supertrend.iloc[i-1] == final_lowerband.iloc[i-1] and df['Close'].iloc[i] >= final_lowerband.iloc[i]:
-            supertrend.iloc[i] = final_lowerband.iloc[i]
-            supertrend_dir.iloc[i] = 1
-        elif supertrend.iloc[i-1] == final_lowerband.iloc[i-1] and df['Close'].iloc[i] < final_lowerband.iloc[i]:
-            supertrend.iloc[i] = final_upperband.iloc[i]
-            supertrend_dir.iloc[i] = -1
+        if supertrend[i-1] == final_upperband[i-1] and close_prices[i] <= final_upperband[i]:
+            supertrend[i] = final_upperband[i]
+            supertrend_dir[i] = -1
+        elif supertrend[i-1] == final_upperband[i-1] and close_prices[i] > final_upperband[i]:
+            supertrend[i] = final_lowerband[i]
+            supertrend_dir[i] = 1
+        elif supertrend[i-1] == final_lowerband[i-1] and close_prices[i] >= final_lowerband[i]:
+            supertrend[i] = final_lowerband[i]
+            supertrend_dir[i] = 1
+        elif supertrend[i-1] == final_lowerband[i-1] and close_prices[i] < final_lowerband[i]:
+            supertrend[i] = final_upperband[i]
+            supertrend_dir[i] = -1
             
     return pd.DataFrame({
         'SuperTrend': supertrend,
         'Direction': supertrend_dir
-    })
+    }, index=df.index)
 
 
-def detect_candlestick_patterns(df: pd.DataFrame) -> pd.DataFrame:
-    """Detects basic candlestick patterns and returns a series with the pattern name."""
-    patterns = pd.Series(index=df.index, dtype=object)
+def detect_candlestick_patterns(df: pd.DataFrame) -> pd.Series:
+    """Detects candlestick patterns using strict, high-accuracy mathematical ratios."""
+    patterns = np.full(len(df), None, dtype=object)
+    
+    op = df['Open'].values
+    hi = df['High'].values
+    lo = df['Low'].values
+    cl = df['Close'].values
     
     for i in range(2, len(df)):
-        O1, H1, L1, C1 = df['Open'].iloc[i-1], df['High'].iloc[i-1], df['Low'].iloc[i-1], df['Close'].iloc[i-1]
-        O2, H2, L2, C2 = df['Open'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i], df['Close'].iloc[i]
+        O1, H1, L1, C1 = op[i-1], hi[i-1], lo[i-1], cl[i-1]
+        O2, H2, L2, C2 = op[i], hi[i], lo[i], cl[i]
         
         body1 = abs(C1 - O1)
         body2 = abs(C2 - O2)
-        
-        # Bullish Engulfing
-        if C1 < O1 and C2 > O2 and O2 < C1 and C2 > O1:
-            patterns.iloc[i] = 'Bullish Engulfing'
-            continue
-            
-        # Bearish Engulfing
-        if C1 > O1 and C2 < O2 and O2 > C1 and C2 < O1:
-            patterns.iloc[i] = 'Bearish Engulfing'
-            continue
-            
-        # Doji (body is less than 5% of the total range)
+        range1 = H1 - L1
         range2 = H2 - L2
-        if range2 > 0 and (body2 / range2) < 0.05:
-            patterns.iloc[i] = 'Doji'
+        
+        if range2 == 0:
             continue
             
-        # Hammer (small body, long lower wick, short upper wick, appears in downtrend)
+        is_bullish1 = C1 > O1
+        is_bullish2 = C2 > O2
+        
         lower_wick = min(O2, C2) - L2
         upper_wick = H2 - max(O2, C2)
-        if range2 > 0 and body2 > 0 and lower_wick > 2 * body2 and upper_wick < 0.2 * range2 and C1 < O1:
-            patterns.iloc[i] = 'Hammer'
+        
+        # 1. Standard Engulfing (Body engulfs previous body)
+        if not is_bullish1 and is_bullish2 and O2 <= C1 and C2 >= O1 and body2 > body1 * 1.2:
+            patterns[i] = 'Bullish Engulfing'
+            continue
+        elif is_bullish1 and not is_bullish2 and O2 >= C1 and C2 <= O1 and body2 > body1 * 1.2:
+            patterns[i] = 'Bearish Engulfing'
             continue
             
-        # Shooting Star (small body, long upper wick, short lower wick, appears in uptrend)
-        if range2 > 0 and body2 > 0 and upper_wick > 2 * body2 and lower_wick < 0.2 * range2 and C1 > O1:
-            patterns.iloc[i] = 'Shooting Star'
+        # 2. Hammer / Hanging Man (Lower wick >= 2.0x body, Upper wick <= 15% of range)
+        if is_bullish2 and lower_wick >= 2.0 * body2 and upper_wick <= 0.15 * range2:
+            patterns[i] = 'Hammer' if not is_bullish1 else 'Hanging Man'
+            continue
+                
+        # 3. Shooting Star / Inverted Hammer (Upper wick >= 2.0x body, Lower wick <= 15% of range)
+        if not is_bullish2 and upper_wick >= 2.0 * body2 and lower_wick <= 0.15 * range2:
+            patterns[i] = 'Shooting Star' if is_bullish1 else 'Inverted Hammer'
             continue
             
-    return patterns
+        # 4. Doji (Body is <= 5% of total range)
+        if (body2 / range2) <= 0.05:
+            patterns[i] = 'Doji'
+            continue
+            
+    return pd.Series(patterns, index=df.index, name='Pattern')
 
 class IndicatorService:
     """Computes technical indicators from OHLCV candle data."""
@@ -253,13 +268,30 @@ class IndicatorService:
 
     @staticmethod
     def _detect_order_blocks(df: pd.DataFrame) -> pd.Series:
-        """Simple order block detection: identify strong impulsive candles."""
+        """High-accuracy Order Block detection: strong impulsive candle with massive volume and price displacement > ATR."""
         ob_series = pd.Series([None] * len(df), index=df.index)
-        for i in range(1, len(df)):
+        
+        # Ensure we have ATR and Vol SMA for mathematical rigor
+        if 'atr_14' not in df.columns:
+            df['atr_14'] = ta.volatility.AverageTrueRange(high=df["High"], low=df["Low"], close=df["Close"], window=14).average_true_range()
+        if 'vol_sma_20' not in df.columns:
+            df['vol_sma_20'] = ta.trend.SMAIndicator(close=df["Volume"], window=20).sma_indicator()
+            
+        for i in range(20, len(df)):
             body = abs(df['Close'].iloc[i] - df['Open'].iloc[i])
             prev_body = abs(df['Close'].iloc[i-1] - df['Open'].iloc[i-1])
-            # A strong engulfing/impulsive move (at least 3x previous body and 1% of price)
-            if body > prev_body * 3 and body / df['Close'].iloc[i] > 0.01:
+            atr = df['atr_14'].iloc[i-1]
+            vol_sma = df['vol_sma_20'].iloc[i-1]
+            vol = df['Volume'].iloc[i]
+            
+            if atr == 0 or vol_sma == 0:
+                continue
+                
+            # Strict Conditions:
+            # 1. Volume must be > 150% of the 20-period moving average volume (Institutional footprint)
+            # 2. Price Body must be > 1.5x the Average True Range (True displacement)
+            # 3. Body > 3x previous body
+            if vol > (vol_sma * 1.5) and body > (atr * 1.5) and body > (prev_body * 3):
                 if df['Close'].iloc[i] > df['Open'].iloc[i]:
                     ob_series.iloc[i-1] = "bullish_ob"
                 else:
