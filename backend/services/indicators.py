@@ -215,6 +215,10 @@ class IndicatorService:
             df["ichi_kijun"] = ichi.ichimoku_base_line()
             df["ichi_senkou_a"] = ichi.ichimoku_a()
             df["ichi_senkou_b"] = ichi.ichimoku_b()
+            
+            # Momentum Returns
+            df["price_return_5d"] = (df["Close"] / df["Close"].shift(5)) - 1
+            df["price_return_20d"] = (df["Close"] / df["Close"].shift(20)) - 1
 
             latest = df.iloc[-1]
 
@@ -261,6 +265,8 @@ class IndicatorService:
                 },
                 "close": _safe(latest.get("Close")),
                 "volume": int(latest.get("Volume", 0)),
+                "price_return_5d": _safe(latest.get("price_return_5d")),
+                "price_return_20d": _safe(latest.get("price_return_20d")),
             }
         except Exception as e:
             logger.error(f"Indicator computation failed: {e}")
@@ -321,6 +327,8 @@ class IndicatorService:
             df["supertrend_dir"] = st_df["Direction"]
             df["vwap"] = ta.volume.VolumeWeightedAveragePrice(high=df["High"], low=df["Low"], close=df["Close"], volume=df["Volume"]).volume_weighted_average_price()
             df["order_block"] = IndicatorService._detect_order_blocks(df)
+            df["price_return_5d"] = (df["Close"] / df["Close"].shift(5)) - 1
+            df["price_return_20d"] = (df["Close"] / df["Close"].shift(20)) - 1
 
             result = []
             for ts, row in df.iterrows():
@@ -343,6 +351,8 @@ class IndicatorService:
                     "supertrend_dir": int(row["supertrend_dir"]) if pd.notna(row.get("supertrend_dir")) else 0,
                     "vwap": round(float(row["vwap"]), 4) if pd.notna(row.get("vwap")) else None,
                     "order_block": row["order_block"] if pd.notna(row.get("order_block")) else None,
+                    "price_return_5d": round(float(row["price_return_5d"]), 4) if pd.notna(row.get("price_return_5d")) else None,
+                    "price_return_20d": round(float(row["price_return_20d"]), 4) if pd.notna(row.get("price_return_20d")) else None,
                 })
             return result
         except Exception as e:

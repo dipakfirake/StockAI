@@ -103,6 +103,8 @@ async def fetch_single_symbol(symbol: str, sem: asyncio.Semaphore) -> pd.DataFra
             df['Low'] = df['low']
             df['Volume'] = df['volume']
             df['Open'] = df['open']
+            if 'timestamp' in df.columns:
+                df['Date'] = pd.to_datetime(df['timestamp'])
             
             df = engineer_features(df)
             df['symbol'] = symbol
@@ -131,7 +133,16 @@ def train_and_validate(df: pd.DataFrame, model_path: str, model_name: str) -> di
         'adx_14', 'price_return_5d', 'price_return_20d', 'vol_ratio'
     ]
     
-    df = df.dropna(subset=features).sort_index()
+    # Step 5: Fix Split Ordering. 
+    # Must sort by Date globally so TimeSeriesSplit acts on chronological time, not cross-sectional ticker chunks.
+    if 'Date' in df.columns:
+        df = df.sort_values(by="Date")
+        
+    initial_rows = len(df)
+    df = df.dropna(subset=features)
+    final_rows = len(df)
+    logger.info(f"[{model_name}] Dropped {initial_rows - final_rows} rows due to NaN features (e.g. SMA200 warm-up). Actual training rows: {final_rows}.")
+    
     X = df[features].reset_index(drop=True)
     y = df['target'].reset_index(drop=True)
     

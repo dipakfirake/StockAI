@@ -10,6 +10,7 @@ import pandas as pd
 import lightgbm as lgb
 import shap
 from backend.core.logging_config import get_logger
+from backend.services.ml.calibration import calibrator
 
 logger = get_logger(__name__)
 
@@ -104,9 +105,9 @@ class AIEngineService:
             
             adx_14 = _safe_float(indicators.get("adx_14", 20.0), 20.0)
             
-            # Since we don't have historical arrays here, we mock the momentum for real-time inference
-            price_return_5d = ema9_ratio * 2.0  # Approximation
-            price_return_20d = ema21_ratio * 1.5 # Approximation
+            # Use true historical returns if available, else fallback to approximation
+            price_return_5d = _safe_float(indicators.get("price_return_5d", ema9_ratio * 2.0))
+            price_return_20d = _safe_float(indicators.get("price_return_20d", ema21_ratio * 1.5))
             
             vol = _safe_float(indicators.get("volume", 0.0))
             vol_sma20 = _safe_float(indicators.get("vol_sma_20", 1.0), 1.0)
@@ -121,7 +122,10 @@ class AIEngineService:
             ]
             
             X = pd.DataFrame([feature_vector], columns=FEATURES)
-            prob_up = float(model.predict(X)[0])
+            raw_prob_up = float(model.predict(X)[0])
+            
+            # Wire in Calibration
+            prob_up = calibrator.calibrate(raw_prob_up)
             prob_down = 1.0 - prob_up
             
             if prob_up > 0.60:
