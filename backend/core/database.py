@@ -59,18 +59,21 @@ async def get_db() -> AsyncSession:
 
 async def create_db_tables():
     """Create all tables on startup (use Alembic for production migrations)."""
-    async with engine.begin() as conn:
-        # Create all tables first
-        await conn.run_sync(Base.metadata.create_all)
-        
-        # Now create TimescaleDB hypertable for candles if it doesn't exist
-        # We catch exceptions gracefully in case it's already a hypertable or TimescaleDB isn't installed
-        from sqlalchemy import text
-        try:
-            await conn.execute(text(
-                "SELECT create_hypertable('candles', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);"
-            ))
-        except Exception as e:
-            # Depending on the DB, this might fail if Timescale isn't installed.
-            # In MVP we can log it and continue.
-            pass
+    try:
+        async with engine.begin() as conn:
+            # Create all tables first
+            await conn.run_sync(Base.metadata.create_all)
+            
+            # Now create TimescaleDB hypertable for candles if it doesn't exist
+            # We catch exceptions gracefully in case it's already a hypertable or TimescaleDB isn't installed
+            from sqlalchemy import text
+            try:
+                await conn.execute(text(
+                    "SELECT create_hypertable('candles', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);"
+                ))
+            except Exception:
+                # Depending on the DB, this might fail if Timescale isn't installed.
+                pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"⚠️ [Database] Connection check deferred: {e}")

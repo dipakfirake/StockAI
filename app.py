@@ -3,6 +3,29 @@ StockAI - Cloud Backend Entrypoint for Hugging Face Spaces.
 Mounts the full FastAPI backend onto Gradio for 24/7 autonomous serving.
 """
 
+# Compatibility patch for huggingface_hub >= 0.28 / 1.0.0 and Gradio 4.x
+try:
+    import huggingface_hub
+    if not hasattr(huggingface_hub, "HfFolder"):
+        class HfFolder:
+            @classmethod
+            def get_token(cls):
+                try:
+                    from huggingface_hub import get_token
+                    return get_token()
+                except Exception:
+                    return None
+            @classmethod
+            def save_token(cls, token):
+                try:
+                    from huggingface_hub import login
+                    login(token=token)
+                except Exception:
+                    pass
+        huggingface_hub.HfFolder = HfFolder
+except Exception:
+    pass
+
 import gradio as gr
 from backend.main import app as fastapi_app
 

@@ -264,6 +264,16 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
    - Cleaned duplicate entries in `backend/requirements.txt` (`pytest`, `feedparser`).
    - Restored `cache-dependency-path: 'backend/requirements.txt'` in `.github/workflows/ci.yml`.
 
+### Phase 11: Hugging Face Spaces Runtime Compatibility Fix (2026-09-10)
+1. 🔍 **Root Cause of Hugging Face Space Runtime Error**:
+   - `ImportError: cannot import name 'HfFolder' from 'huggingface_hub'`.
+   - Hugging Face's Docker environment installs `huggingface_hub >= 0.30`, in which the legacy `HfFolder` class was removed.
+   - Gradio 4.44.0 imports `from huggingface_hub import HfFolder, whoami` in `gradio/oauth.py`, causing application startup failure.
+2. ✅ **Implemented Fix**:
+   - Added in-memory dynamic compatibility patch in `app.py` before importing Gradio to provide `huggingface_hub.HfFolder` fallback methods (`get_token()`, `save_token()`).
+   - Pinned `huggingface_hub==0.23.2` in root `requirements.txt`.
+   - Added fault-tolerant startup error handling in `backend/core/database.py` (`create_db_tables`) so database initialization is deferred if connection/secrets are still being provisioned.
+
 ## Running Services & Public URLs
 - GitHub Repository: `https://github.com/dipakfirake/StockAI`
 - Hugging Face Space (Backend API): `https://huggingface.co/spaces/DipakFirake/stockai-backend`
@@ -273,10 +283,10 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - Local Dev Stack: Frontend on `http://localhost:5173`, Backend on `http://localhost:8000`
 
 ## Exact Next Safe Steps
-1. Push the fix to `origin main` and `hf main`.
-2. Observe GitHub Actions CI turning 100% green.
+1. Push commit `fix(space): add HfFolder compatibility patch and pin huggingface_hub==0.23.2` to `origin main` and `hf main`.
+2. Observe Hugging Face Space rebuild and launch into `Running` state.
 3. In Hugging Face Space Settings (`/settings`), ensure `DATABASE_URL` and `SECRET_KEY` secrets are populated.
-4. Verify Hugging Face Space status transitions to `Running`.
+4. Verify endpoints at `https://dipakfirake-stockai-backend.hf.space/docs`.
 5. Connect Vercel Frontend to Hugging Face Backend (`https://dipakfirake-stockai-backend.hf.space`).
 
 ## Ideas backlog (not yet implemented)
