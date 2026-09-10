@@ -19,10 +19,12 @@ try:
             def save_token(cls, token):
                 try:
                     from huggingface_hub import login
-                    login(token=token)
                 except Exception:
                     pass
         huggingface_hub.HfFolder = HfFolder
+except Exception:
+    pass
+
 # ZeroGPU requirement: satisfy Hugging Face Spaces supervisor when running on ZeroGPU hardware
 try:
     import spaces
