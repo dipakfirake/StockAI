@@ -213,7 +213,7 @@ export default function ChartPage() {
     const isNeutral = latestPattern.pattern.includes('Doji');
     
     let action = 'WAIT';
-    let entry = latestCandle.close;
+    const entry = latestCandle.close;
     let sl = 0;
     let target = 0;
     

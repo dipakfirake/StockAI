@@ -15,24 +15,28 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
       
-    - name: Set up Python 3.12
+    - name: Set up Python 3.11
       uses: actions/setup-python@v5
       with:
-        python-version: "3.12"
+        python-version: "3.11"
         cache: 'pip'
         
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgomp1
+
     - name: Install Backend Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r backend/requirements.txt
         
-    - name: Run Pytest
-      # Replace this with 'pytest backend/tests' if you have a specific tests folder
+    - name: Run Unit Tests
       run: |
-        pytest || echo "No tests found or tests failed, ensure tests are configured."
+        python -m pytest backend/tests/test_indicators.py backend/tests/test_signals.py backend/tests/test_risk_analysis.py backend/tests/test_options_engine.py backend/tests/test_market_data.py -v
       env:
+        PYTHONPATH: .
         SECRET_KEY: "test-secret-key"
-        DATABASE_URL: "postgresql+asyncpg://stockuser:stockpass@localhost:5432/stockdb"
 
   frontend-build:
     name: Frontend Build & Lint
