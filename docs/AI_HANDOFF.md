@@ -253,6 +253,17 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
    - Upgraded `backend/scripts/generate_fyers_token.py` to automatically launch the default browser to Fyers login, auto-extract `auth_code` from pasted URLs, save `FYERS_ACCESS_TOKEN` directly to `.env` using `dotenv.set_key`, and verify connectivity via Fyers profile API.
    - Backed by dynamic in-memory `.env` reload in `MarketDataService._get_fyers_client()`, avoiding docker restarts.
 
+### Phase 10: CI Pipeline Resolution & Dependency Alignment (2026-09-10)
+1. 🔍 **Root Cause of CI Run 34507417868 Failure**:
+   - `Frontend Build & Lint` passed in 27s.
+   - `Backend Tests` failed during dependency installation with `ResolutionImpossible`: `yfinance>=1.5.2` strictly requires `websockets>=13.0`, while Hugging Face Gradio client strictly requires `websockets<13.0,>=10.0`.
+   - With `websockets>=10.4,<13.0` specified, pip could not satisfy `yfinance>=1.5.2`.
+2. ✅ **Implemented Fix**:
+   - Pinned `yfinance==0.2.43` in both `backend/requirements.txt` and root `requirements.txt`.
+   - `yfinance 0.2.43` uses HTTP REST/scraping and does not require `websockets>=13.0`, allowing `websockets>=10.4,<13.0` to resolve cleanly without any conflicts across both GitHub Actions CI (Linux Python 3.11) and Hugging Face Spaces (Python 3.10 Gradio SDK).
+   - Cleaned duplicate entries in `backend/requirements.txt` (`pytest`, `feedparser`).
+   - Restored `cache-dependency-path: 'backend/requirements.txt'` in `.github/workflows/ci.yml`.
+
 ## Running Services & Public URLs
 - GitHub Repository: `https://github.com/dipakfirake/StockAI`
 - Hugging Face Space (Backend API): `https://huggingface.co/spaces/DipakFirake/stockai-backend`
@@ -262,9 +273,11 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - Local Dev Stack: Frontend on `http://localhost:5173`, Backend on `http://localhost:8000`
 
 ## Exact Next Safe Steps
-1. In Hugging Face Space Settings (`/settings`), ensure `DATABASE_URL` and `SECRET_KEY` secrets are populated.
-2. In `frontend/vercel.json`, update the proxy destination URL to `https://dipakfirake-stockai-backend.hf.space/api/$1` once the Space is running.
-3. Test live end-to-end data flow between Vercel frontend and Hugging Face backend.
+1. Push the fix to `origin main` and `hf main`.
+2. Observe GitHub Actions CI turning 100% green.
+3. In Hugging Face Space Settings (`/settings`), ensure `DATABASE_URL` and `SECRET_KEY` secrets are populated.
+4. Verify Hugging Face Space status transitions to `Running`.
+5. Connect Vercel Frontend to Hugging Face Backend (`https://dipakfirake-stockai-backend.hf.space`).
 
 ## Ideas backlog (not yet implemented)
 - Volume profile (horizontal histogram on chart right)

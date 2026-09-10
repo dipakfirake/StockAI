@@ -7,7 +7,7 @@ alembic>=1.13.1
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.9
 redis>=5.0.4
-yfinance>=1.5.2
+yfinance==0.2.43
 fyers-apiv3==3.0.5
 pandas==2.2.2
 ta==0.11.0
