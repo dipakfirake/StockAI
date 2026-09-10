@@ -242,10 +242,10 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
    - Selected Gradio SDK with ZeroGPU (Free tier) to host the full FastAPI backend 24/7 without being subject to Docker paid limits or Vercel 250MB size restrictions.
    - Created root `app.py`: Mounts the complete `fastapi_app` onto Gradio (`gr.mount_gradio_app(fastapi_app, demo, path="/")`), preserving all `/api/*` REST endpoints, WebSockets, and `/docs` Swagger UI while providing a visual health status page on `/`.
    - Created root `packages.txt` containing `libgomp1` (Debian OpenMP library required by LightGBM).
-   - Created root `requirements.txt` containing complete production dependencies.
+   - Created root `requirements.txt` containing complete production dependencies (pinned `websockets>=10.4,<13.0` to eliminate dependency conflicts with `gradio-client 1.3.0`).
    - Updated root `README.md` with required Hugging Face Spaces YAML frontmatter (`sdk: gradio`, `sdk_version: 4.44.0`, `app_file: app.py`).
    - Configured universal CORS in `backend/main.py` (`allow_origins=["*"]`) so Vercel frontend can call cloud backend APIs without cross-origin rejections.
-   - Pushed full repository to Hugging Face remote (`https://huggingface.co/spaces/DipakFirake/stockai-backend`, commit `ff74b6b`).
+   - Pushed full repository to Hugging Face remote (`https://huggingface.co/spaces/DipakFirake/stockai-backend`, commit `609d3b3`).
 3. ✅ **Frontend Cloud Deployment & Reverse Proxy**:
    - Created root `vercel.json` instructing Vercel to build the React application from `frontend/` into `frontend/dist`.
    - Configured `frontend/vercel.json` for client-side single-page app (SPA) routing and backend API rewrites.
