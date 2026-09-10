@@ -229,6 +229,42 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
    - `npm run lint` in `frontend/` exited code 0 (clean pass).
    - `npm run build` in `frontend/` exited code 0 (clean pass).
    - `pytest` on backend unit tests passed 30/30 in 45s.
+   - GitHub Actions run `34494221114` completed with 100% `success` (all green).
+
+### Phase 9: 24/7 Cloud Architecture & Production Deployment (2026-09-10)
+1. ✅ **Neon Serverless PostgreSQL Cloud Setup**:
+   - Linked repository to Neon project `lively-voice-35713029` on branch `production`.
+   - Generated `neon.ts` with `@neon/config/v1` specification.
+   - Configured `backend/core/database.py` with `get_async_db_url()` to automatically normalize `postgres://` or `postgresql://` connection strings into `postgresql+asyncpg://` for seamless asyncpg driver compatibility.
+   - Verified live database connectivity: Successfully created all 13 production tables (`users`, `predictions`, `prediction_archive`, `candles`, `system_settings`, `stocks`, `alerts`, `watchlists`, `signals`, `paper_trades`, `notifications`, `user_preferences`, `alembic_version`).
+   - Verified system settings seeded into the live Neon database.
+2. ✅ **Hugging Face Spaces Cloud Backend Deployment**:
+   - Selected Gradio SDK with ZeroGPU (Free tier) to host the full FastAPI backend 24/7 without being subject to Docker paid limits or Vercel 250MB size restrictions.
+   - Created root `app.py`: Mounts the complete `fastapi_app` onto Gradio (`gr.mount_gradio_app(fastapi_app, demo, path="/")`), preserving all `/api/*` REST endpoints, WebSockets, and `/docs` Swagger UI while providing a visual health status page on `/`.
+   - Created root `packages.txt` containing `libgomp1` (Debian OpenMP library required by LightGBM).
+   - Created root `requirements.txt` containing complete production dependencies.
+   - Updated root `README.md` with required Hugging Face Spaces YAML frontmatter (`sdk: gradio`, `sdk_version: 4.44.0`, `app_file: app.py`).
+   - Configured universal CORS in `backend/main.py` (`allow_origins=["*"]`) so Vercel frontend can call cloud backend APIs without cross-origin rejections.
+   - Pushed full repository to Hugging Face remote (`https://huggingface.co/spaces/DipakFirake/stockai-backend`, commit `ff74b6b`).
+3. ✅ **Frontend Cloud Deployment & Reverse Proxy**:
+   - Created root `vercel.json` instructing Vercel to build the React application from `frontend/` into `frontend/dist`.
+   - Configured `frontend/vercel.json` for client-side single-page app (SPA) routing and backend API rewrites.
+4. ✅ **Daily Token Workflow Optimization**:
+   - Upgraded `backend/scripts/generate_fyers_token.py` to automatically launch the default browser to Fyers login, auto-extract `auth_code` from pasted URLs, save `FYERS_ACCESS_TOKEN` directly to `.env` using `dotenv.set_key`, and verify connectivity via Fyers profile API.
+   - Backed by dynamic in-memory `.env` reload in `MarketDataService._get_fyers_client()`, avoiding docker restarts.
+
+## Running Services & Public URLs
+- GitHub Repository: `https://github.com/dipakfirake/StockAI`
+- Hugging Face Space (Backend API): `https://huggingface.co/spaces/DipakFirake/stockai-backend`
+- Hugging Face Live API: `https://dipakfirake-stockai-backend.hf.space`
+- Hugging Face Swagger Docs: `https://dipakfirake-stockai-backend.hf.space/docs`
+- Neon PostgreSQL Project: `lively-voice-35713029` (Branch: `production`)
+- Local Dev Stack: Frontend on `http://localhost:5173`, Backend on `http://localhost:8000`
+
+## Exact Next Safe Steps
+1. In Hugging Face Space Settings (`/settings`), ensure `DATABASE_URL` and `SECRET_KEY` secrets are populated.
+2. In `frontend/vercel.json`, update the proxy destination URL to `https://dipakfirake-stockai-backend.hf.space/api/$1` once the Space is running.
+3. Test live end-to-end data flow between Vercel frontend and Hugging Face backend.
 
 ## Ideas backlog (not yet implemented)
 - Volume profile (horizontal histogram on chart right)
