@@ -28,17 +28,20 @@ except Exception:
 # ZeroGPU requirement: satisfy Hugging Face Spaces supervisor when running on ZeroGPU hardware
 try:
     import spaces
-
-    @spaces.GPU(duration=1)
-    def dummy_gpu():
-        return None
+    gpu_decorator = spaces.GPU(duration=1)
 except Exception:
-    pass
+    def gpu_decorator(fn):
+        return fn
+
+@gpu_decorator
+def dummy_gpu():
+    return None
 
 import gradio as gr
 from backend.main import app as fastapi_app
 
 
+@gpu_decorator
 def api_health():
     return {
         "status": "online",
