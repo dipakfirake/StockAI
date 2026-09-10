@@ -346,10 +346,11 @@ class BacktestEngine:
                 "vol_sma_20": float(row["vol_sma_20"])
             }
             
-            # Use LightGBM fallback scoring method to simulate the AI fast (without hitting API)
-            ai_result = ai_engine_service.score(indicators, symbol)
+            # Use LightGBM scoring method to simulate the AI fast (without computing SHAP explanations)
+            ai_result = ai_engine_service.score(indicators, symbol, compute_shap=False)
             score = ai_result.get("score", "HOLD")
-            confidence = ai_result.get("confidence", 0)
+            probs = ai_result.get("probabilities", {})
+            buy_prob = probs.get("buy", 0.0)
             
             price = float(row["Close"])
             current_atr = float(row["atr"]) if float(row["atr"]) > 0 else 1.0
@@ -364,7 +365,7 @@ class BacktestEngine:
                 qty = fixed_qty
 
             if position is None:
-                if score == "BUY" and confidence > 0.65:
+                if score == "BUY" or buy_prob > 0.55:
                     entry = price * (1 + slippage_pct)
                     sl = entry - (current_atr * 1.5)
                     position = {"entry": entry, "qty": qty, "entry_date": ts.isoformat(), "highest_price": entry, "sl": sl}

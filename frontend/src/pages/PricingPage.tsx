@@ -129,7 +129,7 @@ export default function PricingPage() {
               transition: 'all 0.3s'
             }}
           >
-            {loading ? 'Processing...' : user?.subscription_tier === 'PRO' ? 'You are PRO' : 'Upgrade Now (Mock)'}
+            {loading ? 'Processing...' : user?.subscription_tier === 'PRO' ? 'You are PRO' : 'Upgrade to PRO'}
           </button>
         </div>
 

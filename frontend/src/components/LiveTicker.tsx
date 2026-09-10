@@ -37,8 +37,80 @@ export default function LiveTicker() {
     }
 
     fetchIndices()
-    const interval = setInterval(fetchIndices, 30000)
-    return () => clearInterval(interval)
+    // We fetch once to get the initial names/symbols, then let WebSocket update prices.
+
+    const token = localStorage.getItem('auth_token')
+    if (!token) return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let ws: WebSocket | null = null
+
+    try {
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
+
+      ws.onopen = () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol: '^NSEI' }))
+          ws.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol: '^NSEBANK' }))
+        }
+      }
+
+      ws.onerror = () => {}
+
+      ws.onclose = () => {
+        setTimeout(() => {
+          // Re-trigger the effect by forcing a small state update if we wanted, 
+          // or just re-establish the ws here. But since we are in useEffect, 
+          // the easiest way to reconnect without dependency loops is to just reload or re-call connect.
+          // Since this is a simple ticker, let's just let the user refresh if it completely dies, 
+          // or we can implement a basic reconnect inside the closure.
+        }, 3000)
+      }
+
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'market_update' && data.price > 0) {
+            const cleanSym = (data.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
+            
+            if (cleanSym === '^NSEI' || cleanSym === 'NSEI' || cleanSym === 'NIFTY50') {
+              setNifty(prev => prev ? {
+                ...prev,
+                price: Number(data.price),
+                change: data.change !== undefined ? data.change : prev.change,
+                change_pct: data.change_pct !== undefined ? data.change_pct : prev.change_pct,
+                change_percent: data.change_pct !== undefined ? data.change_pct : prev.change_percent
+              } : null)
+            } else if (cleanSym === '^NSEBANK' || cleanSym === 'NSEBANK' || cleanSym === 'BANKNIFTY') {
+              setBankNifty(prev => prev ? {
+                ...prev,
+                price: Number(data.price),
+                change: data.change !== undefined ? data.change : prev.change,
+                change_pct: data.change_pct !== undefined ? data.change_pct : prev.change_pct,
+                change_percent: data.change_pct !== undefined ? data.change_pct : prev.change_percent
+              } : null)
+            }
+          }
+        } catch (err) {
+          console.error('WebSocket LiveTicker error:', err)
+        }
+      }
+    } catch (e) {
+      console.warn('WebSocket LiveTicker init skipped:', e)
+    }
+
+    return () => {
+      if (ws) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close()
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => {
+            try { ws?.close() } catch (_) {}
+          }
+        }
+      }
+    }
   }, [])
 
   const renderTicker = (data: IndexData | null, fallbackName: string, link: string) => {

@@ -28,9 +28,11 @@ export default function AnimatedNumber({
   const startTimeRef = useRef<number | null>(null)
   const rafRef = useRef<number | null>(null)
 
+  const safeValue = typeof value === 'number' && !isNaN(value) ? value : 0
+
   useEffect(() => {
     const start = startRef.current
-    const end = value
+    const end = safeValue
     startTimeRef.current = null
 
     const easeOut = (t: number) => 1 - Math.pow(1 - t, 3)
@@ -59,7 +61,7 @@ export default function AnimatedNumber({
     }
   }, [value, duration])
 
-  const formatted = displayValue.toLocaleString('en-IN', {
+  const formatted = (displayValue || 0).toLocaleString('en-IN', {
     maximumFractionDigits: decimals,
     minimumFractionDigits: decimals,
   })

@@ -5,19 +5,26 @@ import { Search, Filter, Activity, BarChart2, Plus, Trash2 } from 'lucide-react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 
 const SCANNER_RULES = [
-  { id: 'RSI_OVERSOLD', name: 'RSI Oversold (< 30)', desc: 'Stocks where RSI is below 30 (Potential Reversal)' },
-  { id: 'RSI_OVERBOUGHT', name: 'RSI Overbought (> 70)', desc: 'Stocks where RSI is above 70 (Potential Pullback)' },
-  { id: 'MACD_BULLISH', name: 'MACD Bullish', desc: 'MACD Histogram is positive' },
-  { id: 'EMA_BULLISH_CROSS', name: 'EMA Bullish Cross', desc: 'EMA 9 has crossed above EMA 21' },
-  { id: 'SUPERTREND_BUY', name: 'SuperTrend Buy', desc: 'SuperTrend indicator is currently green (up)' },
-  { id: 'BB_SQUEEZE', name: 'Bollinger Band Squeeze', desc: 'Bollinger Bands are very tight (Bandwidth < 5%)' },
+  { id: 'EMA_BULLISH_CROSS', name: 'EMA Bullish Trend (EMA9 > EMA21)', desc: 'Fast EMA9 is trading above slow EMA21 (Bullish short-term momentum)' },
+  { id: 'MACD_BULLISH', name: 'MACD Bullish Histogram (+)', desc: 'MACD Histogram is positive, signaling upward trend acceleration' },
+  { id: 'SUPERTREND_BUY', name: 'SuperTrend Buy (Green / UP)', desc: 'SuperTrend indicator is active in Green / Bullish buy territory' },
+  { id: 'RSI_BULLISH_MOMENTUM', name: 'RSI Momentum Zone (50 - 70)', desc: 'Healthy sustained bullish momentum without being overextended' },
+  { id: 'PRICE_ABOVE_200SMA', name: 'Institutional Uptrend (Price > 200 SMA)', desc: 'Stock is trading above its 200-day Simple Moving Average' },
+  { id: 'RSI_OVERSOLD', name: 'RSI Deep Oversold (< 30)', desc: 'Severely oversold conditions suitable for mean-reversion bounces' },
+  { id: 'RSI_OVERBOUGHT', name: 'RSI Breakout / Overbought (> 70)', desc: 'High-velocity momentum breakouts with strong buyer aggression' },
+  { id: 'BB_SQUEEZE', name: 'Bollinger Band Squeeze (< 8%)', desc: 'Volatility compression preceding explosive directional breakouts' },
 ]
 
 const SECTORS = [
-  { id: 'Nifty 50', name: 'Nifty 50 (Full Universe)' },
-  { id: 'Nifty Bank', name: 'Nifty Bank' },
-  { id: 'Nifty IT', name: 'Nifty IT' },
-  { id: 'Nifty Auto', name: 'Nifty Auto' },
+  { id: 'Nifty 50', name: 'Nifty 50 (Full Benchmark Universe)' },
+  { id: 'Nifty Bank', name: 'Nifty Bank (10 Major Banks)' },
+  { id: 'Nifty IT', name: 'Nifty IT (Tech Leaders)' },
+  { id: 'Nifty Auto', name: 'Nifty Auto (Auto OEM & Ancillaries)' },
+  { id: 'Nifty FMCG', name: 'Nifty FMCG (Consumer Goods)' },
+  { id: 'Nifty Metal', name: 'Nifty Metal (Steel, Aluminium & Mining)' },
+  { id: 'Nifty Pharma', name: 'Nifty Pharma (Healthcare & Formulations)' },
+  { id: 'Nifty Realty', name: 'Nifty Realty (Real Estate Leaders)' },
+  { id: 'Nifty Energy', name: 'Nifty Energy (Oil, Power & Utilities)' },
 ]
 
 export default function ScannerPage() {
@@ -71,7 +78,7 @@ export default function ScannerPage() {
     <div>
       <div className="page-header">
         <h1 className="page-title">Market Scanner</h1>
-        <p className="page-subtitle">Scan Nifty 50 universe for technical setups</p>
+        <p className="page-subtitle">Real-time multi-condition technical setup scanner powered by Fyers API v3</p>
       </div>
 
       <div className="card" style={{ marginBottom: 24 }}>
@@ -83,9 +90,25 @@ export default function ScannerPage() {
         <form onSubmit={handleScan} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {scanMode === 'basic' ? (
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 250 }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
                 <label style={{ display: 'block', fontSize: 13, marginBottom: 8, color: 'var(--color-text-secondary)' }}>
-                  Scan Rule
+                  Universe / Sector
+                </label>
+                <select 
+                  className="input" 
+                  value={selectedSector} 
+                  onChange={e => setSelectedSector(e.target.value)}
+                  style={{ width: '100%', cursor: 'pointer' }}
+                >
+                  {SECTORS.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ flex: 2, minWidth: 280 }}>
+                <label style={{ display: 'block', fontSize: 13, marginBottom: 8, color: 'var(--color-text-secondary)' }}>
+                  Scan Setup Preset
                 </label>
                 <select 
                   className="input" 

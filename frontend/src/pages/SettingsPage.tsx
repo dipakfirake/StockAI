@@ -51,20 +51,39 @@ export default function SettingsPage() {
               <strong>Dynamic Settings Enabled:</strong> These values are fetched dynamically from the database, eliminating hardcoded system defaults.
             </div>
 
-            {Object.entries(settings).map(([key, val]) => (
-              <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label style={{ fontWeight: 600, fontSize: 14 }}>
-                  {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
-                </label>
-                <input 
-                  type="text"
-                  className="input"
-                  value={val.toString()}
-                  onChange={(e) => setSettings({ ...settings, [key]: e.target.value })}
-                  style={{ maxWidth: 300 }}
-                />
-              </div>
-            ))}
+            {Object.entries(settings).map(([key, val]) => {
+              const isBoolean = val === true || val === false || val === 'true' || val === 'false';
+              
+              return (
+                <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <label style={{ fontWeight: 600, fontSize: 14 }}>
+                    {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                  </label>
+                  
+                  {isBoolean ? (
+                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8, marginTop: 4 }}>
+                      <input 
+                        type="checkbox"
+                        checked={val === true || val === 'true'}
+                        onChange={(e) => setSettings({ ...settings, [key]: e.target.checked.toString() })}
+                        style={{ width: 20, height: 20, cursor: 'pointer' }}
+                      />
+                      <span style={{ fontSize: 14, color: (val === true || val === 'true') ? 'var(--color-bullish)' : 'var(--color-text-muted)' }}>
+                        {(val === true || val === 'true') ? 'ENABLED' : 'DISABLED'}
+                      </span>
+                    </label>
+                  ) : (
+                    <input 
+                      type="text"
+                      className="input"
+                      value={val.toString()}
+                      onChange={(e) => setSettings({ ...settings, [key]: e.target.value })}
+                      style={{ maxWidth: 300 }}
+                    />
+                  )}
+                </div>
+              )
+            })}
             
             <button onClick={saveSettings} className="btn btn-primary" style={{ alignSelf: 'flex-start', marginTop: 16 }}>
               <Save size={16} /> Save Configuration

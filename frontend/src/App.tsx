@@ -9,6 +9,7 @@ import PortfolioPage from './pages/PortfolioPage'
 import ScannerPage from './pages/ScannerPage'
 import HeatmapPage from './pages/HeatmapPage'
 import OptionsChainPage from './pages/OptionsChainPage'
+import SMCWatchlist from './pages/SMCWatchlist'
 import LoginPage from './pages/LoginPage'
 import PricingPage from './pages/PricingPage'
 import SettingsPage from './pages/SettingsPage'
@@ -16,9 +17,24 @@ import { AuthProvider } from './AuthContext'
 import { ThemeProvider } from './ThemeContext'
 
 import AIAssistantWidget from './components/AIAssistantWidget'
-import { ToastContainer } from './components/Toast'
+import { ToastContainer, toast } from './components/Toast'
+import { alertWebSocket } from './services/websocket'
+import { useEffect } from 'react'
 
 export default function App() {
+  useEffect(() => {
+    // Listen for server-side manual alerts from Auto-Trader
+    alertWebSocket.onAlert((payload: any) => {
+      if (payload.type === 'alert_toast' && payload.data) {
+        const { title, message, type } = payload.data
+        if (type === 'success') toast.success(title, message)
+        else if (type === 'warning') toast.warning(title, message)
+        else if (type === 'error') toast.error(title, message)
+        else toast.info(title, message)
+      }
+    })
+  }, [])
+
   return (
     <ThemeProvider>
       <AuthProvider>
@@ -33,6 +49,7 @@ export default function App() {
               <Route path="/scanner" element={<ScannerPage />} />
               <Route path="/heatmap" element={<HeatmapPage />} />
               <Route path="/options/:symbol?" element={<OptionsChainPage />} />
+              <Route path="/smc-watchlist" element={<SMCWatchlist />} />
               <Route path="/alerts" element={<AlertsPage />} />
               <Route path="/paper-trading" element={<PaperTradingPage />} />
               <Route path="/backtest" element={<BacktestPage />} />

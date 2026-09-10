@@ -24,8 +24,8 @@ async def get_stock_insight(
     from backend.data.ingestion.news_scraper import fetch_stock_news
     from backend.services.screener import screener_service
 
-    # Fetch maximum possible history for all charts
-    fetch_limit = 10000
+    # Fetch optimal 500 candles (~2 years of daily data), enough for SMA200 and all indicators in 1 fast call
+    fetch_limit = 500
 
     quote, candles, news, swing_trade, events = await __import__("asyncio").gather(
         market_data_service.fetch_quote(symbol),
@@ -36,6 +36,28 @@ async def get_stock_insight(
     )
     if not quote:
         raise HTTPException(status_code=404, detail=f"No quote data found for {symbol}")
+
+    # Compute dynamic 52W High & Low from historical candles
+    if candles:
+        # Take the most recent 252 candles (1 trading year)
+        year_candles = candles[-252:]
+        quote["52w_high"] = round(max(float(c.get("high", quote["price"])) for c in year_candles), 2)
+        quote["52w_low"] = round(min(float(c.get("low", quote["price"])) for c in year_candles), 2)
+    else:
+        quote["52w_high"] = quote["price"]
+        quote["52w_low"] = quote["price"]
+
+    # Populate Market Cap from swing_trade or stock info
+    if swing_trade and swing_trade.get("market_cap"):
+        quote["market_cap"] = swing_trade["market_cap"]
+    elif not quote.get("market_cap"):
+        try:
+            info = await market_data_service.get_stock_info(symbol)
+            if info and info.get("market_cap"):
+                quote["market_cap"] = info["market_cap"]
+        except Exception:
+            pass
+
     indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
     series_candles = indicator_service.compute_for_candles_series(candles)
     patterns = []

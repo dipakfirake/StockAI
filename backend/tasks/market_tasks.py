@@ -19,7 +19,7 @@ def ingest_watchlist_stocks(self):
         return {"skipped": True, "reason": "Market closed"}
 
     try:
-        from backend.data.ingestion.yfinance_ingestion import ingest_candles, NSE_NIFTY50_SYMBOLS
+        from backend.data.ingestion.candle_ingestion import ingest_candles, NSE_NIFTY50_SYMBOLS
         async def _run_all():
             total_inserted = 0
             for sym in NSE_NIFTY50_SYMBOLS:
@@ -49,7 +49,7 @@ def end_of_day_processing():
 
 async def _eod_processing_async():
     from backend.core.cache import redis_client
-    from backend.data.ingestion.yfinance_ingestion import NSE_NIFTY50_SYMBOLS, ingest_candles
+    from backend.data.ingestion.candle_ingestion import NSE_NIFTY50_SYMBOLS, ingest_candles
     from backend.services.market_data import market_data_service
     from backend.services.indicators import indicator_service
     
@@ -88,7 +88,7 @@ def analyze_market_bulk():
 async def _analyze_market_bulk_async():
     from backend.services.screener import ScreenerService
     from backend.core.cache import cache_set
-    from backend.data.ingestion.yfinance_ingestion import NSE_NIFTY50_SYMBOLS
+    from backend.data.ingestion.candle_ingestion import NSE_NIFTY50_SYMBOLS
     
     # Run the screener on a large subset (using NIFTY 50 for stability, can be expanded to 500)
     screener_results = await ScreenerService.run_screener(NSE_NIFTY50_SYMBOLS)

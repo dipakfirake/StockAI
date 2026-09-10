@@ -19,21 +19,21 @@ def sample_candles():
 
 
 def test_normalise_symbol_adds_ns_suffix():
-    """Symbol without suffix should get .NS appended."""
+    """Symbol without suffix should get NSE-EQ appended."""
     result = MarketDataService._normalise_symbol("RELIANCE")
-    assert result == "RELIANCE.NS"
+    assert result == "NSE:RELIANCE-EQ"
 
 
 def test_normalise_symbol_preserves_existing_suffix():
-    """Symbol with existing suffix should be unchanged."""
+    """Symbol with .BO suffix should map to BSE-EQ."""
     result = MarketDataService._normalise_symbol("RELIANCE.BO")
-    assert result == "RELIANCE.BO"
+    assert result == "BSE:RELIANCE-EQ"
 
 
 def test_normalise_symbol_uppercases():
-    """Symbol should always be uppercased."""
+    """Symbol should always be uppercased and map to NSE-EQ."""
     result = MarketDataService._normalise_symbol("reliance")
-    assert result == "RELIANCE.NS"
+    assert result == "NSE:RELIANCE-EQ"
 
 
 @pytest.mark.asyncio
@@ -63,30 +63,25 @@ async def test_fetch_candles_returns_list(mock_cache_set, mock_cache_get):
 @patch("backend.services.market_data.cache_get", return_value=None)
 @patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
 async def test_fetch_candles_bse_dual_fetch_fallback(mock_cache_set, mock_cache_get):
-    """BSE (.BO) stocks should attempt .NS first, then fallback to .BO without auto_adjust if .NS is empty."""
-    mock_df_empty = pd.DataFrame()
+    """BSE (.BO) stocks should attempt yfinance fallback if Fyers fails."""
     mock_df_valid = pd.DataFrame({
         "Open": [100.0], "High": [105.0], "Low": [99.0], "Close": [103.0], "Volume": [1000000]
     }, index=pd.DatetimeIndex([datetime(2024, 1, 2)]))
 
-    with patch("backend.services.market_data.yf.Ticker") as mock_ticker:
-        mock_instance = MagicMock()
-        # First call (for .NS) returns empty, Second call (for .BO) returns valid
-        mock_instance.history.side_effect = [mock_df_empty, mock_df_valid]
-        mock_ticker.return_value = mock_instance
-
-        # We request .BO
-        result = await MarketDataService.fetch_candles("SMESTOCK.BO", "1d", 10)
-
-        # The ticker should have been initialized twice: first for SMESTOCK.NS, then SMESTOCK.BO
-        assert mock_ticker.call_count == 2
-        calls = mock_ticker.call_args_list
-        assert calls[0][0][0] == "SMESTOCK.NS"
-        assert calls[1][0][0] == "SMESTOCK.BO"
+    with patch("backend.services.market_data.MarketDataService._get_fyers_client") as mock_fyers:
+        # Mock Fyers to raise an exception, forcing fallback
+        mock_fyers.side_effect = Exception("Fyers failed")
         
-        # Verify the fallback succeeded and returned data
-        assert len(result) == 1
-        assert result[0]["close"] == 103.0
+        with patch("backend.services.market_data.yf.Ticker") as mock_ticker:
+            mock_instance = MagicMock()
+            mock_instance.history.return_value = mock_df_valid
+            mock_ticker.return_value = mock_instance
+
+            result = await MarketDataService.fetch_candles("SMESTOCK.BO", "1d", 10)
+
+            # Verify the fallback succeeded and returned data
+            assert len(result) == 1
+            assert result[0]["close"] == 103.0
 
 
 @pytest.mark.asyncio
@@ -116,22 +111,19 @@ async def test_fetch_quote_returns_cache_hit(mock_cache_get):
 async def test_fetch_quote_uses_history_when_previous_close_missing(mock_cache_set, mock_cache_get):
     """Missing index reference closes must not result in invalid 0% change data."""
     history = pd.DataFrame(
-        {"Close": [100.0, 103.0]}, index=pd.DatetimeIndex([datetime(2024, 1, 1), datetime(2024, 1, 2)])
+        {"Close": [100.0, 103.0], "Volume": [100, 200]}, index=pd.DatetimeIndex([datetime(2024, 1, 1), datetime(2024, 1, 2)])
     )
-    fast_info = SimpleNamespace(
-        last_price=103.0,
-        previous_close=0.0,
-        three_month_average_volume=0,
-        market_cap=0,
-        year_high=110.0,
-        year_low=90.0,
-    )
-    with patch("backend.services.market_data.yf.Ticker") as mock_ticker:
-        instance = MagicMock()
-        instance.fast_info = fast_info
-        instance.history.return_value = history
-        mock_ticker.return_value = instance
-        quote = await MarketDataService.fetch_quote("^NSEI")
+    
+    with patch("backend.services.market_data.MarketDataService._get_fyers_client") as mock_fyers:
+        # Mock Fyers to raise an exception, forcing fallback
+        mock_fyers.side_effect = Exception("Fyers failed")
+        
+        with patch("backend.services.market_data.yf.Ticker") as mock_ticker:
+            instance = MagicMock()
+            instance.history.return_value = history
+            mock_ticker.return_value = instance
+            
+            quote = await MarketDataService.fetch_quote("^NSEI")
 
     assert quote["previous_close"] == 100.0
     assert quote["change"] == 3.0

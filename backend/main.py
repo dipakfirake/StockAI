@@ -26,14 +26,20 @@ async def lifespan(app: FastAPI):
     
     # Start WebSocket market data poller
     from backend.api.websocket import poll_market_data
+    from backend.tasks.screener_poller import poll_screener_cache
+    from backend.tasks.auto_trader import auto_trader_loop
     import asyncio
-    task = asyncio.create_task(poll_market_data())
+    task1 = asyncio.create_task(poll_market_data())
+    task2 = asyncio.create_task(poll_screener_cache())
+    task3 = asyncio.create_task(auto_trader_loop())
     
     yield
     
-    task.cancel()
+    task1.cancel()
+    task2.cancel()
+    task3.cancel()
     try:
-        await task
+        await asyncio.gather(task1, task2, task3)
     except asyncio.CancelledError:
         pass
     # Cleanup on shutdown

@@ -16,3 +16,4 @@ Analyze the whole affected path before editing.
 Find root causes, add focused tests, run relevant full-stack checks, and measure performance changes.
 Update the shared handoff before ending, so another tool can continue safely.
 Preserve secrets, avoid destructive operations, and report failures honestly.
+**STRICT CONFIDENTIALITY RULE:** You are strictly forbidden from scanning, viewing, reading, or analyzing the `.env` file at any time. It contains highly confidential keys. Never read it or request the user to reveal its contents.

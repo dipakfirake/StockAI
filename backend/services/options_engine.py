@@ -218,4 +218,121 @@ class OptionsChainGenerator:
             "chain": chain
         }
 
+    @staticmethod
+    def recommend_strategy(chain_data: dict, action: str, score: float, vix: float) -> dict:
+        """
+        AI Strategy Recommendation based on ML signal and VIX.
+        """
+        spot = chain_data.get("spot_price", 0)
+        chain = chain_data.get("chain", [])
+        if not chain:
+            return None
+            
+        # Sort chain by strike
+        chain = sorted(chain, key=lambda x: x["strike"])
+        
+        # Find ATM strike
+        atm_row = min(chain, key=lambda x: abs(x["strike"] - spot))
+        atm_idx = chain.index(atm_row)
+        
+        high_iv = vix > 18.0
+        
+        strategy_name = ""
+        legs = []
+        max_profit = 0
+        max_loss = 0
+        breakeven = 0
+        reasoning = ""
+        
+        if action == "BUY":
+            if high_iv:
+                strategy_name = "Bull Put Spread (Credit)"
+                sell_put = chain[atm_idx]
+                buy_put = chain[max(0, atm_idx - 2)]
+                credit = sell_put["PE"]["lastPrice"] - buy_put["PE"]["lastPrice"]
+                spread = sell_put["strike"] - buy_put["strike"]
+                max_profit = credit * 100
+                max_loss = (spread - credit) * 100 if spread > credit else 0
+                breakeven = sell_put["strike"] - credit
+                legs = [
+                    {"action": "SELL", "type": "PE", "strike": sell_put["strike"], "price": sell_put["PE"]["lastPrice"]},
+                    {"action": "BUY", "type": "PE", "strike": buy_put["strike"], "price": buy_put["PE"]["lastPrice"]}
+                ]
+                reasoning = f"AI Conviction Score is {score} (BULLISH). High Implied Volatility ({vix}) makes credit spreads optimal. Selling the {sell_put['strike']} Put."
+            else:
+                strategy_name = "Bull Call Spread (Debit)"
+                buy_call = chain[atm_idx]
+                sell_call = chain[min(len(chain)-1, atm_idx + 2)]
+                debit = buy_call["CE"]["lastPrice"] - sell_call["CE"]["lastPrice"]
+                spread = sell_call["strike"] - buy_call["strike"]
+                max_loss = debit * 100
+                max_profit = (spread - debit) * 100 if spread > debit else 0
+                breakeven = buy_call["strike"] + debit
+                legs = [
+                    {"action": "BUY", "type": "CE", "strike": buy_call["strike"], "price": buy_call["CE"]["lastPrice"]},
+                    {"action": "SELL", "type": "CE", "strike": sell_call["strike"], "price": sell_call["CE"]["lastPrice"]}
+                ]
+                reasoning = f"AI Conviction Score is {score} (BULLISH). Low Volatility ({vix}) favors debit spreads. Buying the {buy_call['strike']} Call."
+                
+        elif action == "SELL":
+            if high_iv:
+                strategy_name = "Bear Call Spread (Credit)"
+                sell_call = chain[atm_idx]
+                buy_call = chain[min(len(chain)-1, atm_idx + 2)]
+                credit = sell_call["CE"]["lastPrice"] - buy_call["CE"]["lastPrice"]
+                spread = buy_call["strike"] - sell_call["strike"]
+                max_profit = credit * 100
+                max_loss = (spread - credit) * 100 if spread > credit else 0
+                breakeven = sell_call["strike"] + credit
+                legs = [
+                    {"action": "SELL", "type": "CE", "strike": sell_call["strike"], "price": sell_call["CE"]["lastPrice"]},
+                    {"action": "BUY", "type": "CE", "strike": buy_call["strike"], "price": buy_call["CE"]["lastPrice"]}
+                ]
+                reasoning = f"AI Conviction Score is {score} (BEARISH). High IV favors credit spreads to capture Theta decay."
+            else:
+                strategy_name = "Bear Put Spread (Debit)"
+                buy_put = chain[atm_idx]
+                sell_put = chain[max(0, atm_idx - 2)]
+                debit = buy_put["PE"]["lastPrice"] - sell_put["PE"]["lastPrice"]
+                spread = buy_put["strike"] - sell_put["strike"]
+                max_loss = debit * 100
+                max_profit = (spread - debit) * 100 if spread > debit else 0
+                breakeven = buy_put["strike"] - debit
+                legs = [
+                    {"action": "BUY", "type": "PE", "strike": buy_put["strike"], "price": buy_put["PE"]["lastPrice"]},
+                    {"action": "SELL", "type": "PE", "strike": sell_put["strike"], "price": sell_put["PE"]["lastPrice"]}
+                ]
+                reasoning = f"AI Conviction Score is {score} (BEARISH). Low IV favors debit put spreads."
+        else:
+            strategy_name = "Iron Condor (Neutral)"
+            sell_call = chain[min(len(chain)-1, atm_idx + 3)]
+            buy_call = chain[min(len(chain)-1, atm_idx + 5)]
+            sell_put = chain[max(0, atm_idx - 3)]
+            buy_put = chain[max(0, atm_idx - 5)]
+            
+            credit = (sell_call["CE"]["lastPrice"] + sell_put["PE"]["lastPrice"]) - (buy_call["CE"]["lastPrice"] + buy_put["PE"]["lastPrice"])
+            spread_call = buy_call["strike"] - sell_call["strike"]
+            spread_put = sell_put["strike"] - buy_put["strike"]
+            max_spread = max(spread_call, spread_put)
+            
+            max_profit = credit * 100
+            max_loss = (max_spread - credit) * 100 if max_spread > credit else 0
+            breakeven = f"{sell_put['strike'] - credit:.2f} to {sell_call['strike'] + credit:.2f}"
+            legs = [
+                {"action": "SELL", "type": "CE", "strike": sell_call["strike"], "price": sell_call["CE"]["lastPrice"]},
+                {"action": "BUY", "type": "CE", "strike": buy_call["strike"], "price": buy_call["CE"]["lastPrice"]},
+                {"action": "SELL", "type": "PE", "strike": sell_put["strike"], "price": sell_put["PE"]["lastPrice"]},
+                {"action": "BUY", "type": "PE", "strike": buy_put["strike"], "price": buy_put["PE"]["lastPrice"]}
+            ]
+            reasoning = f"AI Conviction Score is {score} (NEUTRAL). Price is expected to consolidate. Selling OTM calls and puts captures Theta decay safely."
+
+        return {
+            "name": strategy_name,
+            "max_profit_per_lot": round(max_profit, 2),
+            "max_loss_per_lot": round(max_loss, 2),
+            "breakeven": breakeven if isinstance(breakeven, str) else round(breakeven, 2),
+            "reasoning": reasoning,
+            "legs": legs
+        }
+
 options_engine = OptionsChainGenerator()

@@ -21,8 +21,8 @@ test.describe('Master Analyst Robot QA: Swing Trade Validations', () => {
       
       // 4. Assert Mathematical Precision & UI Rendering
       // Check that the system didn't output raw JSON or 'undefined' for Target Price
-      const targetPriceLabel = page.locator('text=Target Price');
-      await expect(targetPriceLabel).toBeVisible();
+      const targetPriceLabel = page.locator('text=Target Price').or(page.locator('text=Upper Bound'));
+      await expect(targetPriceLabel.first()).toBeVisible();
       
       // Check that Expected Duration doesn't say N/A
       const expectedDurationLabel = page.locator('text=Expected Duration');

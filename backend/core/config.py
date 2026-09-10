@@ -61,5 +61,11 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str | None = None
     SMTP_USE_TLS: bool = True
 
+    # Fyers API (Real-time data integration)
+    FYERS_CLIENT_ID: str | None = None
+    FYERS_SECRET_KEY: str | None = None
+    FYERS_REDIRECT_URI: str = "http://localhost:8000/api/fyers/callback"
+    FYERS_ACCESS_TOKEN: str | None = None
+
 
 settings = Settings()

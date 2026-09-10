@@ -122,6 +122,8 @@ export default function ChartPage() {
   const tradePriceLinesRef = useRef<any[]>([])
 
   const patternsRef = useRef<any[]>([])
+  const lastCandleRef = useRef<CandlestickData | null>(null)
+  const lastVolumeRef = useRef<HistogramData | null>(null)
 
   const [signals, setSignals] = useState<Signal[]>([])
   const [aiScore, setAiScore] = useState<AIScore | null>(null)
@@ -551,6 +553,8 @@ export default function ChartPage() {
 
       candleSeriesRef.current.setData(chartData)
       volumeSeriesRef.current.setData(volumeData)
+      lastCandleRef.current = chartData.length > 0 ? { ...chartData[chartData.length - 1] } : null
+      lastVolumeRef.current = volumeData.length > 0 ? { ...volumeData[volumeData.length - 1] } : null
       
       // Force auto-scale reset for the price axis when data changes (e.g. from 1500 to 7)
       if (chartRef.current) {
@@ -879,31 +883,91 @@ export default function ChartPage() {
     if (!symbol) return
 
     const token = localStorage.getItem('auth_token')
+    if (!token) return
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
+    let ws: WebSocket | null = null
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol }))
-    }
+    try {
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.type === 'market_update' && data.symbol.replace(/\.NS$/, '') === symbol.replace(/\.NS$/, '')) {
-          setQuote((prev: any) => prev ? {
-            ...prev,
-            price: data.price,
-            change: data.change,
-            change_pct: data.change_pct,
-          } : prev)
+      ws.onopen = () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol }))
         }
-      } catch (err) {
-        console.error(err)
       }
+
+      ws.onerror = () => {
+        // Suppress unhandled socket disconnect errors in dev
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          const cleanParam = symbol.replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
+          const cleanMsg = (data.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
+          
+          if (data.type === 'market_update' && (cleanMsg === cleanParam || cleanMsg === symbol.toUpperCase())) {
+            const newPrice = Number(data.price)
+            if (newPrice > 0) {
+              setQuote((prev: any) => prev ? {
+                ...prev,
+                price: newPrice,
+                change: data.change !== undefined ? data.change : prev.change,
+                change_pct: data.change_pct !== undefined ? data.change_pct : prev.change_pct,
+              } : prev)
+
+              // Dynamically update the latest live candle in the chart in real-time
+              if (candleSeriesRef.current && lastCandleRef.current) {
+                const currentLast = lastCandleRef.current
+                const updatedCandle: CandlestickData = {
+                  time: currentLast.time,
+                  open: currentLast.open,
+                  high: Math.max(Number(currentLast.high), newPrice),
+                  low: Math.min(Number(currentLast.low), newPrice),
+                  close: newPrice,
+                }
+                lastCandleRef.current = updatedCandle
+                try {
+                  candleSeriesRef.current.update(updatedCandle)
+                } catch (_) {}
+              }
+
+              // Dynamically update volume bar if provided
+              if (volumeSeriesRef.current && lastVolumeRef.current && data.volume) {
+                const currentVol = lastVolumeRef.current
+                const updatedVol: HistogramData = {
+                  time: currentVol.time,
+                  value: Number(data.volume),
+                  color: (lastCandleRef.current && lastCandleRef.current.close >= lastCandleRef.current.open)
+                    ? 'rgba(16, 185, 129, 0.4)' 
+                    : 'rgba(239, 68, 68, 0.4)'
+                }
+                lastVolumeRef.current = updatedVol
+                try {
+                  volumeSeriesRef.current.update(updatedVol)
+                } catch (_) {}
+              }
+            }
+          }
+        } catch (err) {
+          console.error('WebSocket tick processing error:', err)
+        }
+      }
+    } catch (e) {
+      console.warn('WebSocket init skipped:', e)
     }
 
     return () => {
-      ws.close()
+      if (ws) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close()
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => {
+            try { ws?.close() } catch (_) {}
+          }
+        }
+      }
     }
   }, [symbol])
 
@@ -1069,10 +1133,10 @@ export default function ChartPage() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W High</div><div className="mono">₹{quote['52w_high']?.toLocaleString('en-IN')}</div></div>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W Low</div><div className="mono">₹{quote['52w_low']?.toLocaleString('en-IN')}</div></div>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Volume</div><div className="mono">{quote.volume?.toLocaleString('en-IN')}</div></div>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Market Cap</div><div className="mono">₹{(quote.market_cap / 1e9)?.toFixed(0)}B</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W High</div><div className="mono">₹{quote['52w_high'] ? Number(quote['52w_high']).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W Low</div><div className="mono">₹{quote['52w_low'] ? Number(quote['52w_low']).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Volume</div><div className="mono">{quote.volume ? Number(quote.volume).toLocaleString('en-IN') : '—'}</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Market Cap</div><div className="mono">{quote.market_cap ? (quote.market_cap >= 1e7 ? `₹${(quote.market_cap / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 1 })} Cr` : `₹${(quote.market_cap / 1e9).toFixed(1)} B`) : '—'}</div></div>
           </div>
         {/* AI Score Ring */}
           <div style={{ marginLeft: 'auto', textAlign: 'center', flexShrink: 0 }}>
@@ -1210,7 +1274,7 @@ export default function ChartPage() {
                     const { paperTradingApi } = await import('../services/api')
                     await paperTradingApi.place({
                       symbol: symbol.endsWith('.NS') ? symbol : `${symbol}.NS`,
-                      direction: liveSetup.action === 'SELL' ? 'SHORT' : 'LONG',
+                      direction: liveSetup.action === 'SELL' ? 'SELL' : 'BUY',
                       quantity: 1,
                       order_type: 'MARKET',
                       stop_loss: liveSetup.sl,
@@ -1428,23 +1492,37 @@ export default function ChartPage() {
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>{swingTrade.trade_plan?.estimated_hold_time || '3 to 4 Days'}</div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Potential Gain</div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-bullish)' }}>+{(swingTrade.trade_plan?.expected_gain_pct ?? 15).toFixed(2)}%</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                  {swingTrade.action === 'SELL' ? 'Expected Drop' : (swingTrade.action === 'HOLD' ? 'Upper Resistance' : 'Potential Gain')}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: swingTrade.action === 'SELL' ? 'var(--color-bearish)' : (swingTrade.action === 'HOLD' ? 'var(--color-text-primary)' : 'var(--color-bullish)') }}>
+                  {swingTrade.action === 'SELL' ? '-' : '+'}{(swingTrade.trade_plan?.expected_gain_pct ?? 15).toFixed(2)}%
+                </div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Max Risk (Stop Loss)</div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-bearish)' }}>-{(swingTrade.trade_plan?.risk_pct ?? 7).toFixed(2)}%</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                  {swingTrade.action === 'HOLD' ? 'Lower Support' : 'Max Risk (Stop Loss)'}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: swingTrade.action === 'HOLD' ? 'var(--color-text-primary)' : 'var(--color-bearish)' }}>
+                  -{(swingTrade.trade_plan?.risk_pct ?? 7).toFixed(2)}%
+                </div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Entry Price</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                  {swingTrade.action === 'HOLD' ? 'Current Level' : 'Entry Price'}
+                </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{(swingTrade.trade_plan?.entry_price ?? 0).toFixed(2)}</div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Stop Loss Level</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                  {swingTrade.action === 'HOLD' ? 'Lower Bound' : 'Stop Loss Level'}
+                </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{(swingTrade.trade_plan?.stop_loss ?? 1400).toFixed(2)}</div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>Target Price</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                  {swingTrade.action === 'HOLD' ? 'Upper Bound' : 'Target Price'}
+                </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{(swingTrade.trade_plan?.target_price ?? 1700).toFixed(2)}</div>
               </div>
             </div>

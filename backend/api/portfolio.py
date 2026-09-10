@@ -49,12 +49,15 @@ async def get_portfolio(
     wins = [t for t in closed if (t.realized_pnl or 0) > 0]
     win_rate = len(wins) / len(closed) if closed else 0.0
 
-    # Calculate unrealized PnL for open trades
+    # Calculate unrealized PnL for open trades in one fast bulk query
     total_unrealized = 0.0
     allocation = []
+    open_symbols = list({t.symbol for t in open_trades})
+    quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols) if open_symbols else {}
+
     for t in open_trades:
-        quote = await market_data_service.fetch_quote(t.symbol)
-        if quote:
+        quote = quotes_map.get(t.symbol)
+        if quote and quote.get("price", 0) > 0:
             current_price = quote["price"]
             multiplier = 1 if t.direction == "BUY" else -1
             

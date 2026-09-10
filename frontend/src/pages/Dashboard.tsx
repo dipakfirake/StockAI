@@ -154,6 +154,72 @@ export default function Dashboard() {
     }
   }
 
+  // Real-time tick updates for indices via WebSocket
+  useEffect(() => {
+    if (indices.length === 0) return
+
+    const token = localStorage.getItem('auth_token')
+    if (!token) return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let ws: WebSocket | null = null
+
+    try {
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
+
+      ws.onopen = () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          indices.forEach(idx => {
+            if (idx.symbol) {
+              ws!.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol: idx.symbol }))
+            }
+          })
+        }
+      }
+
+      ws.onerror = () => {}
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'market_update' && data.price > 0) {
+            const cleanSym = (data.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
+            
+            setIndices(prev => prev.map(idx => {
+              const idxClean = (idx.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
+              if (idxClean === cleanSym || idx.name.toUpperCase() === cleanSym) {
+                return {
+                  ...idx,
+                  price: Number(data.price),
+                  change: data.change !== undefined ? data.change : idx.change,
+                  change_pct: data.change_pct !== undefined ? data.change_pct : idx.change_pct
+                }
+              }
+              return idx
+            }))
+          }
+        } catch (err) {
+          console.error('WebSocket Dashboard error:', err)
+        }
+      }
+    } catch (e) {
+      console.warn('WebSocket Dashboard init skipped:', e)
+    }
+
+    return () => {
+      if (ws) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close()
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => {
+            try { ws?.close() } catch (_) {}
+          }
+        }
+      }
+    }
+  }, [indices.length]) // Only re-run if number of indices changes
+
+
   const RegimeIcon = regime?.regime === 'BULLISH' ? TrendingUp : regime?.regime === 'BEARISH' ? TrendingDown : Minus
   const regimeColor = regime?.regime === 'BULLISH' ? 'var(--color-bullish)' : regime?.regime === 'BEARISH' ? 'var(--color-bearish)' : 'var(--color-neutral)'
   const vixColor = vix ? (vix.vix > 25 ? 'var(--color-bearish)' : vix.vix < 15 ? 'var(--color-bullish)' : 'var(--color-neutral)') : 'var(--color-text-primary)'
@@ -268,7 +334,7 @@ export default function Dashboard() {
                   &nbsp;(<AnimatedNumber value={idx.change} decimals={2} prefix={idx.change >= 0 ? '+' : ''} duration={700} />)
                 </div>
                 <div style={{ marginTop: 7, fontSize: 10, color: 'var(--color-text-muted)' }} title={idx.source}>
-                  {idx.data_status === 'exchange_feed' ? 'Exchange feed' : 'Provider fallback'}
+                  {idx.data_status === 'exchange_feed' || idx.data_status === 'realtime' ? 'Exchange feed' : 'Provider fallback'}
                   {idx.timestamp ? ` · ${idx.timestamp}` : ''}
                 </div>
               </div>

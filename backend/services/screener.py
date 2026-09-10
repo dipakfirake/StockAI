@@ -16,6 +16,7 @@ from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service, candles_to_df
 from backend.services.signals import signal_engine
 from backend.services.nlp_engine import nlp_engine_service
+from backend.services.ai_engine import ai_engine_service
 
 logger = get_logger(__name__)
 
@@ -89,20 +90,35 @@ class ScreenerService:
             
             candles, info, events, news = await asyncio.gather(candles_task, info_task, events_task, news_task)
             
-            if not candles or len(candles) < 50:
-                return {"symbol": symbol, "error": "Insufficient candle data"}
+            if not candles:
+                return {"symbol": symbol, "error": "Insufficient data"}
                 
-            info = info or {}
+            indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
             
-            # 2. Technical Score (40% Weight)
-            indicators = indicator_service.compute_all(candles)
+            # 2.5 Market Relative Strength (Accuracy Upgrade)
+            if indicators:
+                try:
+                    nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
+                    if nifty_candles and len(nifty_candles) >= 20:
+                        nifty_indicators = indicator_service.compute_all(nifty_candles)
+                        if len(nifty_indicators) > 0 and 'price_return_20d' in nifty_indicators:
+                            nifty_return_20d = nifty_indicators.get("price_return_20d", 0.0)
+                            stock_return_20d = indicators.get("price_return_20d", 0.0)
+                            indicators["rs_momentum_20d"] = stock_return_20d - nifty_return_20d
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to fetch Nifty for RS: {e}")
+            
             signals = signal_engine.evaluate(indicators, symbol)
             sig = signals[0] if signals else {}
             
             # Extract the raw 0-100 technical score from the new signal engine
             tech_raw = sig.get("composite_rating", 50)
             
-            # 3. Fundamental Score (35% Weight)
+            # 3. AI ML Score
+            ai_res = ai_engine_service.score(indicators if indicators else {}, symbol=symbol, compute_shap=True)
+            
+            # 4. Fundamental Score (35% Weight)
             # Evaluate basic health metrics
             fund_score = 50
             info = info or {}
@@ -150,23 +166,32 @@ class ScreenerService:
             total_score = (tech_raw * 0.40) + (fund_score * 0.35) + (sentiment_score * 0.25)
             
             # 6. Generate Trade Setup
-            current_price = candles[-1]["close"]
-            raw_atr = indicators.get("atr_14")
+            current_price = candles[-1]["close"] if candles else 0.0
+            raw_atr = indicators.get("atr_14") if indicators else 0.0
             # Enforce a minimum ATR (e.g. 1.5% of price) so target/SL are never exactly entry price
             atr = max(float(raw_atr) if raw_atr is not None else 0.0, current_price * 0.015)
             
             if total_score >= 60:
                 action = "BUY"
-                stop_loss = current_price - (1.5 * atr)
-                target = current_price + (3.0 * atr)
+                # Dynamic multiplier: higher score = wider target. Score 60 -> Target 2.0x ATR, Score 100 -> Target 4.0x ATR
+                conviction_scale = (total_score - 60) / 40.0  # 0.0 to 1.0
+                target_mult = 2.0 + (2.0 * conviction_scale)
+                sl_mult = 1.0 + (0.5 * conviction_scale) # Stop loss also scales slightly to avoid premature stopped out on high volatility breakouts
+                stop_loss = max(0.05, current_price - (sl_mult * atr))
+                target = max(0.05, current_price + (target_mult * atr))
             elif total_score <= 40:
                 action = "SELL"
-                stop_loss = current_price + (1.5 * atr)
-                target = current_price - (3.0 * atr)
+                conviction_scale = (40 - total_score) / 40.0  # 0.0 to 1.0
+                target_mult = 2.0 + (2.0 * conviction_scale)
+                sl_mult = 1.0 + (0.5 * conviction_scale)
+                stop_loss = max(0.05, current_price + (sl_mult * atr))
+                target = max(0.05, current_price - (target_mult * atr))
             else:
                 action = "HOLD"
-                stop_loss = current_price - (1.5 * atr)
-                target = current_price + (3.0 * atr)
+                # Neutral sideways projection: symmetrical support/resistance bands
+                # For HOLD, we show the expected trading channel rather than a strict 1:2 trade setup
+                stop_loss = max(0.05, current_price - (1.2 * atr))
+                target = max(0.05, current_price + (1.2 * atr))
 
             gain_pct = abs((target - current_price) / current_price) * 100 if current_price > 0 else 0
             risk_pct = abs((current_price - stop_loss) / current_price) * 100 if current_price > 0 else 0
@@ -195,7 +220,8 @@ class ScreenerService:
                     "reward_to_risk": round(gain_pct / risk_pct, 2) if risk_pct > 0 else 0,
                     "estimated_hold_time": hold_time
                 },
-                "news_sentiment": nlp_result.get("overall_sentiment", "NEUTRAL")
+                "news_sentiment": nlp_result.get("overall_sentiment", "NEUTRAL"),
+                "ml_score": ai_res
             }
             
             # Cache for 15 minutes

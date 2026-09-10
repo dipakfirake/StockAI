@@ -73,6 +73,9 @@ async def list_paper_trades(
     """List all paper trades with current unrealized PnL for open trades."""
     trades = await paper_trading_service.get_all_trades(db, str(current_user.id))
 
+    open_symbols = list({t.symbol for t in trades if t.status == "OPEN"})
+    quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols) if open_symbols else {}
+
     result = []
     for t in trades:
         entry = {
@@ -95,8 +98,8 @@ async def list_paper_trades(
             "closed_at": t.closed_at.isoformat() if t.closed_at else None,
         }
         if t.status == "OPEN":
-            quote = await market_data_service.fetch_quote(t.symbol)
-            if quote:
+            quote = quotes_map.get(t.symbol)
+            if quote and quote.get("price", 0) > 0:
                 current_price = quote["price"]
                 multiplier = 1 if t.direction == "BUY" else -1
                 unrealized = multiplier * (current_price - float(t.entry_price)) * t.quantity - float(t.commission)

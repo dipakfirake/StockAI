@@ -10,7 +10,7 @@ import {
   TrendingUp,
   Search,
   Crown,
-  LogOut, Menu, X, Radio, Sun, Moon, MoreHorizontal, Activity
+  LogOut, Menu, X, Radio, Sun, Moon, MoreHorizontal, Activity, Settings, Target
 } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
@@ -24,9 +24,11 @@ const links = [
   { to: '/portfolio', label: 'Holdings', icon: PieChart },
   { to: '/options/^NSEI', label: 'F&O Chain', icon: Activity },
   { to: '/chart/^NSEI', label: 'Charts', icon: CandlestickChart },
+  { to: '/smc-watchlist', label: 'Pre-Market SMC', icon: Target },
   { to: '/backtest', label: 'Backtest', icon: FlaskConical },
   { to: '/scanner', label: 'Scanner', icon: Search },
   { to: '/alerts', label: 'Alerts', icon: Bell },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export default function NavBar() {

@@ -71,6 +71,12 @@ async def list_strategies(current_user=Depends(require_pro_tier)):
     return {
         "strategies": [
             {
+                "id": "ai_machine_learning",
+                "name": "LightGBM Multi-Cap AI Model",
+                "description": "Walk-forward trade execution powered by the trained LightGBM ML model with ATR trailing stops and SHAP confidence scoring",
+                "params": {"confidence_threshold": 0.65, "quantity": 10, "qty_mode": "fixed"},
+            },
+            {
                 "id": "rsi_mean_reversion",
                 "name": "RSI Mean Reversion",
                 "description": "Buy when RSI < 30 (oversold), sell when RSI > 70 (overbought)",

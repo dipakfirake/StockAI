@@ -22,11 +22,26 @@ FEATURES = [
     'rsi_14', 'rsi_z', 'macd_hist', 'stoch_k', 'cci_20',
     'atr_pct', 'bb_pct_b', 'bb_width_norm',
     'ema9_ratio', 'ema21_ratio', 'ema_cross', 'golden_death',
-    'adx_14', 'price_return_5d', 'price_return_20d', 'vol_ratio'
+    'adx_14', 'price_return_5d', 'price_return_20d', 'vol_ratio',
+    'rs_momentum_20d'
 ]
 
-# Quick heuristic to map common stocks to Large vs Small if market cap API fails
-LARGE_CAP_SYMBOLS = {"RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "HINDUNILVR.NS", "LT.NS"}
+# Complete set of Benchmark Indices and Large Cap Heavyweights
+LARGE_CAP_SYMBOLS = {
+    "^NSEI", "^NSEBANK", "^CNXIT", "^CNXAUTO", "^CNXENERGY", "^CNXREALTY", "^CNXMETAL", "^CNXFMCG", "^CNXPHARMA", "^NSEMDCP50", "^BSESN",
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
+    "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "HINDUNILVR.NS", "LT.NS",
+    "AXISBANK.NS", "KOTAKBANK.NS", "MARUTI.NS", "SUNPHARMA.NS", "TITAN.NS",
+    "ULTRACEMCO.NS", "ASIANPAINT.NS", "NTPC.NS", "TATAMOTORS.NS", "BAJFINANCE.NS",
+    "POWERGRID.NS", "M&M.NS", "ADANIENT.NS", "TATASTEEL.NS", "COALINDIA.NS",
+    "JSWSTEEL.NS", "HCLTECH.NS", "BAJAJFINSV.NS", "ONGC.NS", "GRASIM.NS",
+    "TECHM.NS", "NESTLEIND.NS", "HDFCLIFE.NS", "BRITANNIA.NS", "ADANIPORTS.NS",
+    "SBILIFE.NS", "DRREDDY.NS", "EICHERMOT.NS", "INDUSINDBK.NS", "WIPRO.NS",
+    "CIPLA.NS", "DIVISLAB.NS", "BPCL.NS", "TATACONSUM.NS", "APOLLOHOSP.NS",
+    "HEROMOTOCO.NS", "BAJAJ-AUTO.NS", "HINDALCO.NS", "LTIM.NS", "BEL.NS",
+    "TRENT.NS", "VBL.NS", "PIDILITIND.NS", "CHOLAFIN.NS", "SHREECEM.NS",
+    "SIEMENS.NS", "ABB.NS", "HAVELLS.NS", "DLF.NS", "GAIL.NS", "INDIGO.NS"
+}
 
 class AIEngineService:
     def __init__(self):
@@ -48,11 +63,20 @@ class AIEngineService:
         except Exception as e:
             logger.error(f"Failed to load LightGBM models: {e}")
 
-    def score(self, indicators: dict, symbol: str = "", market_cap: float = 0) -> dict:
+    def reload_models(self):
+        self.models = {}
+        self.explainers = {}
+        self._load_models()
+
+    def score(self, indicators: dict, symbol: str = "", market_cap: float = 0, compute_shap: bool = True) -> dict:
         """
         Compute ML AI score using LightGBM with robust scale-independent features.
         Routes to the SmallCap or LargeCap model based on symbol/cap.
         """
+        # Auto-load models if they were generated post-startup
+        if not self.models and (os.path.exists(MODEL_LARGE_PATH) or os.path.exists(MODEL_SMALL_PATH)):
+            self._load_models()
+
         # Determine model to use
         model_key = "small"
         if symbol in LARGE_CAP_SYMBOLS or market_cap > 500000000000: # 50,000 Cr+
@@ -113,12 +137,15 @@ class AIEngineService:
             vol_sma20 = _safe_float(indicators.get("vol_sma_20", 1.0), 1.0)
             if vol_sma20 == 0: vol_sma20 = 1.0
             vol_ratio = vol / vol_sma20
+            # Market Relative Strength
+            rs_momentum_20d = _safe_float(indicators.get("rs_momentum_20d", 0.0))
             
             feature_vector = [
                 rsi_14, rsi_z, macd_hist, stoch_k, cci_20,
                 atr_pct, bb_pct_b, bb_width_norm,
                 ema9_ratio, ema21_ratio, ema_cross, golden_death,
-                adx_14, price_return_5d, price_return_20d, vol_ratio
+                adx_14, price_return_5d, price_return_20d, vol_ratio,
+                rs_momentum_20d
             ]
             
             X = pd.DataFrame([feature_vector], columns=FEATURES)
@@ -128,9 +155,9 @@ class AIEngineService:
             prob_up = calibrator.calibrate(raw_prob_up)
             prob_down = 1.0 - prob_up
             
-            if prob_up > 0.60:
+            if prob_up > 0.55:
                 direction = "BUY"
-            elif prob_down > 0.60:
+            elif prob_down > 0.55:
                 direction = "SELL"
             else:
                 direction = "HOLD"
@@ -142,26 +169,30 @@ class AIEngineService:
             }
             confidence = max(probs.values())
 
-            # SHAP Explanations
-            shap_values = explainer.shap_values(X)
-            if isinstance(shap_values, list): 
-                shap_vals = shap_values[1][0]
-            else:
-                shap_vals = shap_values[0]
-
+            # SHAP Explanations (Computed on demand)
             explanations = []
-            for i, feature in enumerate(FEATURES):
-                contrib = float(shap_vals[i])
-                if abs(contrib) > 0.01:
-                    explanations.append({
-                        "feature": feature.upper(),
-                        "value": round(float(X.iloc[0, i]), 4),
-                        "contribution": round(abs(contrib), 4),
-                        "direction": "bullish" if contrib > 0 else "bearish",
-                        "reason": f"{model_key.capitalize()}Cap Model identified {feature} as {'bullish' if contrib > 0 else 'bearish'}"
-                    })
+            if compute_shap and explainer is not None:
+                try:
+                    shap_values = explainer.shap_values(X)
+                    if isinstance(shap_values, list): 
+                        shap_vals = shap_values[1][0]
+                    else:
+                        shap_vals = shap_values[0]
 
-            explanations = sorted(explanations, key=lambda x: x["contribution"], reverse=True)[:5]
+                    for i, feature in enumerate(FEATURES):
+                        contrib = float(shap_vals[i])
+                        if abs(contrib) > 0.01:
+                            explanations.append({
+                                "feature": feature.upper(),
+                                "value": round(float(X.iloc[0, i]), 4),
+                                "contribution": round(abs(contrib), 4),
+                                "direction": "bullish" if contrib > 0 else "bearish",
+                                "reason": f"{model_key.capitalize()}Cap Model identified {feature} as {'bullish' if contrib > 0 else 'bearish'}"
+                            })
+
+                    explanations = sorted(explanations, key=lambda x: x["contribution"], reverse=True)[:5]
+                except Exception as ex:
+                    logger.debug(f"SHAP explanation bypassed: {ex}")
 
             return {
                 "symbol": symbol,

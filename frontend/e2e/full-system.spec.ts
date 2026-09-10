@@ -63,7 +63,8 @@ test.describe('Full System QA: Navigation, Search, Charting, and Quant Validatio
       await page.waitForURL(new RegExp(`/chart/${escapeRegExp(stock.symbol)}`), { timeout: 120000 });
 
       await expect(page.locator('text=Swing Trade Analysis')).toBeVisible({ timeout: 160000 });
-      await expect(page.locator('text=Target Price')).toBeVisible();
+      const targetPriceLabel = page.locator('text=Target Price').or(page.locator('text=Upper Bound'));
+      await expect(targetPriceLabel.first()).toBeVisible();
       await expect(page.locator('text=Expected Duration')).toBeVisible();
 
       const pageText = await page.textContent('body');

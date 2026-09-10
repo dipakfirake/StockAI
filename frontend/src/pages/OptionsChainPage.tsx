@@ -25,20 +25,8 @@ export default function OptionsChainPage() {
       const res = await marketApi.getOptions(sym)
       setData(res.data)
     } catch (err: any) {
-      // Ignore error and fall back to mock data
-      setData({
-        symbol: sym,
-        spot_price: 1500,
-        expiry_date: '2026-08-15',
-        days_to_expiry: 12,
-        pcr: 1.1,
-        max_pain: 1500,
-        chain: [{
-          strike: 1500,
-          CE: { lastPrice: 10, openInterest: 1000, impliedVolatility: 15, delta: 0.5, gamma: 0.05, theta: -5, vega: 10 },
-          PE: { lastPrice: 10, openInterest: 1000, impliedVolatility: 15, delta: -0.5, gamma: 0.05, theta: -5, vega: 10 }
-        }]
-      })
+      setError(err?.response?.data?.detail || `Failed to fetch live options chain for ${sym}.`)
+      setData(null)
     } finally {
       setLoading(false)
     }
@@ -116,6 +104,41 @@ export default function OptionsChainPage() {
               </div>
             </div>
           </div>
+
+          {data.ai_strategy && (
+            <div className="card" style={{ padding: 16, borderLeft: '4px solid var(--color-primary)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ margin: 0, color: 'var(--color-primary)' }}>AI Recommended Strategy: {data.ai_strategy.name}</h3>
+                  <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--color-text-muted)' }}>{data.ai_strategy.reasoning}</p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Max Profit (1 Lot)</div>
+                  <div style={{ fontSize: 16, fontWeight: 'bold', color: 'var(--color-bullish)' }}>+₹{data.ai_strategy.max_profit_per_lot}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Max Risk (1 Lot)</div>
+                  <div style={{ fontSize: 16, fontWeight: 'bold', color: 'var(--color-bearish)' }}>-₹{data.ai_strategy.max_loss_per_lot}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Breakeven Point</div>
+                  <div style={{ fontSize: 16, fontWeight: 'bold' }}>{data.ai_strategy.breakeven}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {data.ai_strategy.legs.map((leg: any, idx: number) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--color-bg-secondary)', padding: '8px 12px', borderRadius: 4 }}>
+                    <span>
+                      <strong style={{ color: leg.action === 'BUY' ? 'var(--color-bullish)' : 'var(--color-bearish)' }}>{leg.action}</strong> {leg.strike} {leg.type}
+                    </span>
+                    <span>₹{leg.price.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="card" style={{ overflow: 'hidden' }}>
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between' }}>

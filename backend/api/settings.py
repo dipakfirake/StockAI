@@ -13,7 +13,8 @@ router = APIRouter()
 DEFAULT_SETTINGS = [
     {"key": "default_risk_pct", "value": "2.0", "value_type": "float", "description": "Default risk percentage per trade"},
     {"key": "default_slippage", "value": "0.1", "value_type": "float", "description": "Default slippage percentage"},
-    {"key": "enable_trading", "value": "true", "value_type": "boolean", "description": "Global kill switch for trading"}
+    {"key": "enable_trading", "value": "true", "value_type": "boolean", "description": "Global kill switch for trading"},
+    {"key": "enable_auto_trader", "value": "false", "value_type": "boolean", "description": "Master toggle switch for AI Auto-Trader daemon"}
 ]
 
 @router.get("/")

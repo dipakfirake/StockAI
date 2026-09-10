@@ -4,7 +4,12 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: true, // Listen on all network interfaces (required for Docker)
     port: 5173,
+    strictPort: true,
+    hmr: {
+      clientPort: 5173, // Force HMR to use the exposed port
+    },
     proxy: {
       '/api': {
         target: process.env.VITE_API_URL || 'http://localhost:8000',
