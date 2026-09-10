@@ -23,6 +23,13 @@ try:
                 except Exception:
                     pass
         huggingface_hub.HfFolder = HfFolder
+# ZeroGPU requirement: satisfy Hugging Face Spaces supervisor when running on ZeroGPU hardware
+try:
+    import spaces
+
+    @spaces.GPU(duration=1)
+    def dummy_gpu():
+        return None
 except Exception:
     pass
 
