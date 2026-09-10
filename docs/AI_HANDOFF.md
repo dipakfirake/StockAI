@@ -292,10 +292,11 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - Local Dev Stack: Frontend on `http://localhost:5173`, Backend on `http://localhost:8000`
 
 ## Exact Next Safe Steps
-1. Push commit `fix(space): add @spaces.GPU decorator for ZeroGPU compatibility` to `origin main` and `hf main`.
-2. Observe Hugging Face Space transition into `Running` state.
-3. Verify live endpoints at `https://dipakfirake-stockai-backend.hf.space/docs`.
-4. Connect Vercel Frontend to Hugging Face Backend (`https://dipakfirake-stockai-backend.hf.space`).
+1. In Space Settings -> Space Hardware, switch hardware to **CPU basic · 2 vCPU · 16 GB · Free** (recommended for continuous 24/7 web backends without GPU timeouts).
+2. Alternatively, with `spaces` and `@spaces.GPU` added in commit `0ee986c`, ZeroGPU can also run.
+3. Observe Hugging Face Space transition into `Running` state.
+4. Verify live endpoints at `https://dipakfirake-stockai-backend.hf.space/docs`.
+5. Connect Vercel Frontend to Hugging Face Backend (`https://dipakfirake-stockai-backend.hf.space`).
 
 ## Ideas backlog (not yet implemented)
 - Volume profile (horizontal histogram on chart right)
