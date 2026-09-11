@@ -283,20 +283,30 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
    - Decorated a dummy worker function with `@spaces.GPU(duration=1)` in `app.py` within a safe `try...except` wrapper.
    - Satisfies the ZeroGPU supervisor check while gracefully falling back if run on standard CPU.
 
+### Phase 13: Hugging Face Compute Paywall & Render.com 100% Free Blueprint (2026-09-11)
+1. 🔍 **Discovery from User Screenshot**:
+   - Hugging Face Spaces now strictly marks both `Gradio` (5 templates) and `Docker` (17 templates) as 🔒 `Paid`, stating: *"Gradio and Docker Spaces require a paid plan. Static Spaces stay free for everyone. To create a Space that runs on compute, subscribe to PRO."*
+   - To keep our promise of **100% FREE ($0 / ₹0) without credit cards or subscriptions**, we pivot to **Render.com**.
+2. ✅ **Implemented Render.com Blueprint (`render.yaml`)**:
+   - Created root `render.yaml` declaring a free web service (`plan: free`) with native Python 3.11.5.
+   - Build Command: `pip install -r backend/requirements.txt`
+   - Start Command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+   - Health check path: `/api/market/indices`
+   - Configured environment variables for `SECRET_KEY` and `DATABASE_URL` (Neon PostgreSQL).
+
 ## Running Services & Public URLs
 - GitHub Repository: `https://github.com/dipakfirake/StockAI`
-- Hugging Face Space (Backend API): `https://huggingface.co/spaces/DipakFirake/stockai-backend`
-- Hugging Face Live API: `https://dipakfirake-stockai-backend.hf.space`
-- Hugging Face Swagger Docs: `https://dipakfirake-stockai-backend.hf.space/docs`
 - Neon PostgreSQL Project: `lively-voice-35713029` (Branch: `production`)
 - Local Dev Stack: Frontend on `http://localhost:5173`, Backend on `http://localhost:8000`
+- Render Backend Service: (Pending deployment on `render.com`)
 
 ## Exact Next Safe Steps
-1. In Space Settings -> Space Hardware, switch hardware to **CPU basic · 2 vCPU · 16 GB · Free** (recommended for continuous 24/7 web backends without GPU timeouts).
-2. Alternatively, with `spaces` and `@spaces.GPU` added in commit `0ee986c`, ZeroGPU can also run.
-3. Observe Hugging Face Space transition into `Running` state.
-4. Verify live endpoints at `https://dipakfirake-stockai-backend.hf.space/docs`.
-5. Connect Vercel Frontend to Hugging Face Backend (`https://dipakfirake-stockai-backend.hf.space`).
+1. Push `render.yaml` to GitHub (`origin main`).
+2. User signs into [Render.com](https://render.com) using GitHub (100% Free, no credit card).
+3. Under Blueprints or New Web Service, connect `dipakfirake/StockAI`.
+4. Enter `DATABASE_URL` (Neon connection string).
+5. Render deploys and provides the live free HTTPS URL (`https://stockai-backend.onrender.com`).
+6. Point `frontend/vercel.json` API rewrites to the Render URL and verify live frontend.
 
 ## Ideas backlog (not yet implemented)
 - Volume profile (horizontal histogram on chart right)

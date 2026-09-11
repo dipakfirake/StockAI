@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: stockai-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/market/indices
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.5
+      - key: SECRET_KEY
+        value: production-secret-key-12345
+      - key: DATABASE_URL
+        sync: false
