@@ -585,16 +585,14 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - Oracle Cloud Always Free VM: `stockai-server` (`VM.Standard.A1.Flex`, 1 OCPU, 6 GB RAM, Region: `ap-mumbai-1`)
   - Public IP: `92.4.71.210`
   - Ingress Rules: TCP `80-8000` from `0.0.0.0/0`
-  - Active Service: Docker CE & Compose stack deployment in progress
-- Vercel Frontend: `https://stock-ai-iota-seven.vercel.app`
+  - Active Services: `stockbackend` (FastAPI), `stockdb` (TimescaleDB), `stockredis` (Redis), `stockcelery` (Celery worker), `stockbeat` (Celery beat), `stockflower` (Flower dashboard on :5555)
+  - Operations Cheat Sheet: `docs/SERVER_MANAGEMENT_CHEAT_SHEET.md`
+- Vercel Frontend: `https://stock-ai-iota-seven.vercel.app` (Proxy rewrites mapped to `http://92.4.71.210:8000`)
 
 ## Exact Next Safe Steps
-1. Verify Docker installation completion on Oracle Cloud server `opc@92.4.71.210`.
-2. Push latest local commit `c1604cb` / `f7d8790` to GitHub (`git push origin main`).
-3. Clone repository on Oracle Cloud VM: `git clone https://github.com/dipakfirake/StockAI.git`.
-4. Transfer/configure `.env` safely on Oracle VM without revealing secrets.
-5. Deploy containers: `docker compose up -d --build backend db redis celery_worker celery_beat flower`.
-6. Verify live backend health check: `curl http://92.4.71.210:8000/health/live`.
-7. Wire Vercel frontend environment variable `VITE_API_URL` to `http://92.4.71.210:8000`.
+1. Run `git push origin main` from Windows PowerShell to sync all commits to GitHub and trigger Vercel build.
+2. In Oracle VM, run `git pull origin main` to pull latest documentation and cheat sheet.
+3. Use `docs/SERVER_MANAGEMENT_CHEAT_SHEET.md` for daily operations (start, pause, logs, daily Fyers token sync).
+
 
 
