@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://stockai-backend.onrender.com/api/$1"
+      "destination": "http://92.4.71.210:8000/api/$1"
     },
     {
       "source": "/ws/(.*)",
-      "destination": "https://stockai-backend.onrender.com/ws/$1"
+      "destination": "http://92.4.71.210:8000/ws/$1"
     },
     {
       "source": "/(.*)",

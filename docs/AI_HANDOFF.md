@@ -582,10 +582,19 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - GitHub Repository: `https://github.com/dipakfirake/StockAI`
 - Neon PostgreSQL Project: `lively-voice-35713029` (Branch: `production`)
 - Local Dev Stack: Frontend on `http://localhost:5173`, Backend on `http://localhost:8000`
-- Render Backend Service: (Configured via `render.yaml`)
+- Oracle Cloud Always Free VM: `stockai-server` (`VM.Standard.A1.Flex`, 1 OCPU, 6 GB RAM, Region: `ap-mumbai-1`)
+  - Public IP: `92.4.71.210`
+  - Ingress Rules: TCP `80-8000` from `0.0.0.0/0`
+  - Active Service: Docker CE & Compose stack deployment in progress
+- Vercel Frontend: `https://stock-ai-iota-seven.vercel.app`
 
 ## Exact Next Safe Steps
-1. Verify live environment variables on Render / Vercel cloud dashboards matching `.env.example`.
-2. Review `docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md` for Cloudflare WAF and Neon IP allowlisting prior to pointing public DNS.
-3. Keep `security_audit.log` monitored or forwarded to cloud logging (e.g. Datadog / Grafana Loki).
+1. Verify Docker installation completion on Oracle Cloud server `opc@92.4.71.210`.
+2. Push latest local commit `c1604cb` / `f7d8790` to GitHub (`git push origin main`).
+3. Clone repository on Oracle Cloud VM: `git clone https://github.com/dipakfirake/StockAI.git`.
+4. Transfer/configure `.env` safely on Oracle VM without revealing secrets.
+5. Deploy containers: `docker compose up -d --build backend db redis celery_worker celery_beat flower`.
+6. Verify live backend health check: `curl http://92.4.71.210:8000/health/live`.
+7. Wire Vercel frontend environment variable `VITE_API_URL` to `http://92.4.71.210:8000`.
+
 

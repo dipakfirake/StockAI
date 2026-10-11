@@ -73,10 +73,14 @@ app.add_middleware(RateLimitMiddleware)
 # --- 3. CORS Configuration ---
 # Allow explicit trusted frontend origins in production, or localhost during development
 allowed_origins = list(settings.CORS_ORIGINS)
-if "http://localhost:5173" not in allowed_origins:
-    allowed_origins.append("http://localhost:5173")
-if "http://127.0.0.1:5173" not in allowed_origins:
-    allowed_origins.append("http://127.0.0.1:5173")
+for origin in [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://stock-ai-iota-seven.vercel.app",
+]:
+    if origin not in allowed_origins:
+        allowed_origins.append(origin)
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -741,6 +741,29 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - Status: Local `main` branch is 1 commit ahead of `origin/main` with a clean working tree. The user can complete the push by running `git push origin main` in their interactive terminal (which prompts the Windows Git Credential Manager browser login) or by supplying a GitHub Personal Access Token.
 **System Response**: Provided the user with the commit confirmation and the exact step to complete the GitHub push with credentials.
 
+---
+
+### Session Entry 27: Oracle Cloud Always Free VM Provisioning, Networking, and Deployment
+**Timestamp**: 2026-10-11 23:45:00 IST (18:15:00 UTC)
+**User Prompt**:
+  - Inquired on full free hosting without 700-hour Render limits.
+  - Guided through Oracle Cloud Always Free tier (`VM.Standard.A1.Flex`, Ampere ARM64, 1 OCPU, 6 GB RAM, Region `ap-mumbai-1`).
+  - Addressed VCN subnet generation, attached Ephemeral Public IPv4 (`92.4.71.210`), and configured Ingress Rule for ports `80-8000`.
+  - Resolved Windows OpenSSH file permissions on private key via `icacls`.
+  - Initiated automated Docker CE and Compose installation on Oracle Linux 9 server via SSH.
+**Agent Technical Actions**:
+1. Verified zero-cost constraint (₹0 spend guaranteed under Always Free tier).
+2. Guided user through creating VCN and attaching Ephemeral Public IPv4 `92.4.71.210`.
+3. Guided user through VCN Security List configuration opening TCP ports `80-8000`.
+4. Resolved Windows OpenSSH private key permission error via `icacls` inheritance reset and single-user grant.
+5. Established stable SSH connection with keep-alive (`-o ServerAliveInterval=30`).
+6. Executed Docker CE, containerd, and Compose plugin installation commands on Oracle Linux 9 (`stockai-server`).
+**Verification Evidence**:
+- Oracle Cloud instance status: `RUNNING` on Ampere ARM64 with 6 GB RAM.
+- Public IP address: `92.4.71.210` active and reachable via SSH.
+- User logged in as `opc@stockai-server` and Docker installation running.
+
+
 
 
 
