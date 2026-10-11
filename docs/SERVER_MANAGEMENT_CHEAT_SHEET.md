@@ -17,14 +17,49 @@
 
 ---
 
-## 1. Quick SSH Connection
+## 1. How to Access the Server Console via Windows PowerShell
 
-From your Windows PowerShell:
+### Step-by-Step to Log In:
+1. On your Windows laptop, open **PowerShell** or **Terminal** (press `Win + X` and click **Terminal** / **PowerShell**, or press `Win + R`, type `powershell`, and hit Enter).
+2. Copy and paste this single command and press **Enter**:
 ```powershell
 ssh -o ServerAliveInterval=30 -i "C:\Users\dcfir\Downloads\ssh-key-2026-10-11.key" opc@92.4.71.210
 ```
+3. Your terminal prompt will change from `PS C:\...>` to:
+```text
+[opc@stockai-server ~]$
+```
+🎉 **You are now inside the Linux cloud server console!**
 
 ---
+
+### How to Navigate to the Project Folder:
+Once inside the server console, go to your project folder by running:
+```bash
+cd /home/opc/StockAI
+```
+Your prompt will now show:
+```text
+[opc@stockai-server StockAI]$
+```
+*(All `docker compose` commands should be run here).*
+
+---
+
+### How to Exit / Close the Server Console:
+When you are done working on the server and want to return to your normal Windows PowerShell:
+* Type `exit` and hit **Enter** (or press `Ctrl + D`).
+* Your prompt will return back to `PS C:\...>` on your Windows laptop.
+
+---
+
+### If PowerShell Ever Shows "UNPROTECTED PRIVATE KEY FILE" / Bad Permissions:
+If you ever move or re-download your `.key` file and Windows complains about permissions, run these 2 quick commands in Windows PowerShell before connecting:
+```powershell
+icacls "C:\Users\dcfir\Downloads\ssh-key-2026-10-11.key" /inheritance:r
+icacls "C:\Users\dcfir\Downloads\ssh-key-2026-10-11.key" /grant:r "$($env:USERNAME):R"
+```
+
 
 ## 2. Starting, Pausing & Stopping the Application
 
