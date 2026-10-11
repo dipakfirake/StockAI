@@ -188,7 +188,9 @@ async def get_sector_performance(current_user=Depends(get_current_user)):
         name = item["name"]
         sym = item["symbol"]
         quote = quotes_map.get(sym)
-        if quote:
+        if not quote or quote.get("price", 0) <= 0:
+            quote = await market_data_service.fetch_quote(sym)
+        if quote and quote.get("price", 0) > 0:
             sectors.append({
                 "name": name,
                 "symbol": sym,
@@ -197,13 +199,18 @@ async def get_sector_performance(current_user=Depends(get_current_user)):
                 "change_pct": quote.get("change_pct", 0.0),
             })
         else:
-            sectors.append({
-                "name": name,
-                "symbol": sym,
-                "price": 0.0,
-                "change": 0.0,
-                "change_pct": 0.0,
-            })
+            cached_sectors = cached.get("sectors", []) if cached else []
+            prev = next((s for s in cached_sectors if s.get("symbol") == sym and s.get("price", 0) > 0), None)
+            if prev:
+                sectors.append(prev)
+            else:
+                sectors.append({
+                    "name": name,
+                    "symbol": sym,
+                    "price": 0.0,
+                    "change": 0.0,
+                    "change_pct": 0.0,
+                })
 
     result = {"sectors": sectors}
     if any(s.get("price", 0) > 0 for s in sectors):
@@ -266,17 +273,24 @@ async def get_market_indices(current_user=Depends(get_current_user)):
         name = item["name"]
         sym = item["symbol"]
         quote = quotes_map.get(sym)
+        if not quote or quote.get("price", 0) <= 0:
+            quote = await market_data_service.fetch_quote(sym)
         if quote and quote.get("price", 0) > 0:
             indices.append({"name": name, "symbol": sym, **quote})
         else:
-            indices.append({
-                "name": name,
-                "symbol": sym,
-                "price": 0.0,
-                "change": 0.0,
-                "change_pct": 0.0,
-                "source": "Fyers API"
-            })
+            cached_indices = cached.get("indices", []) if cached else []
+            prev = next((i for i in cached_indices if i.get("symbol") == sym and i.get("price", 0) > 0), None)
+            if prev:
+                indices.append(prev)
+            else:
+                indices.append({
+                    "name": name,
+                    "symbol": sym,
+                    "price": 0.0,
+                    "change": 0.0,
+                    "change_pct": 0.0,
+                    "source": "Fyers API"
+                })
 
     result = {"indices": indices}
     if any(i.get("price", 0) > 0 for i in indices):
@@ -381,21 +395,28 @@ async def get_options_chain(
         current_vix = float(vix_quote["price"]) if vix_quote and vix_quote.get("price") else 14.5
         
         chain_data = options_engine.generate_chain(symbol.upper(), spot_price, current_vix)
+        if not isinstance(chain_data, dict):
+            chain_data = {
+                "symbol": symbol.upper(),
+                "spot_price": spot_price,
+                "chain": [],
+                "pcr": 1.0,
+                "max_pain": spot_price,
+            }
         
         # Inject AI Options Strategy Recommendation
-        try:
-            from backend.services.screener import screener_service
-            import asyncio
-            # We use the raw symbol here as screener caches it based on raw symbol mostly, but sym_clean is safer
-            ai_insight = await screener_service._analyze_symbol(sym_clean)
-            action = ai_insight.get("action", "HOLD")
-            score = ai_insight.get("total_score", 50.0)
-            
-            strategy = options_engine.recommend_strategy(chain_data, action, score, current_vix)
-            if strategy:
-                chain_data["ai_strategy"] = strategy
-        except Exception as e:
-            logger.warning(f"Could not generate AI option strategy for {sym_clean}: {e}")
+        if chain_data.get("chain"):
+            try:
+                from backend.services.screener import screener_service
+                ai_insight = await screener_service._analyze_symbol(sym_clean)
+                if isinstance(ai_insight, dict):
+                    action = ai_insight.get("action", "HOLD")
+                    score = float(ai_insight.get("total_score", 50.0))
+                    strategy = options_engine.recommend_strategy(chain_data, action, score, current_vix)
+                    if strategy:
+                        chain_data["ai_strategy"] = strategy
+            except Exception as e:
+                logger.warning(f"Could not generate AI option strategy for {sym_clean}: {e}")
 
         return chain_data
     except HTTPException:
@@ -406,24 +427,16 @@ async def get_options_chain(
 
 @router.get("/screener")
 async def get_swing_trade_screener(
-    sector: str = Query(None, description="Optional sector or universe to screen (e.g. NIFTY50)"),
+    sector: str = Query(None, description="Optional sector universe to screen (e.g. NIFTY_50, BANKING, IT, AUTO, PHARMA, ENERGY, FMCG, METAL)"),
+    force_refresh: bool = Query(False, description="Bypass cache and force fresh market scan"),
     current_user=Depends(get_current_user)
 ):
     """
-    Run the AI Swing Trade Screener across a predefined universe.
-    Combines Technicals, Fundamentals, and NLP News Sentiment to find trade setups.
+    Run the AI Swing Trade Screener across a universe.
+    Returns categorized lists: buy_stocks, sell_stocks, hold_stocks with exact trade setups and summary stats.
     """
     try:
-        # We can implement a caching layer here if this is hit frequently
-        cache_key = f"screener_results_{sector or 'default'}"
-        cached = await cache_get(cache_key)
-        if cached:
-            return cached
-
-        results = await screener_service.run_screener()
-        
-        # Cache for 1 hour to prevent API rate limits
-        await cache_set(cache_key, results, ttl=3600)
+        results = await screener_service.run_screener(sector=sector, force_refresh=force_refresh)
         return results
     except Exception as e:
         logger.error(f"Screener failed: {e}")

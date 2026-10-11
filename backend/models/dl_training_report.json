@@ -1,0 +1,197 @@
+{
+  "n_features": 36,
+  "total_sequences": 104653,
+  "subsets_completed": 9,
+  "total_subsets": 9,
+  "metrics": [
+    {
+      "subset_index": 1,
+      "stocks": [
+        "APOLLOTYRE.NS",
+        "ITC.NS",
+        "SUPREMEIND.NS",
+        "TCS.NS",
+        "AMBER.NS",
+        "GRANULES.NS",
+        "WIPRO.NS",
+        "DRREDDY.NS",
+        "BHARATFORG.NS",
+        "POLYCAB.NS"
+      ],
+      "sequences": 11654,
+      "lstm_loss": 0.5612,
+      "lstm_acc": 60.59,
+      "transformer_loss": 0.5666,
+      "transformer_acc": 60.48,
+      "timestamp": 1791614432.40527
+    },
+    {
+      "subset_index": 2,
+      "stocks": [
+        "OBEROIRLTY.NS",
+        "LUPIN.NS",
+        "KTKBANK.NS",
+        "HCLTECH.NS",
+        "IDFCFIRSTB.NS",
+        "PAGEIND.NS",
+        "ANGELONE.NS",
+        "SONATSOFTW.NS",
+        "MAXHEALTH.NS",
+        "JUBLFOOD.NS"
+      ],
+      "sequences": 11658,
+      "lstm_loss": 0.5297,
+      "lstm_acc": 62.35,
+      "transformer_loss": 0.5458,
+      "transformer_acc": 62.34,
+      "timestamp": 1791622493.0254264
+    },
+    {
+      "subset_index": 3,
+      "stocks": [
+        "COLPAL.NS",
+        "INDIGO.NS",
+        "CYIENT.NS",
+        "KAYNES.NS",
+        "PERSISTENT.NS",
+        "BHARTIARTL.NS",
+        "VOLTAS.NS",
+        "REDINGTON.NS",
+        "TRENT.NS",
+        "TATACOMM.NS"
+      ],
+      "sequences": 11384,
+      "lstm_loss": 0.5327,
+      "lstm_acc": 62.24,
+      "transformer_loss": 0.5212,
+      "transformer_acc": 62.31,
+      "timestamp": 1791627851.9750266
+    },
+    {
+      "subset_index": 4,
+      "stocks": [
+        "BSE.NS",
+        "COFORGE.NS",
+        "INDHOTEL.NS",
+        "TATASTEEL.NS",
+        "AUROPHARMA.NS",
+        "RADICO.NS",
+        "MARUTI.NS",
+        "ASTRAL.NS",
+        "GRASIM.NS",
+        "TECHM.NS"
+      ],
+      "sequences": 11658,
+      "lstm_loss": 0.5211,
+      "lstm_acc": 60.53,
+      "transformer_loss": 0.5268,
+      "transformer_acc": 60.77,
+      "timestamp": 1791631603.368066
+    },
+    {
+      "subset_index": 5,
+      "stocks": [
+        "KEI.NS",
+        "CASTROLIND.NS",
+        "ABCAPITAL.NS",
+        "BAJFINANCE.NS",
+        "CUMMINSIND.NS",
+        "CENTURYPLY.NS",
+        "HDFCBANK.NS",
+        "NTPC.NS",
+        "ASHOKLEY.NS",
+        "MPHASIS.NS"
+      ],
+      "sequences": 11659,
+      "lstm_loss": 0.4573,
+      "lstm_acc": 62.63,
+      "transformer_loss": 0.4647,
+      "transformer_acc": 62.93,
+      "timestamp": 1791634624.6718209
+    },
+    {
+      "subset_index": 6,
+      "stocks": [
+        "ADANIPORTS.NS",
+        "BSOFT.NS",
+        "BRITANNIA.NS",
+        "HINDUNILVR.NS",
+        "SBIN.NS",
+        "CDSL.NS",
+        "BALKRISIND.NS",
+        "IOC.NS",
+        "KOTAKBANK.NS",
+        "ASIANPAINT.NS"
+      ],
+      "sequences": 11660,
+      "lstm_loss": 0.4139,
+      "lstm_acc": 62.47,
+      "transformer_loss": 0.4493,
+      "transformer_acc": 62.4,
+      "timestamp": 1791637887.4388335
+    },
+    {
+      "subset_index": 7,
+      "stocks": [
+        "ADANIENT.NS",
+        "CAMS.NS",
+        "GODREJPROP.NS",
+        "M&M.NS",
+        "RELIANCE.NS",
+        "BEL.NS",
+        "TORNTPOWER.NS",
+        "BERGEPAINT.NS",
+        "DALBHARAT.NS",
+        "JSWSTEEL.NS"
+      ],
+      "sequences": 11660,
+      "lstm_loss": 0.4017,
+      "lstm_acc": 60.75,
+      "transformer_loss": 0.4665,
+      "transformer_acc": 60.16,
+      "timestamp": 1791659441.396731
+    },
+    {
+      "subset_index": 8,
+      "stocks": [
+        "CIPLA.NS",
+        "ECLERX.NS",
+        "SUZLON.NS",
+        "TATACONSUM.NS",
+        "DIVISLAB.NS",
+        "ONGC.NS",
+        "HAL.NS",
+        "ICICIBANK.NS",
+        "PIIND.NS",
+        "RBLBANK.NS"
+      ],
+      "sequences": 11660,
+      "lstm_loss": 0.3346,
+      "lstm_acc": 62.22,
+      "transformer_loss": 0.42,
+      "transformer_acc": 62.35,
+      "timestamp": 1791662887.9425712
+    },
+    {
+      "subset_index": 9,
+      "stocks": [
+        "LT.NS",
+        "MOTILALOFS.NS",
+        "SUNPHARMA.NS",
+        "POWERGRID.NS",
+        "EICHERMOT.NS",
+        "DIXON.NS",
+        "FEDERALBNK.NS",
+        "INFY.NS",
+        "ULTRACEMCO.NS",
+        "BPCL.NS"
+      ],
+      "sequences": 11660,
+      "lstm_loss": 0.3259,
+      "lstm_acc": 61.62,
+      "transformer_loss": 0.4372,
+      "transformer_acc": 61.26,
+      "timestamp": 1791666129.1212106
+    }
+  ]
+}

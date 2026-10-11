@@ -31,11 +31,11 @@ async def poll_screener_cache():
                 # The service will fetch from cache if valid, or compute if expired.
                 await screener_service._analyze_symbol(symbol)
                 
-                # Sleep between each symbol to avoid hammering APIs or DB
-                await asyncio.sleep(2.0)
+                # Sleep between each symbol to avoid hammering external APIs or DB
+                await asyncio.sleep(8.0)
                 
             # Sleep at the end of a full loop
-            await asyncio.sleep(60)
+            await asyncio.sleep(120)
         except Exception as e:
             logger.error(f"Error in screener poller: {e}")
             await asyncio.sleep(30)

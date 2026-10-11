@@ -57,15 +57,21 @@ async def get_portfolio(
 
     for t in open_trades:
         quote = quotes_map.get(t.symbol)
+        if not quote or quote.get("price", 0) <= 0:
+            clean = t.symbol.replace(".BO", "").replace(".NS", "")
+            quote = quotes_map.get(f"{clean}.NS") or quotes_map.get(f"{clean}.BO") or quotes_map.get(clean)
         if quote and quote.get("price", 0) > 0:
-            current_price = quote["price"]
+            current_price = float(quote["price"])
             multiplier = 1 if t.direction == "BUY" else -1
+            
+            entry_p = float(t.entry_price) if t.entry_price is not None else current_price
+            comm = float(t.commission) if t.commission is not None else 0.0
             
             stt = 0.0
             if t.product_type == "DELIVERY":
                 stt = current_price * t.quantity * 0.001
                 
-            unrealized = multiplier * (current_price - float(t.entry_price)) * t.quantity - float(t.commission) - stt
+            unrealized = multiplier * (current_price - entry_p) * t.quantity - comm - stt
             total_unrealized += unrealized
             value = current_price * t.quantity
             allocation.append({
@@ -73,8 +79,8 @@ async def get_portfolio(
                 "direction": t.direction,
                 "product_type": t.product_type,
                 "quantity": t.quantity,
-                "entry_price": float(t.entry_price),
-                "current_price": current_price,
+                "entry_price": round(entry_p, 2),
+                "current_price": round(current_price, 2),
                 "unrealized_pnl": round(unrealized, 2),
                 "value": round(value, 2),
             })
@@ -83,7 +89,7 @@ async def get_portfolio(
     current_value = initial_capital + total_pnl
 
     # Weight allocation
-    total_value = sum(a["value"] for a in allocation) or 1
+    total_value = sum(a["value"] for a in allocation) or 1.0
     for a in allocation:
         a["weight_pct"] = round(a["value"] / total_value * 100, 2)
 
@@ -91,7 +97,7 @@ async def get_portfolio(
         "initial_capital": initial_capital,
         "current_value": round(current_value, 2),
         "total_pnl": round(total_pnl, 2),
-        "total_pnl_pct": round(total_pnl / initial_capital * 100, 2),
+        "total_pnl_pct": round(total_pnl / initial_capital * 100, 2) if initial_capital > 0 else 0.0,
         "realized_pnl": round(total_realized, 2),
         "unrealized_pnl": round(total_unrealized, 2),
         "total_stt_paid": round(total_stt, 2),

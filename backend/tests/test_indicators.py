@@ -51,6 +51,10 @@ def test_compute_all_returns_dict():
     assert "bb" in result
     assert "ema_9" in result
     assert "ema_21" in result
+    assert "supertrend" in result
+    assert isinstance(result["supertrend"], dict)
+    assert "value" in result["supertrend"]
+    assert "direction" in result["supertrend"]
 
 
 def test_compute_all_insufficient_data():
@@ -124,3 +128,31 @@ def test_mathematical_accuracy_ema():
     assert ema9 > ema21
     # Check if EMA9 is roughly tracking the recent prices (around 128-131)
     assert 125.0 <= ema9 <= 132.0
+
+
+def test_calculate_anchored_vwap():
+    """Verify AVWAP equals normal VWAP when anchored at index 0, and calculates correctly from midpoint."""
+    from backend.services.indicators import calculate_anchored_vwap
+    import ta
+    
+    candles = get_deterministic_candles()
+    df = candles_to_df(candles)
+    
+    # 1. Anchor at index 0
+    anchor_0 = df.index[0]
+    avwap_0 = calculate_anchored_vwap(df, anchor_0)
+    
+    typical_price = (df['High'] + df['Low'] + df['Close']) / 3
+    expected_vwap = (typical_price * df['Volume']).cumsum() / df['Volume'].cumsum()
+    
+    pd.testing.assert_series_equal(avwap_0, expected_vwap, check_names=False, atol=1e-4)
+    
+    # 2. Anchor at midpoint
+    midpoint_idx = len(df) // 2
+    anchor_mid = df.index[midpoint_idx]
+    avwap_mid = calculate_anchored_vwap(df, anchor_mid)
+    
+    assert avwap_mid.iloc[:midpoint_idx].isna().all()
+    
+    typical_price = (df['High'].iloc[midpoint_idx] + df['Low'].iloc[midpoint_idx] + df['Close'].iloc[midpoint_idx]) / 3
+    assert abs(avwap_mid.iloc[midpoint_idx] - typical_price) < 1e-4

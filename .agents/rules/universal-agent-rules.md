@@ -6,12 +6,9 @@ trigger: always_on
 
 This workspace uses `AGENTS.md` as its canonical cross-tool agent policy. Read and obey it completely before using tools or editing files.
 
-Before every implementation or debugging task, read `docs/AI_HANDOFF.md`, inspect the current working tree, and verify the relevant service/test state. Update the handoff before ending work.
+Before every implementation or debugging task, read `docs/AI_HANDOFF.md`, `docs/SESSION_INTERACTION_AUDIT.md`, `docs/ENTERPRISE_MODULES_AND_ROLES_MATRIX.md`, `docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md`, `docs/SYSTEM_DESIGN_ARCHITECTURE.md`, inspect the current working tree, and verify the relevant service/test state. Analyze `docs/SESSION_INTERACTION_AUDIT.md` before responding to eliminate hallucinations. Update the handoff and session audit before ending work.
 
-
-
-
-Read project rules, handoff state, git status, logs, and running-service state first.
+Read project rules, architecture specifications, cybersecurity defenses, session interaction audit, handoff state, git status, logs, and running-service state first.
 Analyze the whole affected path before editing.
 Find root causes, add focused tests, run relevant full-stack checks, and measure performance changes.
 Update the shared handoff before ending, so another tool can continue safely.

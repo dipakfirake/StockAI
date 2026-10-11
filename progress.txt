@@ -1,0 +1,216 @@
+================================================================================
+StockAI Autonomous Loop Progress Tracker
+Workspace: D:\Stock Prediction System
+Date Initialized: 2026-09-28
+================================================================================
+
+[2026-09-28] Initialized PRD.md and baseline progress tracking.
+- System foundation verified: LightGBM models trained, Fyers v3 API integration live, Pre-market SMC Watchlist active, Neon PostgreSQL connected with 13 production tables.
+- Render.com blueprint (render.yaml) established for backend hosting.
+- GitHub Actions CI Pipeline fully green.
+- Next available task: TASK-101 (Validate Render Blueprint Configuration) or TASK-102 (Configure Frontend API Routing for Cloud Backend).
+================================================================================
+
+[2026-09-28 23:52] TASK-101: Validate Render Blueprint Configuration — COMPLETED
+- Replaced hardcoded SECRET_KEY (`production-secret-key-12345`) with Render's `generateValue: true` for secure auto-generation.
+- Verified YAML syntax with Python yaml.safe_load: VALID.
+- Confirmed no hardcoded secrets remain in render.yaml.
+- Health check path: `/api/market/indices` ✓
+- Build command: `pip install -r backend/requirements.txt` ✓
+- Start command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` ✓
+- Python version: 3.11.5 ✓
+
+[2026-09-28 23:54] TASK-102: Configure Frontend API Routing for Cloud Backend — COMPLETED
+- Updated `frontend/vercel.json`: replaced placeholder `YOUR_BACKEND_URL` with `https://stockai-backend.onrender.com`.
+- Added WebSocket rewrite rule `/ws/(.*)` -> `https://stockai-backend.onrender.com/ws/$1`.
+- Updated root `vercel.json`: added API and WebSocket rewrite rules matching the frontend configuration.
+- Verification: `npm run build` passed (exit code 0):
+  - TypeScript: 0 errors
+  - Vite build: 199 modules transformed, built in 5.82s
+  - Output: dist/index.html (0.54 kB), index.css (47.74 kB), index.js (497.21 kB)
+
+================================================================================
+
+[2026-09-29 00:03] TASK-201: Implement Volume Profile Calculation Service — COMPLETED
+- Created `backend/services/volume_profile.py` providing POC, VAH, and VAL from historical bins.
+- Added `/{symbol}/volume-profile` endpoint to `backend/api/stocks.py`.
+- Verified via `backend/tests/test_volume_profile.py` and overall backend test suite (38/38 passed).
+
+[2026-09-29 00:20] TASK-202: Frontend Volume Profile Visual Overlay — COMPLETED
+- Modified `frontend/src/pages/ChartPage.tsx` to include `showVolumeProfile` state and dynamic Volume Profile side bar layout.
+- Added `getVolumeProfile` to `frontend/src/services/api.ts`.
+- Implemented responsive horizontal volume histogram directly next to the chart.
+- Verified via `npm run build` locally without TS errors.
+
+[2026-09-29 00:25] TASK-301: Frontend Report Generation Component — COMPLETED
+- Installed `jspdf` and `html2canvas`.
+- Implemented `generatePDFReport` inside `ChartPage.tsx` using `jsPDF` for native drawing and `takeScreenshot().toDataURL()` for chart image.
+- Formatted institutional report with Symbol, AI Predictive Score, Key Indicators, and Risk Metrics.
+- Verified via `npm run build` locally without TS errors.
+
+================================================================================
+
+[2026-09-29 00:39] TASK-401: Backend Candlestick Pattern Alert Trigger — COMPLETED
+- Extended alert evaluation logic in `backend/tasks/alert_tasks.py` to support `PATTERN` conditions.
+- Implemented specific evaluations for Hammer, Bullish Engulfing, Bearish Engulfing, and Bullish Order Block.
+- Relied on `backend/api/alerts.py` existing `PATTERN` support and `backend/tasks/auto_trader.py` existing notification hooks.
+- Verified via passing `pytest backend/tests/test_alert_tasks.py` (which involved complex DB mocking and market data stubbing).
+
+================================================================================
+
+[2026-09-29 00:44] TASK-402: Frontend Pattern Alert Form — COMPLETED
+- Added `PATTERN` to `CONDITION_TYPES` in `frontend/src/pages/AlertsPage.tsx`.
+- Defined `PATTERN_TYPES` array for Candlestick Patterns mapping (Hammer, Engulfing, Order Block).
+- Modified the "Value" input renderer to display a dropdown `<select>` for patterns when condition type is `PATTERN`, mapping the value dynamically.
+- Ensured table rendering converts the numeric pattern value to the respective label for better UX.
+- Successfully verified build (`npm run build`) and linter (`npm run lint`), passing with 0 exit codes and 0 TS/Lint errors.
+
+================================================================================
+
+[2026-09-29 00:47] TASK-501: Backend Anchored VWAP Indicator — COMPLETED
+- Implemented `calculate_anchored_vwap(df, anchor_date)` in `backend/services/indicators.py`.
+- Wrote unit test `test_calculate_anchored_vwap` in `backend/tests/test_indicators.py` verifying it matches the manual cumulative calculation when anchored at the start and works correctly when anchored at the midpoint.
+- Verified via `pytest backend/tests/test_indicators.py` passing fully.
+
+================================================================================
+
+[2026-09-29 00:56] TASK-502: Frontend Chart Click-to-Anchor Interaction — COMPLETED
+- Added `anchor_date` parameter to `stocksApi.getInsight` and the corresponding `/insight` and `/candles` backend endpoints.
+- Updated `backend/api/stocks.py` to inject `anchored_vwap` into the returned candle series when `anchor_date` is provided.
+- Added "Anchor VWAP" button to `ChartPage.tsx` drawing toolbar and wired it to `isAnchoringVwap` state.
+- Handled chart click events in `subscribeClick` to set the `anchorDate` (handling `BusinessDay` object from `param.time`).
+- Added an `avwapSeries` on the `lightweight-charts` instance to render the dynamically injected `anchored_vwap` data.
+- Verified build using `npm run build` which passed successfully.
+
+================================================================================
+
+[2026-09-29 01:19] Cybersecurity & Financial Risk Hardening — COMPLETED
+- Implemented industrial Token Bucket Rate Limiter with 4 distinct tiers (`AUTH`, `TRADING`, `AI`, `GENERAL`) and standard IETF response headers.
+- Implemented Financial Idempotency Key Manager (`Idempotency-Key` header and body support) to eliminate order race conditions, double-spending, and duplicate executions.
+- Added strict Financial Risk Bounds and Fat-Finger Circuit Breakers in `PaperTradingService` (max 50k shares, max ₹1 Cr notional value, ±30% max price deviation, symbol sanitization).
+- Implemented OWASP Security Headers Middleware (X-Frame-Options: DENY, X-Content-Type-Options: nosniff, HSTS, anti-caching for financial routes).
+- Added DoS Request Body Size Guard (max 1 MB payload with HTTP 413).
+- Implemented Auth Hardening with password complexity checks and 15-minute lockout on 5 consecutive failed logins.
+- Created structured immutable Security Audit Logger writing to `logs/security_audit.log` with sensitive credential redaction.
+- Added sanitized global 500 error handler preventing server stack trace / database connection leaks.
+- Authored comprehensive documentation in `docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md`.
+- Verified with 11 new tests in `backend/tests/test_cybersecurity.py` (all passed), full test suite (43 passed), frontend lint (0 errors), and frontend build (passed).
+
+================================================================================
+
+[2026-09-29 01:33] Ralph Loop Deep Audit & Runtime Bug Fixes — COMPLETED
+- Identified and eliminated 3-second startup freeze in `TimeSyncService`: Moved external `worldtimeapi.org` call to background daemon thread to eliminate blocking imports and noisy SSL timeout warnings during network degradation.
+- Hardened `global_exception_handler` in `backend/main.py`: Added explicit pass-through routing for `FastAPIHTTPException`, `StarletteHTTPException`, and `RequestValidationError`, guaranteeing intentional status codes (400, 401, 403, 404, 409, 422, 429) are never converted into 500 internal server errors.
+- Added 4 live End-to-End integration tests using `TestClient` in `backend/tests/test_cybersecurity.py` verifying header injection, 413 payload limiting, rate limit header propagation, and 500 exception trace sanitization.
+- Full test suite passed: 47 passed in 35.38s (100% green).
+- Frontend lint passed: 0 errors.
+- Frontend production build passed: 48.23s.
+- System confirmed fully operational, robust, and verified.
+
+================================================================================
+
+[2026-09-29 01:48] Institutional System Design Architecture — COMPLETED
+- Acted as Chief Systems Architect & Lead Financial Software Engineer to elevate StockAI to Tier-1 financial institution design standards (Bloomberg, Zerodha, TradingView, QuantConnect).
+- Designed and built Domain Event Bus (`backend/core/event_bus.py`) with typed events (`OrderPlacedEvent`, `OrderExecutedEvent`, `OrderClosedEvent`, `MarketTickEvent`, `SystemAlertEvent`), async subscriber execution, and error isolation.
+- Built State-Machine Circuit Breaker (`backend/core/circuit_breaker.py`) implementing Martin Fowler / Hystrix pattern (`CLOSED`, `OPEN`, `HALF_OPEN`) with fallback mechanisms to protect against external broker (Fyers/Yahoo) timeouts and cascade failures.
+- Built Multi-Tier Cache Manager (`backend/core/cache_manager.py`) with L1 in-memory microsecond LRU cache, L2 Redis async integration, and Single-Flight request coalescing mutex preventing Thundering Herd / Cache Stampedes on volatile market opens.
+- Implemented Enterprise SRE Observability & Prometheus Telemetry (`backend/core/telemetry.py`): `/metrics` Prometheus exposition, Kubernetes `/health/live` probe, and deep `/health/ready` probe measuring Neon Postgres and Redis latencies.
+- Built Coordinated Graceful Lifespan Manager (`backend/core/lifecycle.py`) orchestrating clean startup and SIGTERM/SIGINT teardown, safely draining in-flight requests and disposing Neon DB and Redis connection pools.
+- Fixed volume profile bin accounting reconciliation in `backend/services/volume_profile.py` guaranteeing exact sum invariant equality.
+- Authored comprehensive architecture reference manual in `docs/SYSTEM_DESIGN_ARCHITECTURE.md`.
+- Updated `AGENTS.md`, `GEMINI.md`, and `.agents/rules/universal-agent-rules.md` requiring every AI agent prompt to read both `docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md` and `docs/SYSTEM_DESIGN_ARCHITECTURE.md`.
+- Automated Verification:
+  - `backend/tests/test_system_design.py`: 9/9 passed.
+  - `backend/tests/test_cybersecurity.py`: 15/15 passed.
+  - Full backend test suite: 56/56 passed in 32.53s (100% green).
+  - Frontend lint (`npm run lint`): 0 errors, 0 warnings.
+  - Frontend production build (`npm run build`): passed with exit code 0 in 34.72s.
+
+================================================================================
+
+[2026-09-29 02:15] Docker Backend Rebuild, Enterprise Module Matrix & Session Interaction Audit — COMPLETED
+- Built and refreshed backend Docker image: `docker compose build backend` (0 errors).
+- Recreated and restarted live container: `docker compose up -d --no-deps backend` (`stockbackend` container status: `healthy`).
+- Verified HTTP health probes on running container:
+  - `/health/live`: `{"status": "alive", "uptime_seconds": 102.4}`.
+  - `/health/ready`: `{"status": "ready", "checks": {"database": {"status": "healthy", "latency_ms": 61.8}, "redis": {"status": "healthy", "latency_ms": 28.08}, "circuit_breakers": {"fyers_api": {"state": "CLOSED"}, "market_data": {"state": "CLOSED"}, "neon_db": {"state": "CLOSED"}}}}`.
+- Created comprehensive Enterprise Roles & Modules Matrix: `docs/ENTERPRISE_MODULES_AND_ROLES_MATRIX.md` detailing 45+ specialized modules across 8 engineering disciplines (Systems Architect, InfoSec / SecOps, Quant Developer, ML Quant, QA / SDET, DevOps / SRE, High-Frequency UI / UX, Regulatory Compliance) with interactive checkboxes `[x]` and `[ ]`.
+- Created Master Session Interaction Audit & Anti-Hallucination Ground Truth Ledger: `docs/SESSION_INTERACTION_AUDIT.md` capturing timestamped history of prompts, actions, code changes, and verification test proofs.
+- Updated `AGENTS.md`, `GEMINI.md`, and `.agents/rules/universal-agent-rules.md` requiring every future agent prompt to analyze `docs/SESSION_INTERACTION_AUDIT.md` before responding to eliminate hallucinations.
+- Full verification:
+  - Backend regression suite: 64 passed in 30.69s (100% green).
+  - Frontend lint: 0 errors, 0 warnings.
+  - Frontend production build: passed with exit code 0.
+
+================================================================================
+
+[2026-09-29 02:30] Dual-Listed BSE/NSE Quote Resolution & Holdings Fix — COMPLETED
+- Identified root cause of `LTP: —`, `Current Value: —`, `P&L: —` on Paper Trading Positions page for `PCJEWELLER.BO`.
+- Fixed Fyers API query formatting in `MarketDataService.fetch_quotes_bulk`: BSE cash equities (e.g. `BSE:PCJEWELLER-EQ`) errored in Fyers with `-300: Please provide a valid symbol`. Automatically mapped BSE cash equities to liquid NSE counterparts (`NSE:<SYMBOL>-EQ`) in Fyers bulk queries and populated original requested symbols in the response.
+- Added dual-listed fallback resolution in `backend/api/paper_trading.py` and `backend/api/portfolio.py` to match `.NS`, `.BO`, and base tickers.
+- Restarted backend Docker container and verified live:
+  - `GET /api/paper-trades` returns `PCJEWELLER.BO` with `LTP: 13.52` and `Unrealized: -313.80`.
+- All 64 backend regression tests passed (100% green).
+
+================================================================================
+
+[2026-09-29 02:55] Health Check Alias & Fundamental Market Cap Hydration — COMPLETED
+- Added `/health/liv` alias endpoint alongside `/health/live` in `backend/core/telemetry.py` and `backend/main.py` to handle typos/truncated probes without returning 404.
+- Fixed `frontend/src/pages/ChartPage.tsx` line 1319 to inspect both `quote.market_cap` and `info?.market_cap`: `Number(quote.market_cap || info?.market_cap || 0)`.
+- Enriched `get_quote` in `backend/api/stocks.py` to hydrate fundamental `market_cap` via `market_data_service.get_stock_info(symbol)` whenever broker quotes return 0 or null.
+- Verified on live running backend (`http://localhost:8000`):
+  - `GET /health/liv` -> 200 OK `{"status": "alive"}`.
+  - `GET /api/stocks/PCJEWELLER/quote` -> 200 OK with `market_cap: 132600881152` (~₹13,260.1 Cr).
+  - `GET /api/stocks/PCJEWELLER/insight` -> 200 OK with `market_cap: 132600881152`.
+- Full verification:
+  - Backend regression tests: 64 passed in 37.21s (100% green).
+  - Frontend typecheck and build: `npm run build` passed with exit code 0.
+
+================================================================================
+
+[2026-09-29 18:15] Universal Stock Search & Quote Reliability (Resolving "godigit") — COMPLETED
+- Diagnosed root cause of "No stocks found for 'godigit'": environment yfinance package lacked `yf.Search` attribute, causing all searches outside the local database to fail silently.
+- Re-architected `MarketDataService.search_stocks` with direct, high-speed Yahoo Finance Search API integration via `httpx` (`query2.finance.yahoo.com/v1/finance/search`) with browser User-Agent headers.
+- Implemented automatic async background indexing of discovered stocks into PostgreSQL `Stock` table.
+- Added direct Yahoo Chart API quote fallback in `fetch_quote` ensuring instantaneous quotes even under Fyers single-quote rate limits or Yahoo crumb errors.
+- Added 1.5s timeout guard on `get_quote` fundamental enrichment to protect against third-party upstream latency.
+- Expanded client-side `FALLBACK_RESULTS` in `frontend/src/components/StockSearchBox.tsx`.
+- Verified on live running backend (`http://localhost:8000`):
+  - `GET /api/stocks/search?q=godigit` -> returns `GODIGIT` (NSE) and `GODIGIT.BO` (BSE).
+  - `GET /api/stocks/GODIGIT.NS/quote` -> 200 OK (`Price: 253.2`, `Change%: +3.35%`).
+  - `GET /api/stocks/GODIGIT.NS/candles` -> 200 OK (34 daily candles returned).
+- Full verification:
+  - Backend regression tests: 64 passed in 45.82s (100% green).
+  - Frontend lint (`npm run lint`): 0 errors, 0 warnings.
+  - Frontend production build (`npm run build`): passed with exit code 0 in 45.28s.
+
+================================================================================
+
+[2026-09-29 19:35] Fyers Token & Real-Time Zero-Price Prevention ("0 0 0 0 0" Fix) — COMPLETED
+- Investigated user issue where token generated via `generate_fyers_token.bat` resulted in all prices displaying `0 0 0 0 0`.
+- Validated Fyers token: `fyers.get_profile()` confirmed token was 100% authenticated for user `DIPAK CHANDRAKANT FIRAKE`.
+- Diagnosed root causes:
+  1. Cloudflare WAF Error 1015 IP ban on Fyers REST API caused by rapid 1.0s unthrottled REST polling from `backend/api/websocket.py` and 2.0s polling from `backend/tasks/screener_poller.py`.
+  2. Broken fallback in `fetch_quotes_bulk` relying on `yf.download`, which threw crumb/JSONDecodeError.
+  3. Default hardcoded `0.0` injection in `backend/api/market.py` (`/indices` and `/sectors`) when quotes were missing.
+  4. Disabled WebSocket fallback (`use_fallback=False`) and blocking sleep in `backend/api/websocket.py`.
+- Engineering remediations:
+  - Upgraded `MarketDataService.fetch_quotes_bulk` with Cloudflare WAF 1015 / 429 detection and 45s cooldown.
+  - Implemented high-speed concurrent direct Yahoo Chart API fallback (`httpx.AsyncClient` querying `https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}`) in <200ms without crumb blocks.
+  - Added tertiary fallback to Redis quote cache (`quote:{sym}`) to hydrate last-known prices so prices never drop to 0.0.
+  - Enabled `use_fallback=True` and relaxed polling interval to 3.0s in `backend/api/websocket.py`.
+  - Increased sleep intervals in `screener_poller.py` (8.0s per symbol, 120s per loop).
+  - Hardened `/indices` and `/sectors` in `backend/api/market.py` with single quote fallback and cached price retention.
+  - Added unit test `test_fetch_quotes_bulk_fyers_and_fallback` in `backend/tests/test_market_data.py`.
+- Full verification:
+  - Unit tests: `pytest backend/tests/test_market_data.py` -> 9/9 passed in 31.40s (100% green).
+  - Frontend production build: `npm run build` -> passed in 52.66s (exit code 0).
+  - Live Fyers API & system verification:
+    - Fyers profile: `DIPAK CHANDRAKANT FIRAKE`.
+    - Single quote: `NSE:SBIN-EQ` -> `964.70` (source: `Fyers API`).
+    - Bulk quotes: `^NSEI` (22,716.20), `^NSEBANK` (54,259.95), `BSE:SENSEX-INDEX` (72,529.07), `NSE:INDIAVIX-INDEX` (13.41), `RELIANCE.NS` (1,182.00), `TCS.NS` (2,032.40), `INFY.NS` (1,015.40).
+    - `GET /api/market/indices`: 6/6 indices return live Fyers market prices (zero `0.00`).
+    - `GET /api/market/sectors`: 8/8 sectors return live market prices.
+================================================================================
+
+

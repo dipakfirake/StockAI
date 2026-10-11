@@ -18,6 +18,7 @@ router = APIRouter()
 async def get_stock_insight(
     symbol: str,
     timeframe: str = Query("1d"),
+    anchor_date: str | None = Query(None, description="ISO date to anchor VWAP calculation"),
     current_user=Depends(get_current_user),
 ):
     """One live, UI-ready view of price action, risk, technicals and recent news."""
@@ -27,25 +28,46 @@ async def get_stock_insight(
     # Fetch optimal 500 candles (~2 years of daily data), enough for SMA200 and all indicators in 1 fast call
     fetch_limit = 500
 
-    quote, candles, news, swing_trade, events = await __import__("asyncio").gather(
+    import asyncio
+    import math
+
+    results = await asyncio.gather(
         market_data_service.fetch_quote(symbol),
         market_data_service.fetch_candles(symbol, timeframe, limit=fetch_limit),
         fetch_stock_news(symbol),
         screener_service._analyze_symbol(symbol),
-        market_data_service.fetch_corporate_events(symbol)
+        market_data_service.fetch_corporate_events(symbol),
+        return_exceptions=True
     )
-    if not quote:
+    quote = results[0] if not isinstance(results[0], Exception) else None
+    candles = results[1] if (not isinstance(results[1], Exception) and isinstance(results[1], list)) else []
+    news = results[2] if (not isinstance(results[2], Exception) and isinstance(results[2], list)) else []
+    swing_trade = results[3] if (not isinstance(results[3], Exception) and isinstance(results[3], dict)) else {}
+    events = results[4] if (not isinstance(results[4], Exception) and isinstance(results[4], dict)) else {}
+
+    if not quote or not isinstance(quote, dict):
         raise HTTPException(status_code=404, detail=f"No quote data found for {symbol}")
 
+    price = float(quote.get("price", 0.0))
+
     # Compute dynamic 52W High & Low from historical candles
-    if candles:
-        # Take the most recent 252 candles (1 trading year)
+    if candles and price > 0:
         year_candles = candles[-252:]
-        quote["52w_high"] = round(max(float(c.get("high", quote["price"])) for c in year_candles), 2)
-        quote["52w_low"] = round(min(float(c.get("low", quote["price"])) for c in year_candles), 2)
+        highs = []
+        lows = []
+        for c in year_candles:
+            try:
+                h = float(c.get("high", price))
+                l = float(c.get("low", price))
+                if math.isfinite(h) and h > 0: highs.append(h)
+                if math.isfinite(l) and l > 0: lows.append(l)
+            except (ValueError, TypeError):
+                continue
+        quote["52w_high"] = round(max(highs), 2) if highs else price
+        quote["52w_low"] = round(min(lows), 2) if lows else price
     else:
-        quote["52w_high"] = quote["price"]
-        quote["52w_low"] = quote["price"]
+        quote["52w_high"] = price
+        quote["52w_low"] = price
 
     # Populate Market Cap from swing_trade or stock info
     if swing_trade and swing_trade.get("market_cap"):
@@ -60,6 +82,23 @@ async def get_stock_insight(
 
     indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
     series_candles = indicator_service.compute_for_candles_series(candles)
+    
+    if anchor_date and len(series_candles) > 0:
+        try:
+            from backend.services.indicators import calculate_anchored_vwap, candles_to_df
+            import pandas as pd
+            pd.to_datetime(anchor_date)
+            df = candles_to_df(series_candles)
+            avwap_series = calculate_anchored_vwap(df, anchor_date)
+            for i, c in enumerate(series_candles):
+                ts = pd.to_datetime(c["timestamp"])
+                if ts in avwap_series.index and not pd.isna(avwap_series[ts]):
+                    c["anchored_vwap"] = round(float(avwap_series[ts]), 4)
+                else:
+                    c["anchored_vwap"] = None
+        except Exception as e:
+            logger.warning(f"Anchored VWAP calculation error for {symbol}: {e}")
+
     patterns = []
     if len(series_candles) >= 10:
         from backend.services.indicators import candles_to_df, detect_candlestick_patterns
@@ -104,6 +143,13 @@ async def get_quote(symbol: str, current_user=Depends(get_current_user)):
     quote = await market_data_service.fetch_quote(symbol)
     if not quote:
         raise HTTPException(status_code=404, detail=f"No quote data found for {symbol}")
+    if not quote.get("market_cap") or quote.get("market_cap") == 0:
+        try:
+            info = await asyncio.wait_for(market_data_service.get_stock_info(symbol), timeout=15.0)
+            if info and info.get("market_cap"):
+                quote["market_cap"] = info["market_cap"]
+        except Exception:
+            pass
     return quote
 
 
@@ -114,11 +160,27 @@ async def get_candles(
     limit: int = Query(200, ge=1, le=2000),
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
+    anchor_date: str | None = Query(None, description="ISO date to anchor VWAP calculation"),
     current_user=Depends(get_current_user),
 ):
     """Get OHLCV candlestick data with indicator series."""
     candles = await market_data_service.fetch_candles(symbol, timeframe, limit, start_date, end_date)
     series_candles = indicator_service.compute_for_candles_series(candles)
+    
+    if anchor_date and len(series_candles) > 0:
+        from backend.services.indicators import calculate_anchored_vwap, candles_to_df
+        import pandas as pd
+        df = candles_to_df(series_candles)
+        avwap_series = calculate_anchored_vwap(df, anchor_date)
+        
+        # Inject anchored VWAP back into the result
+        for i, c in enumerate(series_candles):
+            ts = pd.to_datetime(c["timestamp"])
+            if ts in avwap_series.index and not pd.isna(avwap_series[ts]):
+                c["anchored_vwap"] = round(float(avwap_series[ts]), 4)
+            else:
+                c["anchored_vwap"] = None
+
     return {"symbol": symbol, "timeframe": timeframe, "candles": series_candles}
 
 
@@ -201,3 +263,24 @@ async def get_patterns(
         })
         
     return {"symbol": symbol, "timeframe": timeframe, "patterns": result}
+
+
+@router.get("/{symbol}/volume-profile")
+async def get_volume_profile(
+    symbol: str,
+    timeframe: str = Query("1d"),
+    limit: int = Query(250),
+    num_bins: int = Query(50),
+    current_user=Depends(get_current_user),
+):
+    """Compute volume profile (POC, VAH, VAL) for a symbol."""
+    from backend.services.volume_profile import calculate_volume_profile
+    from backend.services.indicators import candles_to_df
+
+    candles = await market_data_service.fetch_candles(symbol, timeframe, limit=limit)
+    if len(candles) < 10:
+        raise HTTPException(status_code=422, detail="Insufficient data for volume profile")
+
+    df = candles_to_df(candles)
+    profile = calculate_volume_profile(df, num_bins=num_bins)
+    return {"symbol": symbol, "timeframe": timeframe, **profile}

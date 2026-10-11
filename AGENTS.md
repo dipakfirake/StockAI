@@ -4,11 +4,13 @@ This file is the canonical, tool-neutral rule set for this repository. Claude, C
 
 ## Continuity across AI tools
 
-1. Read `docs/AI_HANDOFF.md` and `git status --short` at the start of every implementation, debugging, testing, or review task.
-2. Treat the handoff as the shared external memory. Do not assume a previous chat, model, or IDE retained private context.
-3. Before making a change, preserve relevant existing work and identify unfinished work, known failures, running services, and test results.
-4. Before ending work, update `docs/AI_HANDOFF.md` with: task status, files changed, commands run and results, running services/URLs, known failures, and the exact next safe step.
-5. If context is missing, inspect the repository, service status, logs, and test history before changing code. Never invent previous work.
+1. Read `docs/AI_HANDOFF.md`, `docs/SESSION_INTERACTION_AUDIT.md`, `docs/ENTERPRISE_MODULES_AND_ROLES_MATRIX.md`, `docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md`, `docs/SYSTEM_DESIGN_ARCHITECTURE.md`, and `git status --short` at the start of every implementation, debugging, testing, or review task.
+2. Analyze `docs/SESSION_INTERACTION_AUDIT.md` before responding to eliminate AI hallucination, preserve exact chronological context, and ensure consistency with past prompt executions.
+3. Treat the handoff and session audit as the shared external memory. Do not assume a previous chat, model, or IDE retained private context.
+4. Respect and adhere to all architectural patterns (Domain Event Bus, Circuit Breaker, Multi-Tier Cache with Single-Flight Mutex, Prometheus Telemetry) and cybersecurity defenses (Token Bucket Rate Limiting, Idempotency, Risk Guardrails) documented in those specifications.
+5. Before making a change, preserve relevant existing work and identify unfinished work, known failures, running services, and test results.
+6. Before ending work, update `docs/AI_HANDOFF.md` and append to `docs/SESSION_INTERACTION_AUDIT.md` with: task status, files changed, commands run and results, running services/URLs, known failures, and the exact next safe step.
+7. If context is missing, inspect the repository, service status, logs, and test history before changing code. Never invent previous work.
 
 ## Required engineering workflow
 

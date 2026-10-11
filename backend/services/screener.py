@@ -20,78 +20,177 @@ from backend.services.ai_engine import ai_engine_service
 
 logger = get_logger(__name__)
 
-# Subset of highly liquid Nifty 50 stocks to prevent Yahoo Finance IP bans
-NIFTY_UNIVERSE = [
-    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
-    "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "HINDUNILVR.NS", "LT.NS",
-    "BAJFINANCE.NS", "HCLTECH.NS", "ASIANPAINT.NS", "AXISBANK.NS", "MARUTI.NS",
-    "KOTAKBANK.NS", "SUNPHARMA.NS", "TITAN.NS", "M&M.NS", "ULTRACEMCO.NS",
-    "TATAMOTORS.NS", "NTPC.NS", "TATASTEEL.NS", "POWERGRID.NS", "BAJAJFINSV.NS"
-]
+# Sector Universes for targeted market screening
+SECTOR_UNIVERSES: dict[str, list[str]] = {
+    "NIFTY_50": [
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
+        "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "HINDUNILVR.NS", "LT.NS",
+        "AXISBANK.NS", "KOTAKBANK.NS", "MARUTI.NS", "SUNPHARMA.NS", "TITAN.NS",
+        "ULTRACEMCO.NS", "ASIANPAINT.NS", "NTPC.NS", "TATAMOTORS.NS", "BAJFINANCE.NS",
+        "POWERGRID.NS", "M&M.NS", "ADANIENT.NS", "TATASTEEL.NS", "COALINDIA.NS"
+    ],
+    "BANKING": [
+        "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS",
+        "INDUSINDBK.NS", "AUBANK.NS", "BANDHANBNK.NS", "BANKBARODA.NS", "PNB.NS"
+    ],
+    "IT": [
+        "TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS",
+        "LTIM.NS", "COFORGE.NS", "PERSISTENT.NS"
+    ],
+    "AUTO": [
+        "TATAMOTORS.NS", "MARUTI.NS", "M&M.NS", "BAJAJ-AUTO.NS", "EICHERMOT.NS",
+        "HEROMOTOCO.NS", "TVSMOTOR.NS", "ASHOKLEY.NS"
+    ],
+    "PHARMA": [
+        "SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS", "APOLLOHOSP.NS",
+        "LUPIN.NS", "AUROPHARMA.NS"
+    ],
+    "ENERGY": [
+        "RELIANCE.NS", "NTPC.NS", "POWERGRID.NS", "ONGC.NS", "BPCL.NS",
+        "COALINDIA.NS", "IOC.NS", "GAIL.NS"
+    ],
+    "FMCG": [
+        "ITC.NS", "HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS",
+        "DABUR.NS", "MARICO.NS", "GODREJCP.NS"
+    ],
+    "METAL": [
+        "TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "VEDL.NS",
+        "JINDALSTEL.NS", "NMDC.NS", "NATIONALUM.NS"
+    ],
+    "MID_CAP": [
+        "POLYCAB.NS", "DIXON.NS", "PERSISTENT.NS", "COFORGE.NS", "CAMS.NS",
+        "FEDERALBNK.NS", "BEL.NS", "CUMMINSIND.NS", "GODREJPROP.NS", "PIIND.NS"
+    ],
+    "SMALL_CAP": [
+        "SUZLON.NS", "CDSL.NS", "BSE.NS", "ANGELONE.NS", "MAZDOCK.NS",
+        "KAYNES.NS", "KALYANKJIL.NS", "RBLBANK.NS", "BSOFT.NS", "ZENTEC.NS"
+    ]
+}
+
+# Default highly liquid Nifty universe
+NIFTY_UNIVERSE = SECTOR_UNIVERSES["NIFTY_50"]
 
 
 class ScreenerService:
     @staticmethod
-    async def run_screener(symbols: list[str] = None) -> dict:
+    async def run_screener(
+        symbols: list[str] = None,
+        sector: str = None,
+        force_refresh: bool = False
+    ) -> dict:
         """
-        Run the multi-factor screener on a list of symbols.
-        Returns a ranked list of top trade setups.
+        Run the multi-factor screener on a list of symbols or sector universe.
+        Returns categorized lists of BUY, SELL, and HOLD setups with summary stats.
         """
+        norm_sector = sector.upper().replace(" ", "_") if sector else "DEFAULT"
         if not symbols:
-            symbols = NIFTY_UNIVERSE
+            symbols = SECTOR_UNIVERSES.get(norm_sector, NIFTY_UNIVERSE)
 
-        logger.info(f"Starting Swing Trade Screener for {len(symbols)} symbols...")
+        cache_key = f"screener_results_{norm_sector}"
+        if not force_refresh:
+            cached = await cache_get(cache_key)
+            if cached and isinstance(cached, dict) and "buy_stocks" in cached:
+                logger.info(f"Returning cached screener results for {norm_sector}")
+                return cached
+
+        logger.info(f"Starting Swing Trade Screener for {len(symbols)} symbols ({norm_sector})...")
         
-        # We process in batches to avoid rate limits
-        batch_size = 5
+        # We process in batches with rate-limit guards
+        batch_size = 6
         all_results = []
         
         for i in range(0, len(symbols), batch_size):
             batch = symbols[i:i + batch_size]
-            tasks = [ScreenerService._analyze_symbol(sym) for sym in batch]
+            tasks = [ScreenerService._analyze_symbol(sym, force_refresh=force_refresh) for sym in batch]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             for res in results:
-                if isinstance(res, dict) and res.get("total_score", 0) > 0:
+                if isinstance(res, dict) and res.get("total_score", 0) > 0 and not res.get("error"):
                     all_results.append(res)
                     
-            await asyncio.sleep(1.0)  # Rate limit protection
+            if i + batch_size < len(symbols):
+                await asyncio.sleep(0.4)
 
-        # Sort by total conviction score
-        all_results.sort(key=lambda x: x["total_score"], reverse=True)
-        
-        # Only keep top setups (Score > 65)
-        top_setups = [r for r in all_results if r["total_score"] >= 65]
+        # Categorize into explicit trading lists
+        buy_stocks = [r for r in all_results if r.get("action") == "BUY"]
+        buy_stocks.sort(key=lambda x: x.get("total_score", 0), reverse=True)
 
-        return {
+        sell_stocks = [r for r in all_results if r.get("action") == "SELL"]
+        sell_stocks.sort(key=lambda x: x.get("total_score", 0))  # lowest score / strongest sell first
+
+        hold_stocks = [r for r in all_results if r.get("action") == "HOLD"]
+        hold_stocks.sort(key=lambda x: x.get("total_score", 0), reverse=True)
+
+        # Sort all results by score descending
+        all_results.sort(key=lambda x: x.get("total_score", 0), reverse=True)
+        top_setups = [r for r in all_results if r.get("total_score", 0) >= 65]
+
+        # Calculate institutional summary metrics
+        buy_gains = [r["trade_plan"]["expected_gain_pct"] for r in buy_stocks if r.get("trade_plan") and r["trade_plan"].get("expected_gain_pct")]
+        buy_rrs = [r["trade_plan"]["reward_to_risk"] for r in buy_stocks if r.get("trade_plan") and r["trade_plan"].get("reward_to_risk")]
+        sell_drops = [r["trade_plan"]["expected_gain_pct"] for r in sell_stocks if r.get("trade_plan") and r["trade_plan"].get("expected_gain_pct")]
+
+        summary = {
+            "total_scanned": len(symbols),
+            "valid_results": len(all_results),
+            "buy_count": len(buy_stocks),
+            "sell_count": len(sell_stocks),
+            "hold_count": len(hold_stocks),
+            "avg_buy_gain_pct": round(float(np.mean(buy_gains)), 2) if buy_gains else 0.0,
+            "avg_buy_rr": round(float(np.mean(buy_rrs)), 2) if buy_rrs else 0.0,
+            "avg_sell_drop_pct": round(float(np.mean(sell_drops)), 2) if sell_drops else 0.0,
+            "market_breadth": "BULLISH" if len(buy_stocks) > len(sell_stocks) else ("BEARISH" if len(sell_stocks) > len(buy_stocks) else "NEUTRAL"),
+            "top_buy_pick": buy_stocks[0]["symbol"] if buy_stocks else None,
+            "top_sell_pick": sell_stocks[0]["symbol"] if sell_stocks else None,
+        }
+
+        output = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "sector": norm_sector,
+            "total_scanned": len(symbols),
             "stocks_scanned": len(symbols),
             "setups_found": len(top_setups),
+            "summary": summary,
+            "buy_stocks": buy_stocks,
+            "sell_stocks": sell_stocks,
+            "hold_stocks": hold_stocks,
             "top_setups": top_setups,
             "all_results": all_results
         }
 
+        # Cache for 5 minutes (300 seconds)
+        await cache_set(cache_key, output, ttl=300)
+        return output
+
     @staticmethod
-    async def _analyze_symbol(symbol: str) -> dict:
+    async def _analyze_symbol(symbol: str, force_refresh: bool = False) -> dict:
         """Analyze a single symbol across all three dimensions."""
         cache_key = f"screener_analysis:{symbol}"
-        cached = await cache_get(cache_key)
-        if cached:
-            return cached
+        if not force_refresh:
+            cached = await cache_get(cache_key)
+            if cached:
+                return cached
 
         try:
             # 1. Fetch Data
-            # Use limit=2000 to share the cache with get_stock_insight in stocks.py
-            candles_task = market_data_service.fetch_candles(symbol, "1d", limit=2000)
+            # Use limit=250 (approx 1 year of daily candles) which is optimal for swing trade indicators (EMA 200, ATR 14, RSI 14)
+            candles_task = market_data_service.fetch_candles(symbol, "1d", limit=250)
+            quote_task = market_data_service.fetch_quote(symbol)
             info_task = market_data_service.get_stock_info(symbol)
             events_task = market_data_service.fetch_corporate_events(symbol)
             from backend.data.ingestion.news_scraper import fetch_stock_news
             news_task = fetch_stock_news(symbol)
             
-            candles, info, events, news = await asyncio.gather(candles_task, info_task, events_task, news_task)
+            candles, quote, info, events, news = await asyncio.gather(
+                candles_task, quote_task, info_task, events_task, news_task, return_exceptions=True
+            )
             
-            if not candles:
+            if isinstance(candles, Exception) or not candles:
                 return {"symbol": symbol, "error": "Insufficient data"}
+            if isinstance(quote, Exception): quote = {}
+            if isinstance(info, Exception): info = {}
+            if isinstance(events, Exception): events = {}
+            if isinstance(news, Exception): news = []
                 
             indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
             
@@ -166,36 +265,67 @@ class ScreenerService:
             total_score = (tech_raw * 0.40) + (fund_score * 0.35) + (sentiment_score * 0.25)
             
             # 6. Generate Trade Setup
-            current_price = candles[-1]["close"] if candles else 0.0
+            # Prioritize live market quote price for exact real-time entry price
+            live_price = float(quote.get("price", 0.0)) if quote and quote.get("price") else 0.0
+            last_candle_price = float(candles[-1]["close"]) if candles else 0.0
+            current_price = live_price if live_price > 0 else last_candle_price
             raw_atr = indicators.get("atr_14") if indicators else 0.0
             # Enforce a minimum ATR (e.g. 1.5% of price) so target/SL are never exactly entry price
             atr = max(float(raw_atr) if raw_atr is not None else 0.0, current_price * 0.015)
             
             if total_score >= 60:
                 action = "BUY"
-                # Dynamic multiplier: higher score = wider target. Score 60 -> Target 2.0x ATR, Score 100 -> Target 4.0x ATR
                 conviction_scale = (total_score - 60) / 40.0  # 0.0 to 1.0
                 target_mult = 2.0 + (2.0 * conviction_scale)
-                sl_mult = 1.0 + (0.5 * conviction_scale) # Stop loss also scales slightly to avoid premature stopped out on high volatility breakouts
+                sl_mult = 1.0 + (0.5 * conviction_scale)
                 stop_loss = max(0.05, current_price - (sl_mult * atr))
-                target = max(0.05, current_price + (target_mult * atr))
+                t1 = max(0.05, current_price + (1.5 * atr))
+                t2 = max(0.05, current_price + (target_mult * atr))
+                t3 = max(0.05, current_price + (3.5 * atr))
+                target = t2
             elif total_score <= 40:
                 action = "SELL"
                 conviction_scale = (40 - total_score) / 40.0  # 0.0 to 1.0
                 target_mult = 2.0 + (2.0 * conviction_scale)
                 sl_mult = 1.0 + (0.5 * conviction_scale)
                 stop_loss = max(0.05, current_price + (sl_mult * atr))
-                target = max(0.05, current_price - (target_mult * atr))
+                t1 = max(0.05, current_price - (1.5 * atr))
+                t2 = max(0.05, current_price - (target_mult * atr))
+                t3 = max(0.05, current_price - (3.5 * atr))
+                target = t2
             else:
                 action = "HOLD"
-                # Neutral sideways projection: symmetrical support/resistance bands
-                # For HOLD, we show the expected trading channel rather than a strict 1:2 trade setup
                 stop_loss = max(0.05, current_price - (1.2 * atr))
-                target = max(0.05, current_price + (1.2 * atr))
+                t1 = max(0.05, current_price + (0.8 * atr))
+                t2 = max(0.05, current_price + (1.2 * atr))
+                t3 = max(0.05, current_price + (1.8 * atr))
+                target = t2
 
-            gain_pct = abs((target - current_price) / current_price) * 100 if current_price > 0 else 0
-            risk_pct = abs((current_price - stop_loss) / current_price) * 100 if current_price > 0 else 0
+            risk_amount = abs(current_price - stop_loss)
+            gain_pct = abs((target - current_price) / current_price) * 100 if current_price > 0 else 0.0
+            risk_pct = abs((current_price - stop_loss) / current_price) * 100 if current_price > 0 else 0.0
             
+            targets_breakdown = [
+                {
+                    "level": "T1 (Conservative)",
+                    "price": round(t1, 2),
+                    "gain_pct": round(abs(t1 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
+                    "reward_to_risk": round(abs(t1 - current_price) / risk_amount, 2) if risk_amount > 0 else 0.0
+                },
+                {
+                    "level": "T2 (Primary / Optimal)",
+                    "price": round(t2, 2),
+                    "gain_pct": round(abs(t2 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
+                    "reward_to_risk": round(abs(t2 - current_price) / risk_amount, 2) if risk_amount > 0 else 0.0
+                },
+                {
+                    "level": "T3 (Extended Breakout)",
+                    "price": round(t3, 2),
+                    "gain_pct": round(abs(t3 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
+                    "reward_to_risk": round(abs(t3 - current_price) / risk_amount, 2) if risk_amount > 0 else 0.0
+                }
+            ]
+
             # Estimate holding days (Target / average daily range)
             base_days = max(3, int(round(abs(target - current_price) / (atr if atr > 0 else 1))))
             max_days = base_days + max(3, int(base_days * 0.5))
@@ -215,10 +345,14 @@ class ScreenerService:
                     "entry_price": round(current_price, 2),
                     "stop_loss": round(stop_loss, 2),
                     "target_price": round(target, 2),
+                    "target_1": round(t1, 2),
+                    "target_2": round(t2, 2),
+                    "target_3": round(t3, 2),
                     "expected_gain_pct": round(gain_pct, 2),
                     "risk_pct": round(risk_pct, 2),
-                    "reward_to_risk": round(gain_pct / risk_pct, 2) if risk_pct > 0 else 0,
-                    "estimated_hold_time": hold_time
+                    "reward_to_risk": round(gain_pct / risk_pct, 2) if risk_pct > 0 else 0.0,
+                    "estimated_hold_time": hold_time,
+                    "targets": targets_breakdown,
                 },
                 "news_sentiment": nlp_result.get("overall_sentiment", "NEUTRAL"),
                 "ml_score": ai_res

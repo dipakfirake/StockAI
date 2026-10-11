@@ -1,6 +1,4 @@
-"""Auth API router — registration and login."""
-
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -8,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.core.auth import verify_password, hash_password, create_access_token, get_current_user
+from backend.core.auth_security import validate_password_strength, brute_force_protector
+from backend.core.audit_logger import log_security_event
 from backend.models.user import User
 
 router = APIRouter()
@@ -26,10 +26,33 @@ class RegisterResponse(BaseModel):
     token: str
 
 
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
+
+
 @router.post("/register", response_model=RegisterResponse)
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """Register a new user."""
-    existing = await db.execute(select(User).where(User.email == request.email))
+async def register(request: RegisterRequest, req: Request, db: AsyncSession = Depends(get_db)):
+    """Register a new user with password strength validation."""
+    client_ip = _get_client_ip(req)
+    
+    # Enforce password strength
+    try:
+        validate_password_strength(request.password)
+    except ValueError as e:
+        log_security_event(
+            event_type="AUTH_REGISTER_REJECTED",
+            severity="WARNING",
+            ip_address=client_ip,
+            details={"email": request.email, "reason": str(e)},
+        )
+        raise HTTPException(status_code=400, detail=str(e))
+
+    existing = await db.execute(select(User).where(User.email == request.email.lower().strip()))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -44,25 +67,67 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
     await db.flush()
 
     token = create_access_token({"sub": str(user.id)})
+    log_security_event(
+        event_type="AUTH_REGISTER_SUCCESS",
+        severity="INFO",
+        ip_address=client_ip,
+        user_id=str(user.id),
+        details={"email": user.email, "subscription_tier": user.subscription_tier},
+    )
     return RegisterResponse(user_id=str(user.id), email=user.email, name=user.name, token=token)
 
 
 @router.post("/login")
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    """Login and obtain JWT token."""
-    result = await db.execute(select(User).where(User.email == form_data.username.lower()))
+async def login(
+    req: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    """Login with brute-force lockout protection and security auditing."""
+    client_ip = _get_client_ip(req)
+    username = form_data.username.lower().strip()
+
+    # Check brute-force lockout
+    brute_force_protector.check_lockout(client_ip, username)
+
+    result = await db.execute(select(User).where(User.email == username))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(form_data.password, user.hashed_password):
+        brute_force_protector.record_failure(client_ip, username)
+        log_security_event(
+            event_type="AUTH_LOGIN_FAILED",
+            severity="WARNING",
+            ip_address=client_ip,
+            details={"email": username, "reason": "Invalid credentials"},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     if not user.is_active:
+        log_security_event(
+            event_type="AUTH_LOGIN_DEACTIVATED",
+            severity="WARNING",
+            ip_address=client_ip,
+            user_id=str(user.id),
+            details={"email": username},
+        )
         raise HTTPException(status_code=400, detail="Account deactivated")
 
+    # Record success and reset failed attempts
+    brute_force_protector.record_success(client_ip, username)
     token = create_access_token({"sub": str(user.id)})
+
+    log_security_event(
+        event_type="AUTH_LOGIN_SUCCESS",
+        severity="INFO",
+        ip_address=client_ip,
+        user_id=str(user.id),
+        details={"email": username},
+    )
     return {"access_token": token, "token_type": "bearer"}
 
 

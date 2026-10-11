@@ -128,3 +128,36 @@ async def test_fetch_quote_uses_history_when_previous_close_missing(mock_cache_s
     assert quote["previous_close"] == 100.0
     assert quote["change"] == 3.0
     assert quote["change_pct"] == 3.0
+
+
+@pytest.mark.asyncio
+@patch("backend.services.market_data.cache_get", return_value=None)
+@patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
+async def test_fetch_quotes_bulk_fyers_and_fallback(mock_cache_set, mock_cache_get):
+    """Test fetch_quotes_bulk parses Fyers response and hydrates missing via fallback."""
+    mock_fyers_resp = {
+        "s": "ok",
+        "d": [
+            {
+                "n": "NSE:SBIN-EQ",
+                "v": {
+                    "lp": 965.5,
+                    "prev_close_price": 960.0,
+                    "ch": 5.5,
+                    "chp": 0.57,
+                    "volume": 5000000
+                }
+            }
+        ]
+    }
+    with patch("backend.services.market_data.MarketDataService._get_fyers_client") as mock_fyers:
+        instance = MagicMock()
+        instance.quotes.return_value = mock_fyers_resp
+        mock_fyers.return_value = instance
+
+        res = await MarketDataService.fetch_quotes_bulk(["SBIN.NS"], use_fallback=False)
+        assert "SBIN.NS" in res
+        assert res["SBIN.NS"]["price"] == 965.5
+        assert res["SBIN.NS"]["change"] == 5.5
+        assert res["SBIN.NS"]["source"] == "Fyers API"
+

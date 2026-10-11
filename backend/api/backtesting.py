@@ -31,8 +31,17 @@ async def run_backtest(
     db: AsyncSession = Depends(get_db),
 ):
     """Submit a backtest job. Returns backtest_id for polling."""
+    if request.initial_capital <= 0:
+        raise HTTPException(status_code=400, detail="initial_capital must be greater than 0")
+
     import uuid as _uuid
     backtest_id = str(_uuid.uuid4())
+    
+    # Bounded cache eviction to prevent memory leak
+    if len(_backtest_results) > 200:
+        oldest_key = next(iter(_backtest_results))
+        _backtest_results.pop(oldest_key, None)
+
     _backtest_results[backtest_id] = {"status": "RUNNING"}
 
     async def _run():

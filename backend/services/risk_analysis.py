@@ -55,18 +55,39 @@ def analyse_risk(candles: list[dict]) -> dict:
             if peak > 0:
                 max_drawdown = min(max_drawdown, (close / peak - 1) * 100)
 
-        # Historical 95% Value at Risk (VaR)
-        var_95 = abs(float(np.percentile(returns, 5))) * 100 if returns else 0.0
-        if not math.isfinite(var_95):
-            var_95 = 0.0
+        # Historical 95% & 99% Value at Risk (VaR)
+        var_95_val = float(np.percentile(returns, 5)) if returns else 0.0
+        var_95 = abs(var_95_val) * 100 if math.isfinite(var_95_val) else 0.0
 
-        # Simplified Sharpe Ratio (assuming 5% risk-free rate)
+        var_99_val = float(np.percentile(returns, 1)) if returns else 0.0
+        var_99 = abs(var_99_val) * 100 if math.isfinite(var_99_val) else 0.0
+
+        # Expected Shortfall (CVaR / Conditional VaR) - average of tail losses beyond VaR
+        tail_95 = [r for r in returns if r <= var_95_val]
+        cvar_95 = abs(float(np.mean(tail_95))) * 100 if tail_95 else var_95
+
+        tail_99 = [r for r in returns if r <= var_99_val]
+        cvar_99 = abs(float(np.mean(tail_99))) * 100 if tail_99 else var_99
+
+        # Annualized return (Compound Annual Growth Rate if >= 20 bars, else sample annualized)
         total_return = (closes[-1] / closes[0]) - 1 if closes[0] > 0 else 0.0
-        annualized_return = (total_return / len(closes)) * 252
+        years = max(1.0 / 252.0, len(closes) / 252.0)
+        if total_return > -1.0:
+            annualized_return = ((1.0 + total_return) ** (1.0 / years)) - 1.0
+        else:
+            annualized_return = -1.0
+
         risk_free_rate = 0.05
-        sharpe_ratio = (annualized_return - risk_free_rate) / (daily_vol * math.sqrt(252)) if daily_vol > 0 else 0.0
+        annualized_vol = daily_vol * math.sqrt(252)
+        sharpe_ratio = (annualized_return - risk_free_rate) / annualized_vol if annualized_vol > 0 else 0.0
         if not math.isfinite(sharpe_ratio):
             sharpe_ratio = 0.0
+
+        # Sortino Ratio (Excess return / Downside Volatility)
+        annualized_downside_vol = downside_vol * math.sqrt(252)
+        sortino_ratio = (annualized_return - risk_free_rate) / annualized_downside_vol if annualized_downside_vol > 0 else 0.0
+        if not math.isfinite(sortino_ratio):
+            sortino_ratio = 0.0
 
         # Risk Classification based on VaR (95%)
         if var_95 < 1.5:
@@ -82,10 +103,15 @@ def analyse_risk(candles: list[dict]) -> dict:
             "downside_volatility_pct": round(downside_volatility, 2),
             "max_drawdown_pct": round(max_drawdown, 2),
             "period_return_pct": round(total_return * 100, 2),
+            "annualized_return_pct": round(annualized_return * 100, 2),
             "value_at_risk_95_pct": round(var_95, 2),
+            "value_at_risk_99_pct": round(var_99, 2),
+            "expected_shortfall_cvar_95_pct": round(cvar_95, 2),
+            "expected_shortfall_cvar_99_pct": round(cvar_99, 2),
             "sharpe_ratio": round(sharpe_ratio, 2),
+            "sortino_ratio": round(sortino_ratio, 2),
             "observations": len(closes),
-            "methodology": "95% Historical Value at Risk (VaR) used for level classification. Sharpe ratio assumes 5% risk-free rate.",
+            "methodology": "Historical Value at Risk (VaR 95%/99%) and Expected Shortfall (CVaR). Sharpe & Sortino ratios assume 5% risk-free rate.",
         }
     except Exception as e:
         return {
@@ -95,8 +121,13 @@ def analyse_risk(candles: list[dict]) -> dict:
             "downside_volatility_pct": 0.0,
             "max_drawdown_pct": 0.0,
             "period_return_pct": 0.0,
+            "annualized_return_pct": 0.0,
             "value_at_risk_95_pct": 0.0,
+            "value_at_risk_99_pct": 0.0,
+            "expected_shortfall_cvar_95_pct": 0.0,
+            "expected_shortfall_cvar_99_pct": 0.0,
             "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
             "observations": len(candles),
             "methodology": "Error fallback",
         }

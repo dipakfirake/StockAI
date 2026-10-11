@@ -12,7 +12,108 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-08-22)
+## Latest verified checks (2026-10-11)
+
+- **Screener Price Synchronization & Backward Candle Pagination Upgrade:**
+  - **Diagnosed Root Cause:** Deep historical pagination (`limit=2000`) starting from `2015-01-01` hit broker rate limits (HTTP 429) during universe batch scans. The truncated pagination loop returned historical candles ending in 2016, leading to historical entry prices (e.g. `BAJFINANCE.NS` at ₹60.96 instead of its actual current price of ₹960.0).
+  - **Remediations:**
+    - Upgraded `backend/services/screener.py` to use `limit=250` (~1 year), which is optimal for technical indicators (200 EMA, 14 ATR, 14 RSI) and executes in a single fast query.
+    - Concurrently fetched live market quote in `_analyze_symbol` and prioritized `live_price = quote.get("price")` over `candles[-1]["close"]`.
+    - Upgraded `MarketDataService.fetch_candles` to paginate backwards from `dt_end` to `dt_start` so the most recent candles are always fetched first, plus added a 45-day freshness guard against stale historical cutoffs.
+    - Flushed stale Redis screener and candle keys.
+  - **Live Verification:** Probed `GET /api/market/screener?sector=NIFTY_50&force_refresh=true` -> `BAJFINANCE.NS` Entry Price is now **₹960.0** (matches live quote perfectly), with Target ₹989.83 and SL ₹930.17.
+  - **Automated Tests:** `pytest backend/tests/test_swing_screener_categorization.py` passed **2/2 tests (100% green)**. Frontend TypeScript check passed with 0 errors.
+
+- **Quick Paper Trade 400 Bad Request Fix & Screener Auto-Adaptation:**
+  - **Alias Normalization (`backend/services/paper_trading.py`):** Mapped Indian broker acronyms `"CNC"` (Cash & Carry) $\to$ `"DELIVERY"` and `"MIS"` (Margin Intraday Square-off) $\to$ `"INTRADAY"`.
+  - **Short Selling Adaptation:** Indian cash equity regulations prohibit holding delivery short positions; if `direction == "SELL"`, orders automatically convert to `"INTRADAY"` so simulated short trades execute cleanly.
+  - **Frontend One-Click Execution (`frontend/src/pages/SwingScreenerPage.tsx`):** `handleQuickTrade` dynamically assigns `productType = direction === 'SELL' ? 'INTRADAY' : 'DELIVERY'`.
+  - **Live Verification:** Probed live `POST /api/paper-trades` for both BUY (`STATUS: OPEN`, `PRICE: 1171.47`) and SELL (`STATUS: OPEN`, `PRODUCT: INTRADAY`). Both succeeded with HTTP 200/201.
+  - **Market & AI Service Verification:** All 5 previously reset endpoints (`/api/market/events`, `/api/market/indices`, `/api/ai/chat`, `/api/market/regime`, `/api/market/vix`) probed and returned HTTP 200 OK.
+  - **Automated Tests:** `pytest backend/tests/test_swing_screener_categorization.py backend/tests/test_cybersecurity.py` passed **17/17 tests (100% green in 140.49s)**.
+  - **Frontend Typecheck:** `npx tsc --noEmit` passed with 0 errors.
+
+- **Universal Scale-Invariant Deep Learning Architecture (`docs/universal_industrial_ml_architecture_plan.md`):** Complete cross-cap generalization & crash protection upgrade:
+  - **Universal Feature Engine (`backend/services/ml/feature_engineering.py`):** 36 scale-independent normalized features (`N_FEATURES = 36`) adding `atr_norm_return_5d`, `atr_norm_return_20d` (ATR-relative returns removing nominal percentage bias), `log_turnover` (dimensionless liquidity proxy), `candle_range_atr` (circuit lockup and volatility explosion detection), `macro_shock_proxy` (regime shift detection across wars, inflation spikes, and oil hikes), and `catalyst_trend_score`.
+  - **Dynamic Volatility-Adaptive Target Labeling:** Implemented `compute_target_volatility_adaptive` using dynamic ATR barrier ($1.75 \times \text{ATR\_pct}$ bounded to [2%, 12%]), replacing fixed nominal thresholds.
+  - **Asymmetric Crash-Penalty Focal Loss (`backend/services/ml/losses.py`):** Heavy $2.5\times$ penalty for predicting `BUY` during drawdowns and market selloffs.
+  - **Deep Learning Sequence Models:** `BidirectionalLSTMModel` and `StockTransformer` upgraded for 36-feature tensor projection with graceful weight migration handling.
+  - **Stratified 90-Stock Cross-Cap Universe (`backend/services/ml/train_incremental.py`):** Balanced cross-cap coverage (30 Large, 30 Mid, 30 Small/High-Beta caps) spanning 5 years of historical crises (2020 COVID crash, 2021 rally, 2022 Russia-Ukraine war & $130 oil hike, 2022 global inflation peak, 2024 election day).
+  - **Automated Verification:** `docker compose run --rm backend pytest backend/tests/test_universal_ml.py` passed **7/7 tests (100% green in 35.21s)**.
+  - **Universal Deep Learning Model Training (100% Completed):** All **9 of 9 subsets completed** (all 90 stocks across Large, Mid, Small, and Micro caps, totaling **104,653 sequences**). Final BiLSTM loss converged to `0.3259` and Transformer loss to `0.4372`. Both final checkpoint weights (`backend/models/lstm_model.pt` at 5.37MB and `backend/models/transformer_model.pt` at 857KB) are loaded live into `stockbackend` (`LSTM is_ready: True, Transformer is_ready: True`). Full training audit logged in `backend/models/dl_training_report.json`.
+
+
+
+
+- **Institutional System Design Architecture (`docs/SYSTEM_DESIGN_ARCHITECTURE.md`):** Complete enterprise architecture upgrade:
+  - **Domain Event Bus (`backend/core/event_bus.py`):** Asynchronous, thread-safe pub/sub decoupling trading execution from alerts, telemetry, and audit side effects.
+  - **State-Machine Circuit Breaker (`backend/core/circuit_breaker.py`):** Hystrix pattern (`CLOSED`, `OPEN`, `HALF_OPEN`) shielding against downstream broker (Fyers/Yahoo) timeouts with fallback handlers.
+  - **Multi-Tier Cache Manager (`backend/core/cache_manager.py`):** L1 in-memory microsecond LRU cache + L2 Redis + Single-Flight request coalescing (eliminating Thundering Herd / cache stampede).
+  - **Prometheus Telemetry & Health Probes (`backend/core/telemetry.py`):** Standard `/metrics` Prometheus registry, Kubernetes `/health/live`, and deep `/health/ready` probe checking Neon Postgres and Redis latencies.
+  - **Graceful Lifecycle Coordinator (`backend/core/lifecycle.py`):** Handles clean startup and SIGTERM/SIGINT teardown, safely draining in-flight requests and closing connection pools.
+  - **Volume Profile Exact Accounting:** Reconciled bin volumes to guarantee mathematical equality between total volume and child bin sums.
+  - **Automated Verification:** `pytest backend/tests/test_system_design.py` passed 9/9 tests.
+- **Cybersecurity & Financial Risk Architecture (`docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md`):**
+  - Multi-tier Token Bucket Rate Limiting (`backend/core/rate_limiter.py`): AUTH (10/min), TRADING (30/min), AI (30/min), GENERAL (120/min).
+  - Financial Idempotency Key Manager (`backend/core/idempotency.py`): Race detection & safe replay deduplication on order placements.
+  - Financial Risk Guardrails & Fat-Finger Limits (`backend/services/paper_trading.py`): 50k share cap, ₹1 Crore notional cap, ±30% price deviation bound.
+  - OWASP Security Headers & 1MB Body Size Guard (`backend/core/security_middleware.py`).
+  - Auth Brute-Force Lockout (5 attempts -> 15 min lockout) & Password Complexity (`backend/core/auth_security.py`).
+  - Structured Security & Financial Audit Logger (`backend/core/audit_logger.py`).
+  - Automated Verification: `pytest backend/tests/test_cybersecurity.py` passed 15/15 tests.
+- **Live Docker Backend Rebuild & Health Verification:**
+  - Built fresh container image: `docker compose build backend` (Exit code 0).
+  - Recreated and started container: `docker compose up -d --no-deps backend` (`stockbackend` container status: `healthy`).
+  - Verified live probe: `GET /health/live` -> `{"status": "alive", "uptime_seconds": 102.4}`.
+  - Verified deep readiness probe: `GET /health/ready` -> `{"status": "ready", "checks": {"database": {"status": "healthy", "latency_ms": 61.8}, "redis": {"status": "healthy", "latency_ms": 28.08}, "circuit_breakers": {"fyers_api": {"state": "CLOSED"}, "market_data": {"state": "CLOSED"}, "neon_db": {"state": "CLOSED"}}}}`.
+- **Enterprise Modules & Roles Matrix (`docs/ENTERPRISE_MODULES_AND_ROLES_MATRIX.md`):** Complete institutional matrix breaking down 45+ specialized modules across 8 engineering disciplines (Principal Systems Architect, InfoSec / SecOps, Quantitative Developer, ML / AI Quant, QA / SDET, DevOps / SRE, High-Frequency UI / UX, and Regulatory Compliance) with interactive checkboxes `[x]` and `[ ]`.
+- **Session Interaction Audit Ledger (`docs/SESSION_INTERACTION_AUDIT.md`):** Master anti-hallucination ground truth ledger documenting chronological prompts, technical actions, test results, and responses with timestamps.
+- **Dual-Listed BSE/NSE Quote Resolution & Holdings Fix:**
+  - Resolved `LTP: —` / `Current Value: —` / `P&L: —` issue on paper trading positions holding `.BO` tickers (e.g. `PCJEWELLER.BO`).
+  - Added automatic liquid NSE ticker mapping in `MarketDataService.fetch_quotes_bulk` so BSE cash equities query `NSE:<SYMBOL>-EQ` in Fyers API and map back to the requested original symbol.
+  - Added dual-listed fallback resolution in `backend/api/paper_trading.py` and `backend/api/portfolio.py`.
+  - Verified live: `PCJEWELLER.BO` returns `LTP: 13.52` and `Unrealized: -313.80` via live Fyers stream.
+- **Health Check Route Fault Tolerance (`/health/liv` & `/health/live`):**
+  - Added alias `@router.get("/liv")` in `backend/core/telemetry.py` and `@app.get("/health/liv")` in `backend/main.py`.
+  - Verified live: `GET http://localhost:8000/health/liv` returns `200 OK` (`{"status": "alive"}`).
+- **Chart Header Fundamental Market Cap Hydration:**
+  - Fixed `frontend/src/pages/ChartPage.tsx` line 1319 to inspect both `quote.market_cap` and `info?.market_cap`: `Number(quote.market_cap || info?.market_cap || 0)`.
+  - Enriched `get_quote` in `backend/api/stocks.py` to hydrate fundamental `market_cap` via `market_data_service.get_stock_info(symbol)` whenever the live quote broker returns `0` or `null`.
+- **Universal Stock Search & Quote Reliability (Resolving "godigit" & Dynamic Symbols):**
+  - Eliminated dependency on missing `yf.Search` by implementing direct, high-speed Yahoo Finance Search API integration via `httpx` (`query2.finance.yahoo.com/v1/finance/search`) with browser User-Agent headers.
+  - Returns both NSE (`GODIGIT`) and BSE (`GODIGIT.BO`) equities dynamically in sub-200ms.
+  - Automatically indexes newly discovered stocks asynchronously into PostgreSQL `Stock` table and Redis/L1 cache (1800s TTL).
+  - Added direct Yahoo Chart API quote fallback in `fetch_quote` ensuring instantaneous quotes even when Fyers single-quote rate limits or Yahoo crumb errors trigger.
+  - Added 1.5s timeout guard on `get_quote` fundamental enrichment to protect against third-party upstream latency.
+  - Expanded client-side `FALLBACK_RESULTS` in `frontend/src/components/StockSearchBox.tsx`.
+  - Verified live:
+    - `GET /api/stocks/search?q=godigit` -> 200 OK (returns `GODIGIT` on NSE & `GODIGIT.BO` on BSE).
+    - `GET /api/stocks/GODIGIT.NS/quote` -> 200 OK (`Price: 253.2`, `PrevClose: 245.0`, `Change%: +3.35%`).
+    - `GET /api/stocks/GODIGIT.NS/candles` -> 200 OK (34 daily candles returned, latest candle `253.2`).
+- **Fyers Token & Real-Time Zero-Price Prevention (`0 0 0 0 0` Fix):**
+  - Validated Fyers authentication: token generated by `generate_fyers_token.bat` was 100% valid (`DIPAK CHANDRAKANT FIRAKE`).
+  - Diagnosed root cause of `0 0 0 0 0` display:
+    - **Cloudflare WAF Error 1015 on Fyers REST API:** Rapid 1.0s REST polling from `backend/api/websocket.py` and 2.0s polling from `backend/tasks/screener_poller.py` tripped an IP-level rate ban (Error 1015 / HTTP 429) on `api-t1.fyers.in`.
+    - **Silent Fallback Failure:** In `fetch_quotes_bulk`, fallback via `yf.download` threw crumb/JSONDecodeError.
+    - **Zero-Value Hardcoding:** In `backend/api/market.py` (`/indices` and `/sectors`), missing quotes were explicitly appended as `price: 0.0, change: 0.0, change_pct: 0.0` and cached.
+    - **WebSocket Fallback Disabled:** `backend/api/websocket.py` had `use_fallback=False` and a blocking sleep during cooldowns.
+  - Implemented comprehensive solution:
+    - In `MarketDataService.fetch_quotes_bulk`: Added Cloudflare WAF Error 1015 / 429 detection with 45s cooldown, high-speed concurrent direct Yahoo Chart API fallback (`httpx.AsyncClient` querying `https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}`) in <200ms without crumb blocks, and tertiary fallback to Redis quote cache.
+    - In `backend/api/websocket.py`: Enabled `use_fallback=True`, adjusted polling interval to 3.0s (protecting against WAF bans), and allowed fallback ticks to stream seamlessly during broker cooldowns.
+    - In `backend/tasks/screener_poller.py`: Increased inter-symbol sleep from 2.0s to 8.0s and loop sleep to 120s to prevent API and quota starvation.
+    - In `backend/api/market.py`: Hardened `/indices` and `/sectors` with single-quote fallback (`fetch_quote`) and last-known cached price preservation so indices and sectors never return `price: 0.0`.
+  - Added unit test `test_fetch_quotes_bulk_fyers_and_fallback` in `backend/tests/test_market_data.py`.
+  - Verified live:
+    - Single quote: `NSE:SBIN-EQ` -> `964.70` (source: `Fyers API`)
+    - Bulk quotes: `^NSEI` (22,716.20), `^NSEBANK` (54,259.95), `BSE:SENSEX-INDEX` (72,529.07), `NSE:INDIAVIX-INDEX` (13.41), `RELIANCE.NS` (1,182.00), `TCS.NS` (2,032.40), `INFY.NS` (1,015.40).
+    - `GET /api/market/indices`: 6/6 indices return live Fyers market prices (zero `0.00`).
+    - `GET /api/market/sectors`: 8/8 sectors return live market prices.
+- **Backend Tests:** `pytest backend/tests/test_market_data.py` -> **9 passed in 31.40s (100% green)**.
+- **Frontend Code Quality:** `npm run build` -> **PASSED (Exit code 0, 1979 modules transformed in 52.66s)**.
+
+
+
+## Earlier verified checks (2026-08-22)
 
 - Frontend TypeScript/Vite build: passed
 - Backend Python compilation: passed
@@ -294,24 +395,197 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
    - Health check path: `/api/market/indices`
    - Configured environment variables for `SECRET_KEY` and `DATABASE_URL` (Neon PostgreSQL).
 
+### Phase 14: Autonomous Ralph Loop Extension Setup (2026-09-28)
+1. 🔍 **Problem**:
+   - Running the Ralph Loop extension generated an error: `"Task file not found: PRD.md. Please create it or select a different task file."`
+   - The extension relies on a root `PRD.md` containing atomic user stories and task checkboxes (`- [ ]`) to autonomously iterate, execute changes, verify tests, and track completion.
+2. ✅ **Implemented Solution**:
+   - Created authoritative [PRD.md](file:///d:/Stock%20Prediction%20System/PRD.md) in the workspace root:
+     - Documented completed epics (EPIC-01 through EPIC-05) marked with `- [x]` so the loop doesn't re-run or regress completed features.
+     - Documented active user stories with checkboxes (`- [ ]`) covering Cloud Deployment (TASK-101/102), Volume Profile (TASK-201/202), Export Report PDF (TASK-301), Pattern Alerts (TASK-401/402), and Anchored VWAP (TASK-501/502).
+     - Defined explicit verification commands (`pytest` and `npm run lint` / `npm run build`) and safety protocols (never touch `.env`).
+   - Created [progress.txt](file:///d:/Stock%20Prediction%20System/progress.txt) in the workspace root for tracking execution logs and iterative handoffs across Ralph sessions.
+
+### Phase 15: Cybersecurity Audit & Financial Risk Hardening (2026-09-29)
+1. 🔍 **Problem**:
+   - Preparing platform for public cloud deployment on the internet poses severe financial risks: DDoS on heavy AI/ML endpoints, brute-force credential stuffing on auth, financial order replay attacks/double execution, memory exhaustion through payload flooding, fat-finger errors (extreme quantities/notional values), and lack of structured security audit trails.
+2. ✅ **Implemented Solution**:
+   - **Industrial Token Bucket Rate Limiter (`backend/core/rate_limiter.py`):**
+     - Multi-tier rate limiting: `AUTH` (10 req/min), `TRADING` (30 req/min), `AI` (30 req/min), `GENERAL` (120 req/min).
+     - Standard IETF headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`).
+     - Memory-safe garbage collection of idle buckets.
+   - **Financial Idempotency Key Manager (`backend/core/idempotency.py`):**
+     - Added `Idempotency-Key` tracking on `POST /api/paper-trades` to prevent double-spending, concurrent order races (HTTP 409 Conflict), and cached replay (`X-Idempotent-Replay: true`).
+   - **Financial Risk Bounds & Fat-Finger Circuit Breakers (`backend/services/paper_trading.py`):**
+     - Max order quantity cap: `50,000` shares.
+     - Max notional value cap: `₹1,00,00,000 (₹1 Crore)`.
+     - Fat-finger price deviation cap: ±30% maximum deviation for LIMIT/SL orders from current market price.
+     - Strict regex sanitization for symbol parameters.
+   - **Security Headers & Payload Guard Middleware (`backend/core/security_middleware.py`):**
+     - OWASP security headers (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `HSTS`, `Referrer-Policy`, `Permissions-Policy`).
+     - Maximum 1MB request body limit preventing memory exhaustion DoS (HTTP 413).
+     - Anti-caching headers on financial/auth endpoints.
+     - Correlation Trace IDs (`X-Request-ID`).
+   - **Auth Hardening & Brute Force Lockout (`backend/core/auth_security.py`):**
+     - Password complexity validation (8+ characters, letters, digits/symbols).
+     - Automatic 15-minute lockout after 5 consecutive failed login attempts.
+   - **Structured Security & Financial Audit Logger (`backend/core/audit_logger.py`):**
+     - Immutable JSON audit logging to `logs/security_audit.log` with automatic secret redaction (`[REDACTED]`).
+   - **Sanitized Global Exception Handler (`backend/main.py`):**
+     - Prevents stack trace / database connection leakage on 500 errors.
+   - **Documentation (`docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md`):**
+     - Full vulnerability threat model, defense architecture, and production cloud hardening checklist.
+3. 🧪 **Verification & Bug Auditing (Ralph Loop Deep Verification)**:
+   - **Bug 1 Discovered & Fixed**: Synchronous blocking HTTP call to `worldtimeapi.org` in `backend/services/time_sync.py` was causing a 3-second application startup delay and SSL errors when the external service was degraded. Fixed by moving synchronization to a background daemon thread and handling network failures gracefully without blocking.
+   - **Bug 2 Discovered & Fixed**: Generic `@app.exception_handler(Exception)` in `backend/main.py` risked swallowing explicit `HTTPException` / `RequestValidationError` errors into generic 500s. Hardened handler with explicit pass-through for `FastAPIHTTPException`, `StarletteHTTPException`, and `RequestValidationError` while safely sanitizing unexpected 500 crashes.
+   - **New E2E Integration Tests**: Added 4 live integration tests to `backend/tests/test_cybersecurity.py` covering header injection, 413 payload limiting, rate limit header propagation, and 500 exception trace sanitization.
+   - **Test Results**:
+     - `pytest backend/tests/test_cybersecurity.py`: **15 passed in 32.14s**
+     - Full regression test suite: **47 passed in 35.38s (100% green)**
+     - `cd frontend && npm run lint`: **passed with 0 errors**
+     - `cd frontend && npm run build`: **passed in 48.23s**
+
+### Phase 16: System-Wide Endpoint Crash Hardening & Quantitative Mathematical Precision Audit (2026-10-11)
+1. 🔍 **Problem**:
+   - Comprehensive audit of all 15 API routers (`backend/api/`) and underlying quantitative services revealed critical crash vectors and precision issues:
+     - **Magic Values & Distorted Ratios:** Backtesting profit factor returned `9999.0` on zero losses; equity curve only captured trade close points rather than daily mark-to-market intra-trade drawdowns.
+     - **Tail Risk Blindspots:** Risk analysis lacked Expected Shortfall (CVaR) and Sortino ratio; flat candle prices caused division-by-zero crashes.
+     - **Options Engine Crash Vectors:** Black-Scholes Greeks crashed on extreme strikes or zero spot prices (`S <= 0`, `K <= 0`, `sigma <= 0.001`); lot size was hardcoded to `100` instead of dynamic Indian exchange lot sizes (NIFTY 50, BANKNIFTY 15, FINNIFTY 40, RELIANCE 250).
+     - **Unstructured Profit Targets:** Screener and Institutional Smart Money Concepts lacked staged multi-tier future profit projections (Target 1, Target 2, Target 3 with exact risk/reward).
+     - **Endpoint 500 Vectors:** `portfolio.py` and `paper_trading.py` crashed on `NoneType` floats (`entry_price`, `commission`, `exit_price`); malformed UUIDs threw unhandled 500 exceptions instead of clean 400s; `websocket.py` shadowed `broadcast_alert`, breaking alert delivery tasks with `TypeError`.
+2. ✅ **Implemented Solution**:
+   - **Backtesting Precision (`backend/services/backtesting.py`):**
+     - Replaced `9999.0` with exact sum of wins when losses are 0, and `0.0` when no winning trades exist.
+     - Implemented daily mark-to-market equity curve tracking intra-trade open equity drawdowns across all 4 strategies.
+     - Auto-closes open positions at the final backtest candle.
+     - Hardened Calmar ratio calculation against negative total return fractional exponentiation.
+   - **Risk Analytics (`backend/services/risk_analysis.py`):**
+     - Added Expected Shortfall (CVaR 95% & 99%) measuring average loss in the extreme tail distribution.
+     - Added Sortino ratio using downside semi-deviation and 5% annualized risk-free rate.
+     - Implemented CAGR annualized return and guarded zero volatility / flat price series.
+   - **Options Quantitative Engine (`backend/services/options_engine.py`):**
+     - Boundary guards on Black-Scholes formulas (`d1`, `d2`, `gamma`, `theta`, `vega`) ensuring numerical stability.
+     - Dynamic NSE lot size resolution via `get_lot_size(symbol)` mapping real exchange lot sizing.
+     - Strategy recommendations calculate net credit/debit and multiply max profit/loss by dynamic contract lots.
+   - **Screener & SMC Staged Targets (`screener.py` & `institutional_hunter.py`):**
+     - Staged future targets: Target 1 (1.5x ATR, conservative), Target 2 (Optimal / Primary, 2.5-4.0x ATR), Target 3 (Extended Breakout, 3.5x ATR) with precise gain %, risk %, and R:R ratios.
+     - SMC Fair Value Gap enriched with entry zones, stop losses, and multi-tier profit targets.
+   - **Endpoint Crash Resilience:**
+     - `portfolio.py`: Defensively handled `None` for `entry_price` and `commission`, guarded `initial_capital <= 0`.
+     - `paper_trading.py`: Guarded float casts on `None`, added UUID validator returning HTTP 400 for malformed IDs.
+     - `alerts.py`: Updated `condition_value` to `Union[float, str]` supporting pattern alerts, guarded UUID lookups.
+     - `websocket.py`: Unified `broadcast_alert` supporting user-isolated routing and broadcast alerts with zero keyword mismatches.
+     - `stocks.py`: Hardened `get_stock_insight` with `asyncio.gather(..., return_exceptions=True)`, guarded 52W high/low float parsing and anchor date validation.
+     - `market.py`: Validated options chain data types before strategy recommendation.
+     - `backtesting.py`: Added HTTP 400 guard on `initial_capital <= 0` and bounded memory eviction (200 entries).
+3. 🧪 **Verification Evidence**:
+   - **New Mathematical Precision & Crash Suite (`backend/tests/test_endpoint_crash_and_math_audit.py`):** 14/14 passed in 33.79s (100% green).
+   - **Full Regression Suite (`test_cybersecurity.py`, `test_system_design.py`, `test_indicators.py`, `test_market_data.py`):** 41/41 passed in 220.27s (100% green).
+   - **Combined Backend Test Suite:** 55/55 passed (100% green).
+   - **Frontend TypeScript Validation (`tsc`):** Clean compile with 0 errors.
+   - **Live Stack Probes:**
+     - `/health/live`: `200 OK` (`status: alive`, uptime 4294s).
+     - `/health/ready`: `200 OK` (`status: ready`, DB & Redis healthy, all circuit breakers `CLOSED`).
+     - `GET /api/market/indices`: `200 OK` (Nifty 50: 22,520.45, Sensex: 72,472.33, Bank: 55,256.65, VIX: 14.38).
+     - `GET /api/market/options/NIFTY`: `200 OK` (Full chain Greeks + Iron Condor recommendation with lot size 50, max profit ₹3,308/lot).
+     - `GET /api/stocks/RELIANCE.NS/insight`: `200 OK` (Live quote, news, defensive handling of short history).
+     - `GET /api/portfolio`: `200 OK` (Capital: ₹1,00,000, P&L: -₹8.56, 2 open trades, 4 closed trades, zero crashes).
+
+### Phase 17: PDF Report SuperTrend Object Formatting & Chart Series Resilience (2026-10-11)
+1. 🔍 **Problem**:
+   - When attempting to export the institutional research report via `Export PDF` on the Chart page, generation failed with:
+     `TypeError: indicators?.supertrend?.toFixed is not a function at generatePDFReport (ChartPage.tsx:1111:48)`.
+   - Root Cause:
+     - The backend indicators engine ([`backend/services/indicators.py`](file:///d:/Stock%20Prediction%20System/backend/services/indicators.py)) returns SuperTrend as an object `{ "value": number | null, "direction": "up" | "down" | "none" }`.
+     - In `frontend/src/pages/ChartPage.tsx`, line 1111 attempted to call `.toFixed(2)` directly on the object reference `indicators?.supertrend`, raising a fatal runtime `TypeError`.
+     - Additionally, `(chartRef as any).supertrendSeries` was assigned to the React ref object rather than `chartRef.current`, leaving `(chartRef.current as any).supertrendSeries` undefined during candle data streaming.
+2. ✅ **Implemented Solution**:
+   - **Safe Number & Object Formatting Helper (`generatePDFReport` in `ChartPage.tsx`):**
+     - Built `formatNum(val, decimals)` defensive utility ensuring null, undefined, NaN, and strings never throw `toFixed` runtime errors.
+     - Extracted `supertrend` defensively: handles both object structure (`{ value, direction }`) and scalar fallbacks, rendering rich direction tags (e.g. `22450.25 (UP)`).
+     - Guarded MACD, RSI, EMA 21, ATR, 52W range, and AI confidence against unhandled type conversions.
+     - Enriched PDF report with advanced risk metrics: Risk Level, Volatility, Max Drawdown, Downside Volatility, Period Return, Sharpe Ratio, Sortino Ratio, VaR (95%), and CVaR (95%).
+     - Wrapped chart canvas screenshot extraction in defensive `try...catch` so screenshot failures never block the textual institutional report download.
+   - **Chart Series Ref Hardening:**
+     - Created explicit `supertrendSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)` and bound to both `supertrendSeriesRef.current` and `(chartRef.current as any).supertrendSeries`.
+     - Hardened indicator series updates on lines 641 and 650.
+   - **Backend Verification:**
+     - Updated `backend/tests/test_indicators.py` asserting `supertrend` dictionary structure (`value` and `direction`).
+3. 🧪 **Verification Evidence**:
+   - **Frontend TypeScript Compilation:** `docker compose exec frontend npx tsc --noEmit` -> **Exit code 0 (0 errors)**.
+   - **Frontend Dev Server Probe:** `curl.exe -s -I http://localhost:5173` -> **HTTP/1.1 200 OK**.
+   - **Backend Unit Tests:** `pytest backend/tests/test_indicators.py` -> **8/8 passed in 7.10s (100% green)**.
+   - **Audit Test Suite:** `pytest backend/tests/test_endpoint_crash_and_math_audit.py` -> **14/14 passed in 17.68s (100% green)**.
+
+### Phase 18: Swing Trade HOLD Range-Bound Consolidation Guidance & UX Clarification (2026-10-11)
+1. 🔍 **Problem**:
+   - In Swing Trade Analysis for stocks with composite conviction score in neutral consolidation ($40 < \text{Score} < 60$, e.g. Score: 59.0), the interface rendered symmetric percentages (+6.19% Upper Resistance and -6.19% Lower Support).
+   - Without clear domain context, users were confused about whether the stock was a BUY or a SELL when both percentages were identical.
+2. ✅ **Implemented Solution**:
+   - **Financial Domain Clarification:**
+     - When `action === 'HOLD'`, the stock is range-bound and neither a BUY nor a SELL.
+     - The symmetric $\pm 6.19\%$ ($\pm 1.2 \times \text{ATR}$) represents the equilibrium trading channel: Upper Resistance (+6.19% at ₹15.73) and Lower Support (-6.19% at ₹13.89) centered around the current price (₹14.81).
+   - **Actionable Guidance UX Enhancement ([`frontend/src/pages/ChartPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/ChartPage.tsx)):**
+     - Integrated a dynamic institutional guidance banner inside the Swing Trade card with color-coded contextual cues:
+       - **HOLD (Amber)**: Clearly clarifies `Neutral / Consolidation (Neither Buy Nor Sell)` with exact actionable instruction: do not buy in the middle of the channel; wait for a confirmed breakout above resistance or look for reversal buying opportunities near support.
+       - **BUY (Green)**: Highlights `Bullish Signal` with conviction score, target, and stop loss.
+       - **SELL (Red)**: Highlights `Bearish Signal` with downside target and capital preservation advice.
+     - Enhanced box labels: `Upper Resistance (Ceiling)`, `Lower Support (Floor)`, `Current Level`, `Support Price`, and `Resistance Price`.
+3. 🧪 **Verification Evidence**:
+   - **Frontend TypeScript Build:** `docker compose exec frontend npx tsc --noEmit` -> **Exit code 0 (0 errors)**.
+   - **Dev Server Status:** `curl.exe -s -I http://localhost:5173` -> **HTTP/1.1 200 OK**.
+
+### Phase 19: Market-Wide Automated Swing Trade Screener & Categorized Buy/Sell/Hold Lists (2026-10-11)
+1. 🔍 **Problem / User Requirement**:
+   - The user requested an automated market-scanning engine that scrapes/evaluates stocks across sectors and produces categorized, high-precision, real-time lists of:
+     - **BUY Stocks**: High-conviction bullish swing setups (Score $\ge 60$) with Entry, Targets (T1/T2/T3), Stop Loss, Expected Gain %, Risk %, R:R ratio, and holding duration.
+     - **SELL Stocks**: Bearish breakdown / short setups (Score $\le 40$) with downside targets, stop losses, and risk-managed exit levels.
+     - **HOLD Stocks**: Range-bound consolidation setups ($40 < \text{Score} < 60$) with explicit Upper Resistance and Lower Support channel boundaries.
+   - The user emphasized: *"not i want to select chart and all of specific stock but list of stocks to buy or sell or hold like that. to give accurate precision with higher accuracy, confidence and precision."*
+2. ✅ **Implemented Solution**:
+   - **Backend Screener Engine ([`backend/services/screener.py`](file:///d:/Stock%20Prediction%20System/backend/services/screener.py)):**
+     - Configured 8 sector universes (`NIFTY_50`, `BANKING`, `IT`, `AUTO`, `PHARMA`, `ENERGY`, `FMCG`, `METAL`) with liquid NSE equities.
+     - Enhanced `run_screener(sector, force_refresh)` to partition scanned setups into three dedicated, sorted arrays:
+       - `buy_stocks`: Sorted descending by total conviction score. Includes multi-stage targets (T1 1.5x ATR conservative, T2 2.0-4.0x ATR primary optimal, T3 3.5x ATR breakout expansion), entry price, stop loss, risk %, gain %, reward-to-risk ratio, and estimated duration.
+       - `sell_stocks`: Sorted ascending by score (strongest bearish breakdown / lowest score first) with downside short targets and stop losses.
+       - `hold_stocks`: Sorted by proximity to resistance/support with channel boundaries.
+     - Calculated institutional summary metrics: `total_scanned`, `valid_results`, `buy_count`, `sell_count`, `hold_count`, `market_breadth` (`BULLISH` / `BEARISH` / `NEUTRAL`), `avg_buy_gain_pct`, `avg_buy_rr`, `avg_sell_drop_pct`, `top_buy_pick`, and `top_sell_pick`.
+     - Multi-tier Redis and in-memory caching with 300s sector TTL and 900s symbol TTL, supporting instantaneous `force_refresh=True` queries.
+   - **Market API Router ([`backend/api/market.py`](file:///d:/Stock%20Prediction%20System/backend/api/market.py)):**
+     - Updated `@router.get("/screener")` to accept `sector: str` and `force_refresh: bool` query parameters.
+   - **Frontend API Service ([`frontend/src/services/api.ts`](file:///d:/Stock%20Prediction%20System/frontend/src/services/api.ts)):**
+     - Added `marketApi.getScreener(sector?, forceRefresh)` and `marketApi.getBulkScreener()`.
+   - **Dedicated Screener Hub UI ([`frontend/src/pages/SwingScreenerPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/SwingScreenerPage.tsx)):**
+     - Institutional summary metric cards (Bullish Buy Setups, Bearish Sell / Short Setups, Neutral Hold Consolidations, Market Breadth Ratio).
+     - Sector dropdown selector across all 8 liquid sector universes.
+     - Category filter tabs (`BUY Stocks`, `SELL Stocks`, `HOLD Stocks`, `All Ranked`).
+     - Dual View Mode:
+       - **Cards View**: Visual trade plan cards with conviction gauge, staged T1/T2/T3 targets, R:R badges, hold duration, and sub-score breakdown (Technical, Fundamental, News Sentiment).
+       - **Matrix Table View**: Compact, quantitative 10-column financial matrix with sorting and rapid scan capabilities.
+     - Direct Action Buttons on every stock:
+       - **Open Chart** (`/chart/:symbol`)
+       - **One-Click Paper Trade** (executes paper order with pre-filled entry, SL, and target)
+       - **Set Price Alert** (opens quick alert dialog)
+   - **Full-Stack Routing & Navigation Integration:**
+     - Registered `/screener` route in [`frontend/src/App.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/App.tsx).
+     - Added `Swing Screener` with `Radar` icon to [`frontend/src/components/NavBar.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/components/NavBar.tsx).
+     - Added promotional banner in [`frontend/src/pages/ScannerPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/ScannerPage.tsx).
+     - Added "View Market-Wide Buy/Sell Screener →" button to Swing Trade Analysis card in [`frontend/src/pages/ChartPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/ChartPage.tsx).
+     - Added "Automated Swing Trade Screener Hub" spotlight card in [`frontend/src/pages/Dashboard.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/Dashboard.tsx).
+3. 🧪 **Verification Evidence**:
+   - **Backend Unit Tests:** `pytest /app/backend/tests/test_swing_screener_categorization.py` -> **2/2 passed (100% green)**.
+   - **Frontend TypeScript Build:** `docker compose exec frontend npx tsc --noEmit` -> **Exit code 0 (0 errors)**.
+   - **Live API Probe:** `GET /api/market/screener?sector=IT` -> **HTTP 200 OK** returning real classified trade plans with staged targets, stop losses, and ML ensemble scores.
+   - **Frontend Route Probe:** `curl.exe -s -I http://localhost:5173/screener` -> **HTTP 200 OK**.
+
 ## Running Services & Public URLs
 - GitHub Repository: `https://github.com/dipakfirake/StockAI`
 - Neon PostgreSQL Project: `lively-voice-35713029` (Branch: `production`)
 - Local Dev Stack: Frontend on `http://localhost:5173`, Backend on `http://localhost:8000`
-- Render Backend Service: (Pending deployment on `render.com`)
+- Render Backend Service: (Configured via `render.yaml`)
 
 ## Exact Next Safe Steps
-1. Push `render.yaml` to GitHub (`origin main`).
-2. User signs into [Render.com](https://render.com) using GitHub (100% Free, no credit card).
-3. Under Blueprints or New Web Service, connect `dipakfirake/StockAI`.
-4. Enter `DATABASE_URL` (Neon connection string).
-5. Render deploys and provides the live free HTTPS URL (`https://stockai-backend.onrender.com`).
-6. Point `frontend/vercel.json` API rewrites to the Render URL and verify live frontend.
+1. Verify live environment variables on Render / Vercel cloud dashboards matching `.env.example`.
+2. Review `docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md` for Cloudflare WAF and Neon IP allowlisting prior to pointing public DNS.
+3. Keep `security_audit.log` monitored or forwarded to cloud logging (e.g. Datadog / Grafana Loki).
 
-## Ideas backlog (not yet implemented)
-- Volume profile (horizontal histogram on chart right)
-- Export chart analysis to PDF
-- Pattern-based alert creation ("alert me when Doji appears on TCS")
-- Streak / gamification (visit streak counter in navbar)
-- Anchored VWAP overlay on chart for institutional zones
-- Options strategy auto-execution via Auto-Trader

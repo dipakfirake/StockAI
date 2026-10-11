@@ -27,7 +27,12 @@ const FALLBACK_RESULTS: SearchResult[] = [
   { symbol: 'INFY.NS', name: 'Infosys', exchange: 'NSE', type: 'EQUITY' },
   { symbol: 'HDFCBANK.NS', name: 'HDFC Bank', exchange: 'NSE', type: 'EQUITY' },
   { symbol: 'ICICIBANK.NS', name: 'ICICI Bank', exchange: 'NSE', type: 'EQUITY' },
+  { symbol: 'SBIN.NS', name: 'State Bank of India', exchange: 'NSE', type: 'EQUITY' },
+  { symbol: 'TATAMOTORS.NS', name: 'Tata Motors', exchange: 'NSE', type: 'EQUITY' },
+  { symbol: 'GODIGIT.NS', name: 'Go Digit General Insurance', exchange: 'NSE', type: 'EQUITY' },
+  { symbol: 'PCJEWELLER.NS', name: 'PC Jeweller', exchange: 'NSE', type: 'EQUITY' },
 ]
+
 
 const normalizeOptionSymbol = (symbol: string) => {
   if (!symbol) return symbol

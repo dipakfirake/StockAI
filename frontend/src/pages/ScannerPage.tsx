@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { stocksApi } from '../services/api'
 import api from '../services/api'
 import { Search, Filter, Activity, BarChart2, Plus, Trash2 } from 'lucide-react'
@@ -79,6 +80,43 @@ export default function ScannerPage() {
       <div className="page-header">
         <h1 className="page-title">Market Scanner</h1>
         <p className="page-subtitle">Real-time multi-condition technical setup scanner powered by Fyers API v3</p>
+      </div>
+
+      {/* Direct Quick Link to AI Swing Screener Hub */}
+      <div 
+        style={{ 
+          marginBottom: 20, 
+          padding: '14px 18px', 
+          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(16, 185, 129, 0.08))', 
+          border: '1px solid rgba(59, 130, 246, 0.3)', 
+          borderRadius: 12,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(59, 130, 246, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa' }}>
+            <Activity size={20} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-text-primary)' }}>
+              Looking for High-Precision Swing Trade Categorized Lists?
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+              Get automated Buy (T1/T2/T3 setups), Sell (Short breakdowns), and Hold lists with entry &amp; risk/reward without opening individual charts.
+            </div>
+          </div>
+        </div>
+        <Link 
+          to="/screener" 
+          className="btn btn-primary" 
+          style={{ fontSize: 13, padding: '8px 16px', textDecoration: 'none' }}
+        >
+          Open AI Swing Screener →
+        </Link>
       </div>
 
       <div className="card" style={{ marginBottom: 24 }}>

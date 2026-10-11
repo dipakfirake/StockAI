@@ -157,6 +157,43 @@ class SMC_Engine:
 
         return {"score": min(score, 100), "factors": factors, "grade": grade}
 
+    def _build_trade_plan(self, fvg: dict, current_price: float) -> dict:
+        """Calculate institutional trade plan with defined entry, SL, targets and R:R."""
+        top = float(fvg.get("top", current_price))
+        bottom = float(fvg.get("bottom", current_price))
+        fvg_type = fvg.get("type", "bullish_fvg")
+        
+        if fvg_type == "bullish_fvg":
+            entry = round((top + bottom) / 2.0, 2)
+            stop_loss = round(bottom * 0.985, 2)
+            risk = max(0.1, entry - stop_loss)
+            t1 = round(entry + (1.5 * risk), 2)
+            t2 = round(entry + (2.5 * risk), 2)
+            t3 = round(entry + (4.0 * risk), 2)
+            gain_pct = round(((t2 - entry) / entry) * 100, 2) if entry > 0 else 0.0
+            risk_pct = round(((entry - stop_loss) / entry) * 100, 2) if entry > 0 else 0.0
+        else:
+            entry = round((top + bottom) / 2.0, 2)
+            stop_loss = round(top * 1.015, 2)
+            risk = max(0.1, stop_loss - entry)
+            t1 = round(max(0.05, entry - (1.5 * risk)), 2)
+            t2 = round(max(0.05, entry - (2.5 * risk)), 2)
+            t3 = round(max(0.05, entry - (4.0 * risk)), 2)
+            gain_pct = round(((entry - t2) / entry) * 100, 2) if entry > 0 else 0.0
+            risk_pct = round(((stop_loss - entry) / entry) * 100, 2) if entry > 0 else 0.0
+
+        return {
+            "entry_zone": f"₹{bottom:.2f} - ₹{top:.2f}",
+            "recommended_entry": entry,
+            "stop_loss": stop_loss,
+            "target_1": t1,
+            "target_2": t2,
+            "target_3": t3,
+            "expected_gain_pct": gain_pct,
+            "risk_pct": risk_pct,
+            "reward_to_risk": round(gain_pct / risk_pct, 2) if risk_pct > 0 else 0.0,
+        }
+
     async def generate_daily_watchlist(self, symbols: List[str]):
         """
         Scans DAILY candles (last 60 days) for each symbol to find
@@ -173,6 +210,7 @@ class SMC_Engine:
                     logger.debug(f"[SMC] Not enough daily candles for {symbol}")
                     continue
 
+                last_price = float(candles[-1].get("close", 0))
                 fvgs = self.calculate_fvg(candles, min_gap_pct=0.3)
 
                 if fvgs:
@@ -180,16 +218,17 @@ class SMC_Engine:
                     enriched = []
                     for fvg in fvgs[-5:]:  # Last 5 significant gaps
                         confluence = self._compute_confluence(candles, fvg)
+                        trade_plan = self._build_trade_plan(fvg, last_price)
                         enriched.append({
                             **fvg,
                             "confluence": confluence,
+                            "trade_plan": trade_plan,
                         })
 
                     # Sort by confluence score descending, keep top 3
                     enriched.sort(key=lambda x: x["confluence"]["score"], reverse=True)
                     top_zones = enriched[:3]
 
-                    last_price = candles[-1].get("close", 0)
                     today_zones[symbol] = {
                         "fvgs": top_zones,
                         "last_price": round(last_price, 2),

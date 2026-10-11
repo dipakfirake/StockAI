@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, HistogramData, LineData } from 'lightweight-charts'
 import { stocksApi, aiApi } from '../services/api'
-import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock } from 'lucide-react'
+import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
 import { toast } from '../components/Toast'
@@ -75,6 +75,8 @@ export default function ChartPage() {
   const [showIndicators, setShowIndicators] = useLocalStorage('chart_show_indicators', true)
   const [showPatterns, setShowPatterns] = useLocalStorage('chart_show_patterns', false)
   const [showEvents, setShowEvents] = useLocalStorage('chart_show_events', false)
+  const [showVolumeProfile, setShowVolumeProfile] = useLocalStorage('chart_show_vp', false)
+  const [volumeProfile, setVolumeProfile] = useState<any>(null)
 
   const [searchInput, setSearchInput] = useState(symbol)
   const [visiblePatterns, setVisiblePatterns] = useState<any[]>([])
@@ -111,6 +113,8 @@ export default function ChartPage() {
   const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const avwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const supertrendSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
 
   const rsiSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const macdSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
@@ -142,12 +146,21 @@ export default function ChartPage() {
   // Drawing Engine State
   const [isDrawing, setIsDrawing] = useState(false)
   const isDrawingRef = useRef(false)
+  
+  const [isAnchoringVwap, setIsAnchoringVwap] = useState(false)
+  const isAnchoringVwapRef = useRef(false)
+  const [anchorDate, setAnchorDate] = useState<string | null>(null)
+  
   const currentDrawPrimitiveRef = useRef<TrendlinePrimitive | null>(null)
   const activePrimitivesRef = useRef<TrendlinePrimitive[]>([])
 
   useEffect(() => {
     isDrawingRef.current = isDrawing;
   }, [isDrawing])
+
+  useEffect(() => {
+    isAnchoringVwapRef.current = isAnchoringVwap;
+  }, [isAnchoringVwap])
 
   // ─── Sync persisted chart state to backend (cross-device) ───────────────────
   // Debounced: waits 2s after the last change before sending to server
@@ -160,10 +173,11 @@ export default function ChartPage() {
         chart_show_indicators: showIndicators,
         chart_show_patterns: showPatterns,
         chart_show_events: showEvents,
+        chart_show_vp: showVolumeProfile,
       })
     }, 2000)
     return () => clearTimeout(timer)
-  }, [symbol, timeframe, isHeikinAshi, showIndicators, showPatterns, showEvents])
+  }, [symbol, timeframe, isHeikinAshi, showIndicators, showPatterns, showEvents, showVolumeProfile])
 
   // Sync route params
   useEffect(() => {
@@ -184,6 +198,7 @@ export default function ChartPage() {
       switch (e.key.toLowerCase()) {
         case 'i': setShowIndicators(v => !v); toast.info('Indicators toggled'); break;
         case 'e': setShowEvents(v => !v); toast.info('Events toggled'); break;
+        case 'v': setShowVolumeProfile(v => !v); toast.info('Volume Profile toggled'); break;
         case 'escape': setSelectedPattern(null); setIsDrawing(false); break;
       }
     }
@@ -273,6 +288,7 @@ export default function ChartPage() {
     const ema9Series = chart.addLineSeries({ color: '#3b82f6', lineWidth: 1, title: 'EMA 9' })
     const ema21Series = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, title: 'EMA 21' })
     const vwapSeries = chart.addLineSeries({ color: '#d946ef', lineWidth: 2, title: 'VWAP', lineStyle: 2 })
+    const avwapSeries = chart.addLineSeries({ color: '#ff7300', lineWidth: 3, title: 'AVWAP' })
     const supertrendSeries = chart.addLineSeries({ color: '#10b981', lineWidth: 2, title: 'SuperTrend', lineStyle: 0 })
     
     const volumeSeries = chart.addHistogramSeries({
@@ -290,7 +306,11 @@ export default function ChartPage() {
     ema9SeriesRef.current = ema9Series
     ema21SeriesRef.current = ema21Series;
     vwapSeriesRef.current = vwapSeries;
-    (chartRef as any).supertrendSeries = supertrendSeries;
+    avwapSeriesRef.current = avwapSeries;
+    supertrendSeriesRef.current = supertrendSeries;
+    if (chartRef.current) {
+      (chartRef.current as any).supertrendSeries = supertrendSeries;
+    }
     volumeSeriesRef.current = volumeSeries;
 
     chart.subscribeCrosshairMove((param) => {
@@ -410,9 +430,25 @@ export default function ChartPage() {
       }
     })
 
-    // Handle Click for Drawing Tool
+    // Handle Click for Drawing Tool & Anchoring VWAP
     chart.subscribeClick((param) => {
-      if (!isDrawingRef.current || !param.point || !param.time) return;
+      if (!param.point || !param.time) return;
+
+      if (isAnchoringVwapRef.current) {
+        let ts = 0;
+        if (typeof param.time === 'number') {
+          ts = param.time * 1000;
+        } else if (typeof param.time === 'string') {
+          ts = new Date(param.time).getTime();
+        } else if (typeof param.time === 'object') {
+          ts = new Date(param.time.year, param.time.month - 1, param.time.day).getTime();
+        }
+        setAnchorDate(new Date(ts).toISOString())
+        setIsAnchoringVwap(false)
+        return
+      }
+      
+      if (!isDrawingRef.current) return;
       
       const price = candleSeries.coordinateToPrice(param.point.y);
       if (price === null) return;
@@ -448,6 +484,8 @@ export default function ChartPage() {
       });
       activePrimitivesRef.current = [];
       setIsDrawing(false);
+      setIsAnchoringVwap(false);
+      setAnchorDate(null);
       currentDrawPrimitiveRef.current = null;
     };
     window.addEventListener('resize', handleResize)
@@ -463,7 +501,7 @@ export default function ChartPage() {
   // Load Data
   useEffect(() => {
     loadChartData()
-  }, [symbol, timeframe])
+  }, [symbol, timeframe, anchorDate])
 
   // Load Compare Data
   useEffect(() => {
@@ -569,6 +607,7 @@ export default function ChartPage() {
          const ema9Data: LineData[] = []
          const ema21Data: LineData[] = []
          const vwapData: LineData[] = []
+         const avwapData: LineData[] = []
          const rsiData: LineData[] = []
          const supertrendData: LineData[] = []
          const macdHistData: HistogramData[] = []
@@ -580,6 +619,7 @@ export default function ChartPage() {
            if (c.ema_9 !== null && c.ema_9 !== undefined) ema9Data.push({ time, value: c.ema_9 })
            if (c.ema_21 !== null && c.ema_21 !== undefined) ema21Data.push({ time, value: c.ema_21 })
            if (c.vwap !== null && c.vwap !== undefined) vwapData.push({ time, value: c.vwap })
+           if (c.anchored_vwap !== null && c.anchored_vwap !== undefined) avwapData.push({ time, value: c.anchored_vwap })
            if (c.rsi_14 !== null && c.rsi_14 !== undefined) rsiData.push({ time, value: c.rsi_14 })
            if (c.supertrend !== null && c.supertrend !== undefined) supertrendData.push({ time, value: c.supertrend })
            if (c.macd_hist !== null && c.macd_hist !== undefined) macdHistData.push({ time, value: c.macd_hist, color: c.macd_hist >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)' })
@@ -596,21 +636,23 @@ export default function ChartPage() {
          ema9SeriesRef.current.setData(ema9Data)
          ema21SeriesRef.current.setData(ema21Data)
          vwapSeriesRef.current.setData(vwapData)
+         avwapSeriesRef.current?.setData(avwapData)
          rsiSeriesRef.current.setData(rsiData)
          
          if (macdSeriesRef.current) macdSeriesRef.current.setData(macdHistData)
          if (macdLineSeriesRef.current) macdLineSeriesRef.current.setData(macdData)
          if (macdSignalSeriesRef.current) macdSignalSeriesRef.current.setData(macdSignalData)
-         if ((chartRef.current as any).supertrendSeries) {
-           (chartRef.current as any).supertrendSeries.setData(supertrendData)
+         if (supertrendSeriesRef.current) {
+           supertrendSeriesRef.current.setData(supertrendData)
          }
       } else {
          ema9SeriesRef.current?.setData([])
          ema21SeriesRef.current?.setData([])
          vwapSeriesRef.current?.setData([])
+         avwapSeriesRef.current?.setData([])
          rsiSeriesRef.current?.setData([])
-         if ((chartRef.current as any).supertrendSeries) {
-           (chartRef.current as any).supertrendSeries.setData([])
+         if (supertrendSeriesRef.current) {
+           supertrendSeriesRef.current.setData([])
          }
       }
       
@@ -810,17 +852,18 @@ export default function ChartPage() {
 
   // Fix Lightweight Charts 0-width issue when container changes from display: none to display: block
   useEffect(() => {
-    if (showIndicators) {
-      setTimeout(() => {
-        if (rsiContainerRef.current && rsiChartRef.current) {
-          rsiChartRef.current.applyOptions({ width: rsiContainerRef.current.clientWidth });
-        }
-        if (macdContainerRef.current && macdChartRef.current) {
-          macdChartRef.current.applyOptions({ width: macdContainerRef.current.clientWidth });
-        }
-      }, 50); // allow DOM to update
-    }
-  }, [showIndicators]);
+    setTimeout(() => {
+      if (chartContainerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+      if (rsiContainerRef.current && rsiChartRef.current) {
+        rsiChartRef.current.applyOptions({ width: rsiContainerRef.current.clientWidth });
+      }
+      if (macdContainerRef.current && macdChartRef.current) {
+        macdChartRef.current.applyOptions({ width: macdContainerRef.current.clientWidth });
+      }
+    }, 50); // allow DOM to update
+  }, [showIndicators, showVolumeProfile]);
 
   // Apply Theme to Lightweight Charts Dynamically
   useEffect(() => {
@@ -843,11 +886,20 @@ export default function ChartPage() {
     applyThemeToChart(macdChartRef.current);
   }, [theme]);
 
+  // Load Volume Profile
+  useEffect(() => {
+    if (showVolumeProfile) {
+      stocksApi.getVolumeProfile(symbol, timeframe)
+        .then(res => setVolumeProfile(res.data))
+        .catch(err => console.error('VP load error:', err))
+    }
+  }, [symbol, timeframe, showVolumeProfile])
+
   async function loadChartData() {
     setLoading(true)
     try {
       const [insightRes, sentimentRes, infoRes] = await Promise.allSettled([
-        stocksApi.getInsight(symbol, timeframe),
+        stocksApi.getInsight(symbol, timeframe, anchorDate),
         aiApi.sentiment(symbol),
         stocksApi.getInfo(symbol),
       ])
@@ -992,6 +1044,160 @@ export default function ChartPage() {
   const signalClass = signal?.type === 'BUY' ? 'badge-buy' : signal?.type === 'SELL' ? 'badge-sell' : signal?.type === 'WATCH' ? 'badge-watch' : 'badge-hold'
   const aiClass = aiScore?.score === 'BUY' ? 'badge-buy' : aiScore?.score === 'SELL' ? 'badge-sell' : 'badge-hold'
 
+  const generatePDFReport = async () => {
+    try {
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF('p', 'pt', 'a4');
+      const margin = 40;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      
+      doc.setFontSize(24);
+      doc.setTextColor(30, 41, 59);
+      doc.text(`Institutional Research: ${symbol.replace('.NS', '')}`, margin, margin + 20);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Generated: ${new Date().toLocaleString('en-IN')} | Timeframe: ${timeframe}`, margin, margin + 40);
+
+      let currentY = margin + 60;
+      if (chartRef.current && typeof (chartRef.current as any).takeScreenshot === 'function') {
+        try {
+          const canvas = (chartRef.current as any).takeScreenshot();
+          if (canvas && canvas.width > 0 && canvas.height > 0) {
+            const imgData = canvas.toDataURL('image/png');
+            const imgWidth = pageWidth - (margin * 2);
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            doc.addImage(imgData, 'PNG', margin, currentY, imgWidth, imgHeight);
+            currentY += imgHeight + 30;
+          } else {
+            currentY += 20;
+          }
+        } catch (screenshotErr) {
+          console.warn('Screenshot capture failed, continuing with textual report:', screenshotErr);
+          currentY += 20;
+        }
+      } else {
+        currentY += 20;
+      }
+      
+      const formatNum = (val: any, decimals = 2): string => {
+        if (val === null || val === undefined) return 'N/A';
+        const num = typeof val === 'number' ? val : Number(val);
+        return isNaN(num) ? 'N/A' : num.toFixed(decimals);
+      };
+
+      doc.setFontSize(14);
+      doc.setTextColor(30, 41, 59);
+      doc.text('1. Market Summary', margin, currentY);
+      currentY += 20;
+      doc.setFontSize(11);
+      doc.setTextColor(71, 85, 105);
+      doc.text(`LTP: Rs. ${formatNum(quote?.price, 2)}`, margin, currentY);
+      const low52 = formatNum(quote?.['52w_low'], 2);
+      const high52 = formatNum(quote?.['52w_high'], 2);
+      const range52Text = (low52 !== 'N/A' && high52 !== 'N/A')
+        ? `Day/52W Range: Rs. ${low52} - ${high52}`
+        : 'Day/52W Range: N/A';
+      doc.text(range52Text, margin + 170, currentY);
+      currentY += 30;
+
+      doc.setFontSize(14);
+      doc.setTextColor(30, 41, 59);
+      doc.text('2. AI Predictive Score', margin, currentY);
+      currentY += 20;
+      doc.setFontSize(11);
+      if (aiScore) {
+        const color = aiScore.score === 'BUY' ? [16, 185, 129] : aiScore.score === 'SELL' ? [239, 68, 68] : [245, 158, 11];
+        doc.setTextColor(color[0], color[1], color[2]);
+        doc.text(`Signal: ${aiScore.score}`, margin, currentY);
+        doc.setTextColor(71, 85, 105);
+        const confStr = typeof aiScore.confidence === 'number' ? (aiScore.confidence * 100).toFixed(1) : formatNum(aiScore.confidence, 1);
+        doc.text(`Confidence: ${confStr}%`, margin + 170, currentY);
+        currentY += 20;
+        doc.setFontSize(9);
+        const topFeatures = Array.isArray(aiScore.explanation)
+          ? aiScore.explanation.slice(0, 3).map((e: any) => `${e.feature}: ${e.direction} (${e.contribution})`).join(' | ')
+          : '';
+        doc.text(`Key Drivers: ${topFeatures || 'N/A'}`, margin, currentY);
+      } else {
+        doc.setTextColor(71, 85, 105);
+        doc.text('AI analysis not available.', margin, currentY);
+      }
+      currentY += 30;
+
+      doc.setFontSize(14);
+      doc.setTextColor(30, 41, 59);
+      doc.text('3. Technical Indicators', margin, currentY);
+      currentY += 20;
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105);
+
+      // Extract supertrend safely whether object { value, direction } or scalar number
+      let supertrendText = 'N/A';
+      if (indicators?.supertrend) {
+        if (typeof indicators.supertrend === 'object') {
+          const stVal = formatNum(indicators.supertrend.value, 2);
+          const stDir = indicators.supertrend.direction && indicators.supertrend.direction !== 'none'
+            ? ` (${indicators.supertrend.direction.toUpperCase()})`
+            : '';
+          supertrendText = stVal !== 'N/A' ? `${stVal}${stDir}` : 'N/A';
+        } else {
+          supertrendText = formatNum(indicators.supertrend, 2);
+        }
+      }
+
+      const macdVal = typeof indicators?.macd === 'object' && indicators?.macd !== null
+        ? formatNum(indicators.macd.macd, 4)
+        : formatNum(indicators?.macd, 4);
+
+      const techMetrics = [
+        `RSI (14): ${formatNum(indicators?.rsi_14, 2)}`,
+        `MACD: ${macdVal}`,
+        `SuperTrend: ${supertrendText}`,
+        `EMA 21: ${formatNum(indicators?.ema_21, 2)}`,
+        `ATR (14): ${formatNum(indicators?.atr_14, 2)}`,
+        `VWAP: ${formatNum(indicators?.vwap, 2)}`
+      ];
+      techMetrics.forEach((metric, index) => {
+        const col = index % 3;
+        const row = Math.floor(index / 3);
+        doc.text(metric, margin + (col * 170), currentY + (row * 20));
+      });
+      currentY += Math.ceil(techMetrics.length / 3) * 20 + 20;
+
+      doc.setFontSize(14);
+      doc.setTextColor(30, 41, 59);
+      doc.text('4. Risk Analysis & Quantitative Projections', margin, currentY);
+      currentY += 20;
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105);
+
+      const riskMetrics = [
+        `Risk Level: ${risk?.level || 'N/A'}`,
+        `Volatility (Ann.): ${formatNum(risk?.annualized_volatility_pct, 2)}%`,
+        `Max Drawdown: ${formatNum(risk?.max_drawdown_pct, 2)}%`,
+        `Downside Vol: ${formatNum(risk?.downside_volatility_pct, 2)}%`,
+        `Period Return: ${formatNum(risk?.period_return_pct, 2)}%`,
+        `Sharpe Ratio: ${formatNum(risk?.sharpe_ratio, 2)}`,
+        `Sortino Ratio: ${formatNum(risk?.sortino_ratio, 2)}`,
+        `VaR 95%: ${formatNum(risk?.value_at_risk_95_pct, 2)}%`,
+        `CVaR 95%: ${formatNum(risk?.expected_shortfall_cvar_95_pct, 2)}%`,
+      ];
+      riskMetrics.forEach((metric, index) => {
+        const col = index % 3;
+        const row = Math.floor(index / 3);
+        doc.text(metric, margin + (col * 170), currentY + (row * 20));
+      });
+      
+      const fileName = `StockAI_Report_${symbol.replace('.NS', '')}_${new Date().toISOString().split('T')[0]}.pdf`;
+      doc.save(fileName);
+      toast.success('Report downloaded successfully');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Failed to generate PDF: ${err?.message || 'Unknown error'}`);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -1063,12 +1269,30 @@ export default function ChartPage() {
             </button>
             <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
             <button 
+              onClick={() => setShowVolumeProfile(!showVolumeProfile)}
+              className="btn btn-ghost" 
+              style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: showVolumeProfile ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showVolumeProfile ? 600 : 400 }}
+              title="Toggle Volume Profile (VPVR)"
+            >
+              <BarChart2 size={14} style={{ marginRight: 4 }} /> VP
+            </button>
+            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+            <button 
               onClick={() => setIsDrawing(!isDrawing)}
               className="btn btn-ghost" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: isDrawing ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: isDrawing ? 600 : 400 }}
               title="Draw Custom Trendline"
             >
               <Pencil size={14} style={{ marginRight: 4 }} /> {isDrawing ? 'Cancel' : 'Draw'}
+            </button>
+            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+            <button 
+              onClick={() => setIsAnchoringVwap(!isAnchoringVwap)}
+              className="btn btn-ghost" 
+              style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: isAnchoringVwap ? 'var(--color-accent-blue)' : (anchorDate ? '#ff7300' : 'var(--color-text-muted)'), fontWeight: isAnchoringVwap || anchorDate ? 600 : 400 }}
+              title="Anchor VWAP to a specific candle"
+            >
+              <TrendingUp size={14} style={{ marginRight: 4 }} /> {isAnchoringVwap ? 'Cancel' : (anchorDate ? 'AVWAP On' : 'Anchor VWAP')}
             </button>
             <button 
               onClick={() => (window as any).clearDrawings?.()}
@@ -1101,7 +1325,7 @@ export default function ChartPage() {
             <ListFilter size={14}/> Heikin Ashi
           </button>
           
-          <div style={{ marginLeft: 16, borderLeft: '1px solid var(--color-border)', paddingLeft: 16 }}>
+          <div style={{ marginLeft: 16, borderLeft: '1px solid var(--color-border)', paddingLeft: 16, display: 'flex', gap: 8 }}>
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
@@ -1114,6 +1338,14 @@ export default function ChartPage() {
                 </option>
               ))}
             </select>
+            <button 
+              onClick={generatePDFReport}
+              className="btn btn-secondary"
+              style={{ fontSize: 13, padding: '6px 12px', height: '34px', display: 'flex', alignItems: 'center', gap: 6 }}
+              title="Export Institutional Report (PDF)"
+            >
+              <Download size={14} /> Export PDF
+            </button>
           </div>
         </div>
       </div>
@@ -1136,7 +1368,20 @@ export default function ChartPage() {
             <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W High</div><div className="mono">₹{quote['52w_high'] ? Number(quote['52w_high']).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}</div></div>
             <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W Low</div><div className="mono">₹{quote['52w_low'] ? Number(quote['52w_low']).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}</div></div>
             <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Volume</div><div className="mono">{quote.volume ? Number(quote.volume).toLocaleString('en-IN') : '—'}</div></div>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Market Cap</div><div className="mono">{quote.market_cap ? (quote.market_cap >= 1e7 ? `₹${(quote.market_cap / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 1 })} Cr` : `₹${(quote.market_cap / 1e9).toFixed(1)} B`) : '—'}</div></div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Market Cap</div>
+              <div className="mono">
+                {(() => {
+                  const cap = Number(quote.market_cap || info?.market_cap || 0);
+                  if (cap > 0) {
+                    return cap >= 1e7
+                      ? `₹${(cap / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 1 })} Cr`
+                      : `₹${(cap / 1e9).toFixed(1)} B`;
+                  }
+                  return '—';
+                })()}
+              </div>
+            </div>
           </div>
         {/* AI Score Ring */}
           <div style={{ marginLeft: 'auto', textAlign: 'center', flexShrink: 0 }}>
@@ -1186,18 +1431,45 @@ export default function ChartPage() {
           />
         )}
         <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
-          <div ref={chartContainerRef} style={{ width: '100%', position: 'relative', minHeight: 450 }}>
-            <div 
-              ref={legendRef} 
-              style={{ 
-                position: 'absolute', 
-                top: 12, 
-                left: 12, 
-                zIndex: 10, 
-                display: 'none',
-                pointerEvents: 'none',
-              }} 
-            />
+          <div style={{ display: 'flex' }}>
+            <div ref={chartContainerRef} style={{ flex: 1, position: 'relative', minHeight: 450 }}>
+              <div 
+                ref={legendRef} 
+                style={{ 
+                  position: 'absolute', 
+                  top: 12, 
+                  left: 12, 
+                  zIndex: 10, 
+                  display: 'none',
+                  pointerEvents: 'none',
+                }} 
+              />
+            </div>
+            {showVolumeProfile && volumeProfile && volumeProfile.bins && (
+              <div style={{ width: 160, background: 'var(--color-bg-secondary)', borderLeft: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column-reverse', padding: '10px 0', zIndex: 10 }}>
+                <div style={{ padding: '4px 8px', fontSize: 11, color: '#fbbf24', textAlign: 'center', borderTop: '1px solid var(--color-border)', marginTop: 4 }}>
+                  VAH: {volumeProfile.vah.toFixed(1)}<br/>VAL: {volumeProfile.val.toFixed(1)}
+                </div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column-reverse', width: '100%' }}>
+                  {volumeProfile.bins.map((bin: any, idx: number) => {
+                    const maxVol = Math.max(...volumeProfile.bins.map((b: any) => b.total_volume));
+                    const widthPct = (bin.total_volume / maxVol) * 100;
+                    const buyPct = (bin.buy_volume / bin.total_volume) * 100 || 0;
+                    const isPOC = bin.price_level === volumeProfile.poc_price;
+                    return (
+                      <div key={idx} title={`Price: ${bin.price_level.toFixed(2)} | Vol: ${bin.total_volume}`} style={{ flex: 1, display: 'flex', position: 'relative', minHeight: 2, borderBottom: isPOC ? '1px solid rgba(251, 191, 36, 0.4)' : 'none', borderTop: isPOC ? '1px solid rgba(251, 191, 36, 0.4)' : 'none', opacity: isPOC ? 1 : 0.7 }}>
+                        <div style={{ width: `${widthPct}%`, display: 'flex', height: '100%' }}>
+                          <div style={{ width: `${buyPct}%`, background: '#10b981' }} />
+                          <div style={{ width: `${100 - buyPct}%`, background: '#ef4444' }} />
+                        </div>
+                        {isPOC && <div style={{ position: 'absolute', left: 4, top: '50%', transform: 'translateY(-50%)', color: '#fbbf24', fontSize: 9, fontWeight: 'bold' }}>POC</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ padding: '0 8px', fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4, textAlign: 'center' }}>Volume Profile</div>
+              </div>
+            )}
           </div>
           <div ref={rsiContainerRef} style={{ width: '100%', borderTop: '1px solid var(--color-border)', display: showIndicators ? 'block' : 'none' }} />
           <div ref={macdContainerRef} style={{ width: '100%', display: showIndicators ? 'block' : 'none' }} />
@@ -1477,13 +1749,76 @@ export default function ChartPage() {
         {/* Swing Trade Analysis */}
         {swingTrade && !swingTrade.error && (
           <div className="card" style={{ gridColumn: '1 / -1', position: 'relative', overflow: 'hidden' }}>
-            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border)', paddingBottom: 12, marginBottom: 16 }}>
-              <span className="card-title" style={{ fontSize: 16, fontWeight: 600 }}>
-                Swing Trade Analysis
-              </span>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', paddingBottom: 12, marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span className="card-title" style={{ fontSize: 16, fontWeight: 600 }}>
+                  Swing Trade Analysis
+                </span>
+                <Link 
+                  to="/screener" 
+                  style={{ 
+                    fontSize: 12, 
+                    fontWeight: 600, 
+                    color: 'var(--color-brand, #3b82f6)', 
+                    textDecoration: 'none', 
+                    display: 'inline-flex', 
+                    alignItems: 'center', 
+                    gap: 4, 
+                    padding: '4px 10px', 
+                    background: 'rgba(59, 130, 246, 0.1)', 
+                    border: '1px solid rgba(59, 130, 246, 0.25)', 
+                    borderRadius: 6,
+                    cursor: 'pointer' 
+                  }}
+                >
+                  View Market-Wide Buy/Sell Screener →
+                </Link>
+              </div>
               <span className={`badge ${swingTrade.action === 'BUY' ? 'badge-buy' : swingTrade.action === 'SELL' ? 'badge-sell' : 'badge-hold'}`} style={{ fontSize: 14, padding: '4px 12px' }}>
                 {swingTrade.action || 'HOLD'} (Score: {(swingTrade.total_score ?? 50).toFixed(1)})
               </span>
+            </div>
+
+            {/* Actionable Guidance Banner */}
+            <div style={{ 
+              marginBottom: 16, 
+              padding: '10px 14px', 
+              borderRadius: 8, 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 10,
+              fontSize: 13,
+              lineHeight: 1.4,
+              background: swingTrade.action === 'BUY' 
+                ? 'rgba(16, 185, 129, 0.1)' 
+                : swingTrade.action === 'SELL' 
+                  ? 'rgba(239, 68, 68, 0.1)' 
+                  : 'rgba(245, 158, 11, 0.1)',
+              border: `1px solid ${
+                swingTrade.action === 'BUY' 
+                  ? 'rgba(16, 185, 129, 0.3)' 
+                  : swingTrade.action === 'SELL' 
+                    ? 'rgba(239, 68, 68, 0.3)' 
+                    : 'rgba(245, 158, 11, 0.3)'
+              }`,
+              color: swingTrade.action === 'BUY' 
+                ? 'var(--color-bullish)' 
+                : swingTrade.action === 'SELL' 
+                  ? 'var(--color-bearish)' 
+                  : '#f59e0b'
+            }}>
+              <Info size={18} style={{ flexShrink: 0 }} />
+              <div>
+                {swingTrade.action === 'BUY' && (
+                  <span><strong>Bullish Signal:</strong> High conviction score ({(swingTrade.total_score ?? 60).toFixed(1)}/100). Favorable reward-to-risk setup. Target is ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (+{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}%) with Stop Loss at ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)}.</span>
+                )}
+                {swingTrade.action === 'SELL' && (
+                  <span><strong>Bearish Signal:</strong> Low conviction score ({(swingTrade.total_score ?? 40).toFixed(1)}/100). Downward momentum detected. Expected drop to ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (-{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}%). Capital preservation recommended.</span>
+                )}
+                {swingTrade.action === 'HOLD' && (
+                  <span><strong>Neutral / Consolidation (Neither Buy Nor Sell):</strong> The stock is range-bound between Lower Support ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)} (-{(swingTrade.trade_plan?.risk_pct ?? 0).toFixed(2)}%) and Upper Resistance ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (+{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}%). Both percentages are symmetric because price is oscillating in the middle of its channel. <em>Action: Do not buy blindly in mid-channel; wait for a breakout above ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} or look for reversal buying near ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)}.</em></span>
+                )}
+              </div>
             </div>
             
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
@@ -1493,7 +1828,7 @@ export default function ChartPage() {
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
-                  {swingTrade.action === 'SELL' ? 'Expected Drop' : (swingTrade.action === 'HOLD' ? 'Upper Resistance' : 'Potential Gain')}
+                  {swingTrade.action === 'SELL' ? 'Expected Drop' : (swingTrade.action === 'HOLD' ? 'Upper Resistance (Ceiling)' : 'Potential Gain (Target)')}
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: swingTrade.action === 'SELL' ? 'var(--color-bearish)' : (swingTrade.action === 'HOLD' ? 'var(--color-text-primary)' : 'var(--color-bullish)') }}>
                   {swingTrade.action === 'SELL' ? '-' : '+'}{(swingTrade.trade_plan?.expected_gain_pct ?? 15).toFixed(2)}%
@@ -1501,7 +1836,7 @@ export default function ChartPage() {
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
-                  {swingTrade.action === 'HOLD' ? 'Lower Support' : 'Max Risk (Stop Loss)'}
+                  {swingTrade.action === 'HOLD' ? 'Lower Support (Floor)' : 'Max Risk (Stop Loss)'}
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: swingTrade.action === 'HOLD' ? 'var(--color-text-primary)' : 'var(--color-bearish)' }}>
                   -{(swingTrade.trade_plan?.risk_pct ?? 7).toFixed(2)}%
@@ -1515,13 +1850,13 @@ export default function ChartPage() {
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
-                  {swingTrade.action === 'HOLD' ? 'Lower Bound' : 'Stop Loss Level'}
+                  {swingTrade.action === 'HOLD' ? 'Support Price' : 'Stop Loss Level'}
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{(swingTrade.trade_plan?.stop_loss ?? 1400).toFixed(2)}</div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
-                  {swingTrade.action === 'HOLD' ? 'Upper Bound' : 'Target Price'}
+                  {swingTrade.action === 'HOLD' ? 'Resistance Price' : 'Target Price'}
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{(swingTrade.trade_plan?.target_price ?? 1700).toFixed(2)}</div>
               </div>

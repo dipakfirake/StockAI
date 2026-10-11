@@ -10,6 +10,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.5
       - key: SECRET_KEY
-        value: production-secret-key-12345
+        generateValue: true
       - key: DATABASE_URL
         sync: false
+

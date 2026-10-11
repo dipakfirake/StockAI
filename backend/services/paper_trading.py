@@ -5,6 +5,7 @@ Phase 7 Advanced Simulation: Support for LIMIT/SL orders, Gap Risk, STT taxes, I
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -14,15 +15,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import settings
 from backend.core.logging_config import get_logger
+from backend.core.audit_logger import log_security_event
+from backend.core.event_bus import event_bus, OrderPlacedEvent, OrderClosedEvent
+from backend.core.telemetry import metrics
 from backend.models.paper_trade import PaperTrade
 from backend.services.market_data import market_data_service
 
 logger = get_logger(__name__)
 
+# Financial Risk & Circuit Breaker Thresholds
+MAX_QUANTITY_PER_ORDER = 50_000
+MAX_NOTIONAL_VALUE_PER_ORDER = 10_000_000.0  # ₹1 Crore max order notional value
+MAX_PRICE_DEVIATION_PCT = 0.30              # Max ±30% deviation for LIMIT/SL from current market price
+
 
 class PaperTradingService:
     """
     Simulates order execution with realistic slippage, commission, and taxes.
+    Includes banking-grade financial risk controls and fat-finger circuit breakers.
     """
 
     @staticmethod
@@ -39,19 +49,37 @@ class PaperTradingService:
         target_price: float | None = None,
         stop_loss: float | None = None,
     ) -> PaperTrade:
-        """Place a simulated order."""
+        """Place a simulated order with strict financial validation."""
+        # 1. Direction and symbol sanitization
         if direction not in ("BUY", "SELL"):
             raise ValueError(f"Invalid direction '{direction}'. Must be BUY or SELL.")
+        if not re.match(r"^[A-Za-z0-9\.\-\:]{1,30}$", symbol):
+            raise ValueError(f"Invalid symbol format '{symbol}'. Potential malicious input.")
+
+        # 2. Quantity boundaries (anti-overflow & sanity bounds)
         if quantity <= 0:
             raise ValueError("Quantity must be greater than 0.")
+        if quantity > MAX_QUANTITY_PER_ORDER:
+            raise ValueError(
+                f"Quantity ({quantity:,}) exceeds the maximum allowable single-order risk limit of {MAX_QUANTITY_PER_ORDER:,} shares."
+            )
+
         if order_type not in ("MARKET", "LIMIT", "SL", "SL_LIMIT"):
             raise ValueError(f"Invalid order type '{order_type}'.")
-        if product_type not in ("INTRADAY", "DELIVERY"):
-            raise ValueError(f"Invalid product type '{product_type}'.")
+
+        # Normalize product_type aliases (CNC -> DELIVERY, MIS -> INTRADAY)
+        norm_product = product_type.upper().strip()
+        if norm_product in ("CNC", "DELIVERY"):
+            product_type = "DELIVERY"
+        elif norm_product in ("MIS", "INTRADAY"):
+            product_type = "INTRADAY"
+        else:
+            raise ValueError(f"Invalid product type '{product_type}'. Must be INTRADAY (MIS) or DELIVERY (CNC).")
         
-        # Enforce Short Selling logic (Phase 7 rule)
+        # Enforce Short Selling logic: short sales in Indian equities must be INTRADAY
         if direction == "SELL" and product_type == "DELIVERY":
-            raise ValueError("Short selling is not allowed for DELIVERY. Please use INTRADAY.")
+            # Automatically adapt simulated short selling to INTRADAY
+            product_type = "INTRADAY"
 
         # For MARKET orders, attempt immediate execution if market is open
         # For simplicity in simulation, we fetch current quote and execute immediately.
@@ -61,6 +89,20 @@ class PaperTradingService:
             raise ValueError(f"Cannot fetch price for {symbol}. Market may be closed.")
 
         raw_price = quote["price"]
+
+        # 3. Notional risk limit (anti-leverage / capital overflow protection)
+        notional_value = raw_price * quantity
+        if notional_value > MAX_NOTIONAL_VALUE_PER_ORDER:
+            log_security_event(
+                event_type="ORDER_RISK_LIMIT_EXCEEDED",
+                severity="WARNING",
+                user_id=str(user_id),
+                details={"symbol": symbol, "quantity": quantity, "notional_value": notional_value},
+            )
+            raise ValueError(
+                f"Order notional value (₹{notional_value:,.2f}) exceeds the maximum allowable limit of ₹{MAX_NOTIONAL_VALUE_PER_ORDER:,.2f}."
+            )
+
         status = "PENDING"
         entry_price = None
         slippage_amount = 0.0
@@ -70,11 +112,26 @@ class PaperTradingService:
             slippage_amount = raw_price * settings.DEFAULT_SLIPPAGE_PCT
             entry_price = raw_price + slippage_amount if direction == "BUY" else raw_price - slippage_amount
 
-        # Validate limit/stop logic relative to current price
-        if order_type == "LIMIT" and limit_price is None:
-            raise ValueError("Limit price must be provided for LIMIT orders.")
-        if order_type in ("SL", "SL_LIMIT") and stop_price is None:
-            raise ValueError("Stop price must be provided for SL orders.")
+        # 4. Fat-Finger Price Deviation Bounds
+        if order_type == "LIMIT":
+            if limit_price is None:
+                raise ValueError("Limit price must be provided for LIMIT orders.")
+            deviation = abs(limit_price - raw_price) / raw_price
+            if deviation > MAX_PRICE_DEVIATION_PCT:
+                raise ValueError(
+                    f"Limit price (₹{limit_price}) deviates by {deviation*100:.1f}% from market price (₹{raw_price}). "
+                    f"Maximum allowed deviation is {int(MAX_PRICE_DEVIATION_PCT*100)}%. Fat-finger circuit breaker triggered."
+                )
+
+        if order_type in ("SL", "SL_LIMIT"):
+            if stop_price is None:
+                raise ValueError("Stop price must be provided for SL orders.")
+            deviation = abs(stop_price - raw_price) / raw_price
+            if deviation > MAX_PRICE_DEVIATION_PCT:
+                raise ValueError(
+                    f"Stop price (₹{stop_price}) deviates by {deviation*100:.1f}% from market price (₹{raw_price}). "
+                    f"Maximum allowed deviation is {int(MAX_PRICE_DEVIATION_PCT*100)}%. Fat-finger circuit breaker triggered."
+                )
 
         trade = PaperTrade(
             user_id=uuid.UUID(str(user_id)),
@@ -99,6 +156,35 @@ class PaperTradingService:
         await db.flush()
         await db.refresh(trade)
         
+        log_security_event(
+            event_type="ORDER_PLACED",
+            severity="INFO",
+            user_id=str(user_id),
+            details={
+                "trade_id": str(trade.id),
+                "symbol": symbol,
+                "direction": direction,
+                "quantity": quantity,
+                "order_type": order_type,
+                "status": status,
+                "price": entry_price or raw_price,
+            },
+        )
+
+        # Track telemetry & publish domain event asynchronously
+        metrics.inc_order(direction, order_type, status)
+        await event_bus.publish(
+            OrderPlacedEvent(
+                user_id=str(user_id),
+                trade_id=str(trade.id),
+                symbol=symbol,
+                direction=direction,
+                quantity=quantity,
+                order_type=order_type,
+                price=float(entry_price or raw_price),
+            )
+        )
+
         if status == "OPEN":
             logger.info(f"Market trade opened: {direction} {quantity}x{symbol} @ {entry_price:.4f}")
         else:
@@ -127,6 +213,12 @@ class PaperTradingService:
             trade.status = "CANCELLED"
             trade.closed_at = datetime.now(timezone.utc)
             await db.flush()
+            log_security_event(
+                event_type="ORDER_CANCELLED",
+                severity="INFO",
+                user_id=str(user_id),
+                details={"trade_id": str(trade.id), "symbol": trade.symbol},
+            )
             return trade
 
         if trade.status != "OPEN":
@@ -139,6 +231,28 @@ class PaperTradingService:
         raw_exit = quote["price"]
         await PaperTradingService._execute_exit(trade, raw_exit)
         await db.flush()
+        
+        log_security_event(
+            event_type="ORDER_CLOSED",
+            severity="INFO",
+            user_id=str(user_id),
+            details={
+                "trade_id": str(trade.id),
+                "symbol": trade.symbol,
+                "exit_price": float(trade.exit_price),
+                "realized_pnl": float(trade.realized_pnl),
+            },
+        )
+        # Publish domain event for trade closure
+        await event_bus.publish(
+            OrderClosedEvent(
+                user_id=str(user_id),
+                trade_id=str(trade.id),
+                symbol=trade.symbol,
+                exit_price=float(trade.exit_price),
+                realized_pnl=float(trade.realized_pnl),
+            )
+        )
         logger.info(f"Paper trade closed manually: {trade.symbol} PnL={trade.realized_pnl}")
         return trade
 

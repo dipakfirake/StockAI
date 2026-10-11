@@ -10,6 +10,14 @@ const CONDITION_TYPES = [
   { value: 'RSI_BELOW', label: 'RSI Below' },
   { value: 'MACD_CROSS_UP', label: 'MACD Cross Up' },
   { value: 'MACD_CROSS_DOWN', label: 'MACD Cross Down' },
+  { value: 'PATTERN', label: 'Candlestick Pattern' },
+]
+
+const PATTERN_TYPES = [
+  { value: '1', label: 'Hammer' },
+  { value: '2', label: 'Bullish Engulfing' },
+  { value: '3', label: 'Bearish Engulfing' },
+  { value: '4', label: 'Bullish Order Block' },
 ]
 
 export default function AlertsPage() {
@@ -107,7 +115,14 @@ export default function AlertsPage() {
             </div>
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Value</label>
-              <input className="input" type="number" step="any" required placeholder="e.g. 2850" value={form.condition_value} onChange={e => setForm({ ...form, condition_value: e.target.value })} />
+              {form.condition_type === 'PATTERN' ? (
+                <select className="input" required value={form.condition_value} onChange={e => setForm({ ...form, condition_value: e.target.value })}>
+                  <option value="" disabled>Select pattern</option>
+                  {PATTERN_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
+              ) : (
+                <input className="input" type="number" step="any" required placeholder="e.g. 2850" value={form.condition_value} onChange={e => setForm({ ...form, condition_value: e.target.value })} />
+              )}
             </div>
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Custom Message (optional)</label>
@@ -150,7 +165,11 @@ export default function AlertsPage() {
                 <tr key={a.alert_id}>
                   <td><span className="mono" style={{ fontWeight: 600 }}>{a.symbol}</span></td>
                   <td style={{ color: 'var(--color-text-secondary)' }}>{CONDITION_TYPES.find(c => c.value === a.condition_type)?.label || a.condition_type}</td>
-                  <td className="mono">{a.condition_value}</td>
+                  <td className="mono">
+                    {a.condition_type === 'PATTERN' 
+                      ? (PATTERN_TYPES.find(p => String(p.value) === String(a.condition_value))?.label || a.condition_value)
+                      : a.condition_value}
+                  </td>
                   <td>
                     <span style={{ color: a.is_active ? 'var(--color-bullish)' : 'var(--color-text-muted)', fontSize: 13 }}>
                       {a.is_active ? '● Active' : '○ Inactive'}

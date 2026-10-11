@@ -78,7 +78,7 @@ class MarketDataService:
             return index_map[symbol]
             
         # Standard Equity translation
-        # .BO suffix means the stock is BSE-listed; route to BSE exchange in Fyers
+        # .BO suffix means the stock is BSE-listed; route to BSE exchange
         base_symbol = symbol.replace(".NS", "").replace(".BO", "").replace("^", "").strip().upper()
         exchange = "BSE" if symbol.endswith(".BO") else "NSE"
         return f"{exchange}:{base_symbol}-EQ"
@@ -116,12 +116,37 @@ class MarketDataService:
     _fyers_cooldown_until: float = 0.0
 
     @staticmethod
-    def _get_fyers_client():
+    async def _get_fyers_client():
         import os
         from dotenv import dotenv_values
+        from backend.core.database import AsyncSessionLocal
+        from backend.models.settings import SystemSettings
+        from sqlalchemy import select
         
         client_id = settings.FYERS_CLIENT_ID
         access_token = settings.FYERS_ACCESS_TOKEN
+
+        try:
+            from backend.core.cache import cache_get, cache_set
+            
+            cached_creds = await cache_get("fyers_creds")
+            if cached_creds:
+                client_id = cached_creds.get("client_id", client_id)
+                access_token = cached_creds.get("access_token", access_token)
+            else:
+                async with AsyncSessionLocal() as db:
+                    fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
+                    fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
+                    
+                    if fyers_client_obj and fyers_client_obj.value:
+                        client_id = fyers_client_obj.value
+                    if fyers_token_obj and fyers_token_obj.value:
+                        access_token = fyers_token_obj.value
+                        
+                if client_id and access_token:
+                    await cache_set("fyers_creds", {"client_id": client_id, "access_token": access_token}, ttl=300)
+        except Exception:
+            pass
         
         # Dynamically read latest values from mounted /app/.env if available
         env_paths = [
@@ -182,7 +207,7 @@ class MarketDataService:
 
         if now >= MarketDataService._fyers_cooldown_until:
             try:
-                fyers = MarketDataService._get_fyers_client()
+                fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbol}
                 
                 response = await asyncio.to_thread(fyers.quotes, data)
@@ -217,20 +242,28 @@ class MarketDataService:
                     else:
                         logger.warning(f"Fyers returned zero price for {fyers_symbol}, falling through to backup")
                 elif response.get("code") == 429:
-                    MarketDataService._fyers_cooldown_until = now + 30.0
-                    logger.warning("Fyers rate limit (429) hit in single quote. Entering 30s cooldown.")
+                    MarketDataService._fyers_cooldown_until = now + 45.0
+                    logger.warning("Fyers rate limit (429) hit in single quote. Entering 45s cooldown.")
                 elif fyers_symbol.startswith("BSE:"):
                     return await MarketDataService.fetch_quote(original_symbol.replace(".BO", ".NS"))
                 else:
+                    err_msg = str(response)
+                    if "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg:
+                        MarketDataService._fyers_cooldown_until = now + 45.0
+                        logger.warning("Fyers WAF rate limit hit in single quote. Entering 45s cooldown.")
                     logger.warning(f"Fyers quote returned non-ok for {fyers_symbol}: {response}")
 
             except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "rate limit" in err_str.lower() or "1015" in err_str:
+                    MarketDataService._fyers_cooldown_until = now + 45.0
+                    logger.warning("Fyers WAF rate limit exception. Entering 45s cooldown.")
                 logger.error(f"Failed to fetch Fyers quote for {original_symbol}: {e}")
         else:
             remaining = int(MarketDataService._fyers_cooldown_until - now)
             logger.debug(f"Fyers cooldown active ({remaining}s remaining), skipping Fyers single quote")
 
-        # Secondary fallback if Fyers token is expired or temporary connectivity glitch
+        # Secondary fallback via yfinance ticker history (supports test mocks)
         try:
             import yfinance as yf
             import requests
@@ -269,6 +302,50 @@ class MarketDataService:
         except Exception:
             pass
 
+        # Tertiary fallback via direct Yahoo Chart API (resilient against crumb & 429 errors)
+        try:
+            import httpx
+            clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
+            if original_symbol.startswith("^"):
+                yf_sym = original_symbol
+            elif original_symbol.endswith(".BO"):
+                yf_sym = f"{clean_sym}.BO"
+            else:
+                yf_sym = f"{clean_sym}.NS"
+
+            chart_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval=1d&range=5d"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            async with httpx.AsyncClient(headers=headers, timeout=5.0) as client:
+                resp = await client.get(chart_url)
+                if resp.status_code == 200:
+                    cdata = resp.json()
+                    res_list = cdata.get("chart", {}).get("result", [])
+                    if res_list:
+                        meta = res_list[0].get("meta", {})
+                        last_price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
+                        if last_price:
+                            prev_close = meta.get("chartPreviousClose") or last_price
+                            calc_change = last_price - prev_close
+                            calc_change_pct = (calc_change / prev_close) * 100 if prev_close else 0.0
+                            fallback_quote = {
+                                "symbol": original_symbol,
+                                "price": round(float(last_price), 2),
+                                "previous_close": round(float(prev_close), 2),
+                                "change": round(float(calc_change), 2),
+                                "change_pct": round(float(calc_change_pct), 2),
+                                "volume": int(meta.get("regularMarketVolume") or 0),
+                                "market_cap": 0,
+                                "52w_high": round(float(meta.get("fiftyTwoWeekHigh") or 0.0), 2),
+                                "52w_low": round(float(meta.get("fiftyTwoWeekLow") or 0.0), 2),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "data_status": "delayed",
+                                "source": "Backup (Yahoo Chart API)",
+                            }
+                            await cache_set(cache_key, fallback_quote, ttl=settings.CACHE_TTL_QUOTE)
+                            return fallback_quote
+        except Exception as e:
+            logger.debug(f"Direct chart API quote fallback failed for {original_symbol}: {e}")
+
         return None
 
     @staticmethod
@@ -281,13 +358,22 @@ class MarketDataService:
 
         import time
         now = time.time()
-        fyers_to_orig = {MarketDataService._normalise_symbol(s): s for s in symbols}
+        fyers_to_orig: dict[str, list[str]] = {}
+        for s in symbols:
+            norm = MarketDataService._normalise_symbol(s)
+            fyers_to_orig.setdefault(norm, []).append(s)
+            # In Fyers, BSE cash equities (e.g. BSE:PCJEWELLER-EQ) error with -300 invalid symbol.
+            # Add the liquid NSE equivalent (NSE:PCJEWELLER-EQ) so Fyers returns real-time quotes.
+            if norm.startswith("BSE:") and not norm.endswith("-INDEX"):
+                nse_norm = norm.replace("BSE:", "NSE:")
+                fyers_to_orig.setdefault(nse_norm, []).append(s)
+
         fyers_symbols_str = ",".join(fyers_to_orig.keys())
         
         quotes_dict = {}
         if now >= MarketDataService._fyers_cooldown_until:
             try:
-                fyers = MarketDataService._get_fyers_client()
+                fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbols_str}
                 response = await asyncio.to_thread(fyers.quotes, data)
                 
@@ -295,7 +381,7 @@ class MarketDataService:
                     for item in response["d"]:
                         fyers_sym = item.get("n", "")
                         quote_data = item.get("v", {})
-                        orig_sym = fyers_to_orig.get(fyers_sym, fyers_sym)
+                        orig_symbols = fyers_to_orig.get(fyers_sym, [fyers_sym])
                         
                         last_price = quote_data.get("lp", 0.0)
                         prev_close = quote_data.get("prev_close_price", last_price)
@@ -303,23 +389,32 @@ class MarketDataService:
                         calc_change_pct = quote_data.get("chp", 0.0)
                         
                         if float(last_price) > 0:
-                            quotes_dict[orig_sym] = {
-                                "symbol": orig_sym,
-                                "price": round(float(last_price), 2),
-                                "previous_close": round(float(prev_close), 2),
-                                "change": round(float(calc_change), 2),
-                                "change_pct": round(float(calc_change_pct), 2),
-                                "volume": int(quote_data.get("volume", 0)),
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "data_status": "realtime",
-                                "source": "Fyers API",
-                            }
+                            for orig_sym in orig_symbols:
+                                quotes_dict[orig_sym] = {
+                                    "symbol": orig_sym,
+                                    "price": round(float(last_price), 2),
+                                    "previous_close": round(float(prev_close), 2),
+                                    "change": round(float(calc_change), 2),
+                                    "change_pct": round(float(calc_change_pct), 2),
+                                    "volume": int(quote_data.get("volume", 0)),
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "data_status": "realtime",
+                                    "source": "Fyers API",
+                                }
                 elif response.get("code") == 429:
-                    MarketDataService._fyers_cooldown_until = now + 30.0
-                    logger.warning("Fyers rate limit (429) hit in bulk quotes. Entering 30s cooldown.")
+                    MarketDataService._fyers_cooldown_until = now + 45.0
+                    logger.warning("Fyers rate limit (429) hit in bulk quotes. Entering 45s cooldown.")
                 else:
+                    err_msg = str(response)
+                    if "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg:
+                        MarketDataService._fyers_cooldown_until = now + 45.0
+                        logger.warning("Fyers WAF rate limit detected in bulk quotes. Entering 45s cooldown.")
                     logger.error(f"Fyers bulk quote returned non-ok: {response}")
             except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "rate limit" in err_str.lower() or "1015" in err_str:
+                    MarketDataService._fyers_cooldown_until = now + 45.0
+                    logger.warning("Fyers WAF rate limit exception in bulk quotes. Entering 45s cooldown.")
                 logger.error(f"Fyers bulk quote failed: {e}")
         else:
             remaining = int(MarketDataService._fyers_cooldown_until - now)
@@ -328,67 +423,141 @@ class MarketDataService:
         # Automatically fill any missing symbols via fast concurrent fallback
         missing_symbols = [s for s in symbols if s not in quotes_dict or quotes_dict[s].get("price", 0) <= 0]
         if missing_symbols and use_fallback:
+            import httpx
+
+            async def _fetch_single_chart_quote(client: httpx.AsyncClient, sym: str):
+                clean = sym.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
+                if sym.startswith("^"):
+                    yf_sym = sym
+                elif sym.endswith(".BO"):
+                    yf_sym = f"{clean}.BO"
+                else:
+                    yf_sym = f"{clean}.NS"
+
+                chart_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval=1d&range=5d"
+                try:
+                    resp = await client.get(chart_url)
+                    if resp.status_code == 200:
+                        cdata = resp.json()
+                        res_list = cdata.get("chart", {}).get("result", [])
+                        if res_list:
+                            meta = res_list[0].get("meta", {})
+                            last_price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
+                            if last_price and float(last_price) > 0:
+                                prev_close = meta.get("chartPreviousClose") or last_price
+                                calc_change = float(last_price) - float(prev_close)
+                                calc_change_pct = (calc_change / float(prev_close)) * 100 if float(prev_close) else 0.0
+                                return sym, {
+                                    "symbol": sym,
+                                    "price": round(float(last_price), 2),
+                                    "previous_close": round(float(prev_close), 2),
+                                    "change": round(float(calc_change), 2),
+                                    "change_pct": round(float(calc_change_pct), 2),
+                                    "volume": int(meta.get("regularMarketVolume") or 0),
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "data_status": "delayed",
+                                    "source": "Backup (Yahoo Chart API)",
+                                }
+                except Exception as ex:
+                    logger.debug(f"Direct chart fetch failed for {sym}: {ex}")
+                return sym, None
+
+            # 1. Primary fallback: Concurrent direct Yahoo Chart queries (fast, no crumb/cookie blocks)
             try:
-                import yfinance as yf
-                import requests
-                yf_map = {}
-                for s in missing_symbols:
-                    clean = s.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-                    if s.startswith("^"):
-                        yf_sym = s
-                    elif s.endswith(".BO"):
-                        yf_sym = f"{clean}.BO"
-                    else:
-                        yf_sym = f"{clean}.NS"
-                    yf_map[yf_sym] = s
-                
-                def _batch_yf():
-                    session = requests.Session()
-                    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-                    tickers = " ".join(yf_map.keys())
-                    return yf.download(tickers, period="5d", interval="1d", progress=False, group_by="ticker", session=session)
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                async with httpx.AsyncClient(headers=headers, timeout=6.0) as client:
+                    tasks = [_fetch_single_chart_quote(client, s) for s in missing_symbols]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for res in results:
+                        if isinstance(res, tuple) and res[1] is not None:
+                            sym, quote_data = res
+                            quotes_dict[sym] = quote_data
+                            try:
+                                await cache_set(f"quote:{sym}", quote_data, ttl=settings.CACHE_TTL_QUOTE)
+                            except Exception:
+                                pass
+            except Exception as e:
+                logger.debug(f"Direct Yahoo Chart bulk fallback failed: {e}")
 
-                df = await asyncio.wait_for(asyncio.to_thread(_batch_yf), timeout=10.0)
-                if df is not None and not df.empty:
-                    for yf_sym, orig_sym in yf_map.items():
-                        try:
-                            if yf_sym in df:
-                                ticker_df = df[yf_sym]
-                            elif "Close" in df and not isinstance(df["Close"], pd.DataFrame):
-                                ticker_df = df
-                            elif "Close" in df and isinstance(df["Close"], pd.DataFrame) and yf_sym in df["Close"]:
-                                ticker_df = pd.DataFrame({
-                                    "Close": df["Close"][yf_sym],
-                                    "Volume": df["Volume"][yf_sym] if "Volume" in df and yf_sym in df["Volume"] else 0
-                                })
-                            else:
-                                continue
+            # 2. Secondary fallback: yfinance batch download (for mocked test suites)
+            still_missing = [s for s in symbols if s not in quotes_dict or quotes_dict[s].get("price", 0) <= 0]
+            if still_missing:
+                try:
+                    import yfinance as yf
+                    import requests
+                    yf_map = {}
+                    for s in still_missing:
+                        clean = s.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
+                        if s.startswith("^"):
+                            yf_sym = s
+                        elif s.endswith(".BO"):
+                            yf_sym = f"{clean}.BO"
+                        else:
+                            yf_sym = f"{clean}.NS"
+                        yf_map[yf_sym] = s
 
-                            if "Close" in ticker_df:
-                                series = ticker_df["Close"].dropna()
-                                if not series.empty:
-                                    last_price = float(series.iloc[-1])
-                                    prev_close = float(series.iloc[-2]) if len(series) > 1 else last_price
-                                    ch = last_price - prev_close
-                                    chp = (ch / prev_close) * 100 if prev_close else 0.0
-                                    vol = 0
-                                    if "Volume" in ticker_df and not ticker_df["Volume"].dropna().empty:
-                                        vol = int(ticker_df["Volume"].dropna().iloc[-1])
-                                    quotes_dict[orig_sym] = {
-                                        "symbol": orig_sym,
-                                        "price": round(last_price, 2),
-                                        "previous_close": round(prev_close, 2),
-                                        "change": round(ch, 2),
-                                        "change_pct": round(chp, 2),
-                                        "volume": vol,
-                                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                                        "data_status": "delayed",
-                                        "source": "Backup",
-                                    }
-                        except Exception:
-                            pass
-            except Exception as ex:
-                logger.debug(f"Batch fallback skipped: {ex}")
+                    def _batch_yf():
+                        session = requests.Session()
+                        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+                        tickers = " ".join(yf_map.keys())
+                        return yf.download(tickers, period="5d", interval="1d", progress=False, group_by="ticker", session=session)
+
+                    df = await asyncio.wait_for(asyncio.to_thread(_batch_yf), timeout=6.0)
+                    if df is not None and not df.empty:
+                        for yf_sym, orig_sym in yf_map.items():
+                            try:
+                                if yf_sym in df:
+                                    ticker_df = df[yf_sym]
+                                elif "Close" in df and not isinstance(df["Close"], pd.DataFrame):
+                                    ticker_df = df
+                                elif "Close" in df and isinstance(df["Close"], pd.DataFrame) and yf_sym in df["Close"]:
+                                    ticker_df = pd.DataFrame({
+                                        "Close": df["Close"][yf_sym],
+                                        "Volume": df["Volume"][yf_sym] if "Volume" in df and yf_sym in df["Volume"] else 0
+                                    })
+                                else:
+                                    continue
+
+                                if "Close" in ticker_df:
+                                    series = ticker_df["Close"].dropna()
+                                    if not series.empty:
+                                        last_price = float(series.iloc[-1])
+                                        prev_close = float(series.iloc[-2]) if len(series) > 1 else last_price
+                                        ch = last_price - prev_close
+                                        chp = (ch / prev_close) * 100 if prev_close else 0.0
+                                        vol = 0
+                                        if "Volume" in ticker_df and not ticker_df["Volume"].dropna().empty:
+                                            vol = int(ticker_df["Volume"].dropna().iloc[-1])
+                                        q = {
+                                            "symbol": orig_sym,
+                                            "price": round(last_price, 2),
+                                            "previous_close": round(prev_close, 2),
+                                            "change": round(ch, 2),
+                                            "change_pct": round(chp, 2),
+                                            "volume": vol,
+                                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                                            "data_status": "delayed",
+                                            "source": "Backup",
+                                        }
+                                        quotes_dict[orig_sym] = q
+                                        try:
+                                            await cache_set(f"quote:{orig_sym}", q, ttl=settings.CACHE_TTL_QUOTE)
+                                        except Exception:
+                                            pass
+                            except Exception:
+                                pass
+                except Exception as ex:
+                    logger.debug(f"Batch yf fallback skipped: {ex}")
+
+            # 3. Tertiary fallback: Check Redis quote cache for last-known valid prices
+            still_missing_after_yf = [s for s in symbols if s not in quotes_dict or quotes_dict[s].get("price", 0) <= 0]
+            for s in still_missing_after_yf:
+                try:
+                    cached_q = await cache_get(f"quote:{s}")
+                    if cached_q and cached_q.get("price", 0) > 0:
+                        quotes_dict[s] = cached_q
+                except Exception:
+                    pass
 
         return quotes_dict
 
@@ -418,7 +587,7 @@ class MarketDataService:
         fyers_interval = FYERS_INTERVAL_MAP[timeframe]
 
         try:
-            fyers = MarketDataService._get_fyers_client()
+            fyers = await MarketDataService._get_fyers_client()
             all_candles = []
             
             # 1. Determine the global start and end timestamps
@@ -445,19 +614,21 @@ class MarketDataService:
                     elif timeframe == "1m":
                         dt_start = dt_end - timedelta(days=60)
                 
-            # 2. Pagination Loop (Fyers max range is 100 days for intraday, 365 days for daily)
+            # 2. Backward Pagination Loop (Fyers max range is 100 days for intraday, 365 days for daily)
+            # Paginating backwards ensures the most recent market candles (today/yesterday)
+            # are retrieved FIRST so any pagination cutoff never leaves candles stuck in old years.
             max_days_per_request = 365 if timeframe in ["1d", "1w", "1mo"] else 100
             
-            current_start = dt_start
-            while current_start < dt_end:
-                current_end = min(current_start + timedelta(days=max_days_per_request), dt_end)
+            chunk_end = dt_end
+            while chunk_end > dt_start:
+                chunk_start = max(chunk_end - timedelta(days=max_days_per_request), dt_start)
                 
                 data = {
                     "symbol": fyers_symbol,
                     "resolution": fyers_interval,
                     "date_format": "1",
-                    "range_from": current_start.strftime("%Y-%m-%d"),
-                    "range_to": current_end.strftime("%Y-%m-%d"),
+                    "range_from": chunk_start.strftime("%Y-%m-%d"),
+                    "range_to": chunk_end.strftime("%Y-%m-%d"),
                     "cont_flag": "1" # Continuous data for futures/indices
                 }
                 
@@ -471,24 +642,31 @@ class MarketDataService:
                     if response.get("code") in [-16, -300, 429] or response.get("s") in ["no_data", "error"]:
                         break
                         
-                    logger.warning(f"Fyers history failed for {fyers_symbol} ({current_start.date()} to {current_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")
+                    logger.warning(f"Fyers history failed for {fyers_symbol} ({chunk_start.date()} to {chunk_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")
                     await asyncio.sleep(1.0)
                 else:
                     break
                     
                 if "candles" in response and response["candles"]:
                     all_candles.extend(response["candles"])
+                elif not all_candles:
+                    # If the most recent chunk had no data or failed, stop
+                    break
                     
-                current_start = current_end + timedelta(days=1)
+                chunk_end = chunk_start - timedelta(days=1)
                 
-                # Sleep briefly only if paginating across multiple years
-                if current_start < dt_end:
+                # Sleep briefly only if paginating across multiple chunks
+                if chunk_end > dt_start:
                     await asyncio.sleep(0.35)
                 
             if all_candles:
                 # Fyers candle format: [Epoch, Open, High, Low, Close, Volume]
                 formatted_candles = []
+                seen_ts = set()
                 for c in all_candles:
+                    if c[0] in seen_ts:
+                        continue
+                    seen_ts.add(c[0])
                     ts_dt = datetime.fromtimestamp(c[0], timezone.utc)
                     formatted_candles.append({
                         "timestamp": ts_dt.isoformat(),
@@ -501,6 +679,14 @@ class MarketDataService:
                     
                 # Sort chronologically and retain complete dataset
                 formatted_candles.sort(key=lambda x: x["timestamp"])
+
+                # Freshness Guard: If requesting live market data (no explicit historical date bounds),
+                # guarantee the most recent candle is not severely stale (>45 days old)
+                if not start_date and not end_date and formatted_candles:
+                    latest_dt = datetime.fromisoformat(formatted_candles[-1]["timestamp"].replace("Z", "+00:00"))
+                    if (dt_end - latest_dt).days > 45:
+                        logger.warning(f"Fyers returned stale historical candles for {fyers_symbol} ending {latest_dt.date()}. Invoking fallback.")
+                        raise ValueError(f"Fyers candles stale for {fyers_symbol}")
 
                 ttl = settings.CACHE_TTL_INTRADAY if timeframe in ("1m", "5m", "15m", "30m") else settings.CACHE_TTL_DAILY_CANDLES
                 await cache_set(cache_key, formatted_candles, ttl=ttl)
@@ -591,37 +777,152 @@ class MarketDataService:
 
     @staticmethod
     async def search_stocks(query: str) -> list[dict]:
-        """Search for stocks in local DB first, fallback to yfinance."""
+        """Search for stocks in local DB first, fallback to direct Yahoo Finance search."""
+        query_clean = query.strip()
+        if not query_clean:
+            return []
+
+        query_upper = query_clean.upper()
+        cache_key = f"stock_search:{query_upper}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
         from backend.core.database import AsyncSessionLocal
         from backend.models.stock import Stock
         from sqlalchemy import select
+        import httpx
+        import urllib.parse
 
-        query_upper = query.upper()
-        
-        async with AsyncSessionLocal() as db:
-            stmt = select(Stock).where(
-                (Stock.symbol.ilike(f"%{query_upper}%")) | 
-                (Stock.name.ilike(f"%{query_upper}%"))
-            ).limit(10)
-            local_stocks = (await db.execute(stmt)).scalars().all()
-            
-            if local_stocks:
-                return [
-                    {
-                        "symbol": s.symbol.replace(".NS", ""),
-                        "name": s.name,
-                        "exchange": s.exchange,
-                        "type": "EQUITY"
-                    }
-                    for s in local_stocks
-                ]
+        results: list[dict] = []
+        seen_symbols: set[str] = set()
 
+        # 1. Search local DB first
+        try:
+            async with AsyncSessionLocal() as db:
+                stmt = select(Stock).where(
+                    (Stock.symbol.ilike(f"%{query_upper}%")) | 
+                    (Stock.name.ilike(f"%{query_upper}%"))
+                ).limit(10)
+                local_stocks = (await db.execute(stmt)).scalars().all()
+                
+                for s in local_stocks:
+                    clean_sym = s.symbol.replace(".NS", "")
+                    if clean_sym not in seen_symbols:
+                        seen_symbols.add(clean_sym)
+                        results.append({
+                            "symbol": clean_sym,
+                            "name": s.name,
+                            "exchange": s.exchange,
+                            "type": "EQUITY"
+                        })
+                
+                # If we have plentiful local matches (>= 5), return them directly
+                if len(results) >= 5:
+                    await cache_set(cache_key, results, ttl=1800)
+                    return results
+        except Exception as e:
+            logger.warning(f"Local DB stock search failed for '{query}': {e}")
+
+        # 2. Resilient Direct Yahoo Finance Search API (version-independent)
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={urllib.parse.quote(query_clean)}&quotesCount=10&newsCount=0"
+            async with httpx.AsyncClient(headers=headers, timeout=5.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    quotes = data.get("quotes", [])
+                    new_stocks_to_persist = []
+                    for q in quotes:
+                        raw_sym = q.get("symbol", "")
+                        quote_type = q.get("quoteType", "")
+                        if not raw_sym or quote_type not in ["EQUITY", "ETF", "INDEX"]:
+                            continue
+
+                        exch = q.get("exchange", "")
+                        if exch in ["NSI", "NSE"] or raw_sym.endswith(".NS"):
+                            exchange_str = "NSE"
+                            clean_sym = raw_sym.replace(".NS", "")
+                            db_sym = f"{clean_sym}.NS"
+                        elif exch in ["BSE", "BOM"] or raw_sym.endswith(".BO"):
+                            exchange_str = "BSE"
+                            clean_sym = raw_sym
+                            db_sym = raw_sym
+                        else:
+                            exchange_str = exch or "NSE"
+                            clean_sym = raw_sym.replace(".NS", "")
+                            db_sym = raw_sym
+
+                        if clean_sym in seen_symbols:
+                            continue
+                        seen_symbols.add(clean_sym)
+
+                        name = q.get("shortname") or q.get("longname") or clean_sym
+                        results.append({
+                            "symbol": clean_sym,
+                            "name": name,
+                            "exchange": exchange_str,
+                            "type": quote_type,
+                        })
+                        new_stocks_to_persist.append((db_sym, name, exchange_str))
+
+                    # Asynchronously persist discovered stocks to DB
+                    if new_stocks_to_persist:
+                        async def _persist_discovered():
+                            try:
+                                async with AsyncSessionLocal() as db_session:
+                                    for sym_val, name_val, exch_val in new_stocks_to_persist[:5]:
+                                        existing = (await db_session.execute(select(Stock).where(Stock.symbol == sym_val))).scalar_one_or_none()
+                                        if not existing:
+                                            db_session.add(Stock(symbol=sym_val, name=name_val, exchange=exch_val, is_active=True))
+                                    await db_session.commit()
+                            except Exception:
+                                pass
+                        asyncio.create_task(_persist_discovered())
+
+                    if results:
+                        await cache_set(cache_key, results, ttl=1800)
+                        return results
+        except Exception as e:
+            logger.warning(f"Direct Yahoo search failed for '{query}': {e}")
+
+        # 3. Fallback to yf.Search if attribute exists (compatibility with future yfinance versions)
+        if hasattr(yf, "Search"):
+            try:
+                search_obj = await asyncio.to_thread(yf.Search, query_clean, max_results=10)
+                quotes = search_obj.quotes if hasattr(search_obj, "quotes") else []
+                for q in quotes:
+                    raw_sym = q.get("symbol", "")
+                    if not raw_sym or q.get("quoteType") not in ["EQUITY", "ETF", "INDEX"]:
+                        continue
+                    clean_sym = raw_sym.replace(".NS", "")
+                    if clean_sym in seen_symbols:
+                        continue
+                    seen_symbols.add(clean_sym)
+                    results.append({
+                        "symbol": clean_sym,
+                        "name": q.get("shortname") or q.get("longname", clean_sym),
+                        "exchange": "NSE" if raw_sym.endswith(".NS") else ("BSE" if raw_sym.endswith(".BO") else q.get("exchange", "NSE")),
+                        "type": q.get("quoteType", "EQUITY"),
+                    })
+                if results:
+                    await cache_set(cache_key, results, ttl=1800)
+                    return results
+            except Exception as e:
+                logger.warning(f"yf.Search fallback failed for '{query}': {e}")
+
+        # 4. Fallback curated symbols if completely offline or disconnected
         fallback_symbols = [
             {"symbol": "RELIANCE.NS", "name": "Reliance Industries", "exchange": "NSE", "type": "EQUITY"},
             {"symbol": "TCS.NS", "name": "Tata Consultancy Services", "exchange": "NSE", "type": "EQUITY"},
             {"symbol": "INFY.NS", "name": "Infosys", "exchange": "NSE", "type": "EQUITY"},
             {"symbol": "HDFCBANK.NS", "name": "HDFC Bank", "exchange": "NSE", "type": "EQUITY"},
             {"symbol": "ICICIBANK.NS", "name": "ICICI Bank", "exchange": "NSE", "type": "EQUITY"},
+            {"symbol": "SBIN.NS", "name": "State Bank of India", "exchange": "NSE", "type": "EQUITY"},
+            {"symbol": "TATAMOTORS.NS", "name": "Tata Motors", "exchange": "NSE", "type": "EQUITY"},
+            {"symbol": "GODIGIT.NS", "name": "Go Digit General Insurance", "exchange": "NSE", "type": "EQUITY"},
+            {"symbol": "PCJEWELLER.NS", "name": "PC Jeweller", "exchange": "NSE", "type": "EQUITY"},
         ]
         normalized_query = query_upper.replace(".NS", "").replace("^", "").strip()
         if normalized_query:
@@ -638,23 +939,7 @@ class MarketDataService:
             if matches:
                 return matches
 
-        # Fallback to yfinance
-        try:
-            results = await asyncio.to_thread(yf.Search, query, max_results=10)
-            quotes = results.quotes if hasattr(results, "quotes") else []
-            return [
-                {
-                    "symbol": q.get("symbol", "").replace(".NS", ""),
-                    "name": q.get("shortname") or q.get("longname", ""),
-                    "exchange": q.get("exchange", ""),
-                    "type": q.get("quoteType", ""),
-                }
-                for q in quotes
-                if q.get("quoteType") == "EQUITY"
-            ]
-        except Exception as e:
-            logger.error(f"Stock search failed for '{query}': {e}")
-            return []
+        return results
 
     @staticmethod
     async def get_stock_info(symbol: str) -> dict:
@@ -672,7 +957,7 @@ class MarketDataService:
             session = requests.Session()
             session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
             ticker = await asyncio.to_thread(yf.Ticker, yf_symbol, session=session)
-            info = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.info), timeout=5.0)
+            info = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.info), timeout=15.0)
             
             # Removed extremely slow balance_sheet and financials fetches (they were unused anyway)
 
@@ -705,10 +990,10 @@ class MarketDataService:
             # or it's an index. In that case, cache for only 5 minutes so it can retry later.
             ttl = 3600 * 6 if result["market_cap"] > 0 else 300
             await cache_set(cache_key, result, ttl=ttl)
-            return result
+            # return result handled below
         except Exception as e:
             logger.error(f"Failed to fetch info for {symbol}: {e}.")
-            return {
+            result = {
                 "symbol": symbol,
                 "name": symbol.replace(".NS", "").replace("^", ""),
                 "sector": "N/A",
@@ -731,6 +1016,34 @@ class MarketDataService:
                 "current_ratio": None,
             }
 
+        # Tertiary fallback: Scrape Screener.in if Yahoo Finance failed to get market_cap
+        if result.get("market_cap") in (0, None) and not symbol.startswith("^") and not symbol.endswith("-INDEX"):
+            try:
+                import httpx
+                from bs4 import BeautifulSoup
+                url = f"https://www.screener.in/company/{clean_sym}/"
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                async with httpx.AsyncClient(headers=headers, timeout=5.0) as client:
+                    r = await client.get(url)
+                    if r.status_code == 200:
+                        soup = BeautifulSoup(r.text, 'html.parser')
+                        for li in soup.find_all('li', class_='flex'):
+                            if 'Market Cap' in li.text:
+                                val_span = li.find('span', class_='number')
+                                if val_span:
+                                    val_str = val_span.text.replace(',', '').strip()
+                                    try:
+                                        mcap = float(val_str) * 10_000_000
+                                        result["market_cap"] = mcap
+                                        # Also cache the updated result to prevent hitting screener constantly
+                                        await cache_set(cache_key, result, ttl=3600*6)
+                                    except ValueError:
+                                        pass
+            except Exception as e:
+                logger.debug(f"Screener.in fallback failed for {clean_sym}: {e}")
+
+        return result
+
 
     @staticmethod
     async def fetch_news(symbol: str) -> list[dict]:
@@ -746,7 +1059,7 @@ class MarketDataService:
             session = requests.Session()
             session.headers.update({"User-Agent": "Mozilla/5.0"})
             ticker = await asyncio.to_thread(yf.Ticker, yf_symbol, session=session)
-            news_items = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.news), timeout=5.0)
+            news_items = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.news), timeout=15.0)
             
             articles = []
             for item in news_items[:10]:

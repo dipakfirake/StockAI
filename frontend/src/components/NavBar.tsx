@@ -10,7 +10,7 @@ import {
   TrendingUp,
   Search,
   Crown,
-  LogOut, Menu, X, Radio, Sun, Moon, MoreHorizontal, Activity, Settings, Target
+  LogOut, Menu, X, Radio, Sun, Moon, MoreHorizontal, Activity, Settings, Target, Radar
 } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
@@ -20,6 +20,7 @@ import WatchlistSidebar from './WatchlistSidebar'
 
 const links = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/screener', label: 'Swing Screener', icon: Radar },
   { to: '/paper-trading', label: 'Orders & Positions', icon: Briefcase },
   { to: '/portfolio', label: 'Holdings', icon: PieChart },
   { to: '/options/^NSEI', label: 'F&O Chain', icon: Activity },

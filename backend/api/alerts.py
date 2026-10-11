@@ -12,6 +12,8 @@ from backend.models.alert import Alert
 
 router = APIRouter()
 
+from typing import Any, Union
+
 VALID_CONDITIONS = {
     "PRICE_ABOVE", "PRICE_BELOW",
     "RSI_BELOW", "RSI_ABOVE",
@@ -23,10 +25,20 @@ VALID_CONDITIONS = {
 class CreateAlertRequest(BaseModel):
     symbol: str
     condition_type: str
-    condition_value: float
+    condition_value: Union[float, str]
     message: str | None = None
     priority: str = "MEDIUM"
     delivery_method: str = "IN_APP"
+
+
+def _format_cond_value(val: Any) -> Union[float, str]:
+    if val is None:
+        return 0.0
+    try:
+        fval = float(val)
+        return fval if not str(val).isalpha() else str(val)
+    except (ValueError, TypeError):
+        return str(val)
 
 
 @router.get("")
@@ -44,7 +56,7 @@ async def list_alerts(
             "alert_id": str(a.id),
             "symbol": a.symbol,
             "condition_type": a.condition_type,
-            "condition_value": float(a.condition_value),
+            "condition_value": _format_cond_value(a.condition_value),
             "message": a.message,
             "is_active": a.is_active,
             "triggered_at": a.triggered_at.isoformat() if a.triggered_at else None,
@@ -90,8 +102,13 @@ async def delete_alert(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an alert."""
+    try:
+        target_uuid = uuid.UUID(str(alert_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Invalid alert_id format: '{alert_id}'. Must be a valid UUID.")
+
     result = await db.execute(
-        select(Alert).where(Alert.id == uuid.UUID(alert_id), Alert.user_id == current_user.id)
+        select(Alert).where(Alert.id == target_uuid, Alert.user_id == current_user.id)
     )
     alert = result.scalar_one_or_none()
     if not alert:
@@ -107,8 +124,13 @@ async def deactivate_alert(
     db: AsyncSession = Depends(get_db),
 ):
     """Deactivate an alert without deleting it."""
+    try:
+        target_uuid = uuid.UUID(str(alert_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Invalid alert_id format: '{alert_id}'. Must be a valid UUID.")
+
     result = await db.execute(
-        select(Alert).where(Alert.id == uuid.UUID(alert_id), Alert.user_id == current_user.id)
+        select(Alert).where(Alert.id == target_uuid, Alert.user_id == current_user.id)
     )
     alert = result.scalar_one_or_none()
     if not alert:

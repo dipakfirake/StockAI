@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { marketApi, aiApi } from '../services/api'
-import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, Sparkles, RefreshCw } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, Sparkles, RefreshCw, Target, ArrowRight } from 'lucide-react'
 import AnimatedNumber from '../components/AnimatedNumber'
 
 interface Index {
@@ -308,6 +309,56 @@ export default function Dashboard() {
           ))}
         </div>
       )}
+
+      {/* Swing Trade Screener Spotlight Hub */}
+      <div 
+        className="card animate-fade-in-up" 
+        style={{ 
+          marginBottom: 20, 
+          padding: '16px 20px', 
+          background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.9))',
+          border: '1px solid rgba(59, 130, 246, 0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 16
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(16, 185, 129, 0.2))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa' }}>
+            <Target size={24} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--color-text-primary)' }}>
+                Automated Swing Trade Screener Hub
+              </span>
+              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(16, 185, 129, 0.15)', color: 'var(--color-bullish)', fontWeight: 600 }}>
+                High Precision Lists
+              </span>
+            </div>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--color-text-secondary)' }}>
+              Explore real-time categorized BUY (Targets T1/T2/T3), SELL (Bearish shorts), and HOLD lists across 8 sectors without opening individual charts.
+            </p>
+          </div>
+        </div>
+        <Link 
+          to="/screener" 
+          className="btn btn-primary"
+          style={{ 
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            gap: 8, 
+            padding: '10px 20px', 
+            fontSize: 13, 
+            fontWeight: 600, 
+            textDecoration: 'none' 
+          }}
+        >
+          Explore Buy &amp; Sell Lists <ArrowRight size={16} />
+        </Link>
+      </div>
 
       {/* Index Cards */}
       <div className="grid-3" style={{ marginBottom: 20 }}>

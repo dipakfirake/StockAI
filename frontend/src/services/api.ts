@@ -42,8 +42,10 @@ export const stocksApi = {
   getInfo: (symbol: string) => api.get(`/stocks/${symbol}/info`),
   getPatterns: (symbol: string, timeframe = '1d', limit = 250) =>
     api.get(`/stocks/${symbol}/patterns`, { params: { timeframe, limit } }),
-  getInsight: (symbol: string, timeframe = '1d') =>
-    api.get(`/stocks/${symbol}/insight`, { params: { timeframe } }),
+  getInsight: (symbol: string, timeframe = '1d', anchorDate?: string | null) =>
+    api.get(`/stocks/${symbol}/insight`, { params: { timeframe, ...(anchorDate && { anchor_date: anchorDate }) } }),
+  getVolumeProfile: (symbol: string, timeframe = '1d') =>
+    api.get(`/stocks/${symbol}/volume-profile`, { params: { timeframe } }),
   scanMarket: (rule: string) => api.get(`/scanner/nifty50`, { params: { rule } }),
   customScan: (data: { universe: string; timeframe?: string; conditions: Array<{ indicator: string; operator: string; value: number | string }> }) => api.post(`/scanner/custom`, data),
 }
@@ -102,6 +104,9 @@ export const marketApi = {
   getSectors: () => api.get('/market/sectors'),
   getHeatmap: () => api.get('/market/heatmap'),
   getOptions: (symbol: string) => api.get(`/market/options/${symbol}`),
+  getScreener: (sector?: string, forceRefresh = false) =>
+    api.get('/market/screener', { params: { ...(sector && { sector }), force_refresh: forceRefresh } }),
+  getBulkScreener: () => api.get('/market/bulk-screener'),
 }
 
 // ===== AI endpoints =====

@@ -92,6 +92,26 @@ def calculate_supertrend(df: pd.DataFrame, period: int = 7, multiplier: float = 
     }, index=df.index)
 
 
+def calculate_anchored_vwap(df: pd.DataFrame, anchor_date: str | pd.Timestamp) -> pd.Series:
+    """Computes Anchored VWAP starting exclusively from anchor_date onward."""
+    if isinstance(anchor_date, str):
+        anchor_date = pd.to_datetime(anchor_date)
+        
+    mask = df.index >= anchor_date
+    avwap = pd.Series(np.nan, index=df.index)
+    
+    if not mask.any():
+        return avwap
+        
+    sub_df = df[mask]
+    typical_price = (sub_df['High'] + sub_df['Low'] + sub_df['Close']) / 3
+    cum_pv = (typical_price * sub_df['Volume']).cumsum()
+    cum_v = sub_df['Volume'].cumsum()
+    
+    avwap.loc[mask] = np.where(cum_v > 0, cum_pv / cum_v, np.nan)
+    return avwap
+
+
 def detect_candlestick_patterns(df: pd.DataFrame) -> pd.Series:
     """Detects candlestick patterns using strict, high-accuracy mathematical ratios."""
     patterns = np.full(len(df), None, dtype=object)

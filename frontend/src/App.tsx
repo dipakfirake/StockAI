@@ -13,6 +13,7 @@ import SMCWatchlist from './pages/SMCWatchlist'
 import LoginPage from './pages/LoginPage'
 import PricingPage from './pages/PricingPage'
 import SettingsPage from './pages/SettingsPage'
+import SwingScreenerPage from './pages/SwingScreenerPage'
 import { AuthProvider } from './AuthContext'
 import { ThemeProvider } from './ThemeContext'
 
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/chart/:symbol?" element={<ChartPage />} />
+              <Route path="/screener" element={<SwingScreenerPage />} />
               <Route path="/scanner" element={<ScannerPage />} />
               <Route path="/heatmap" element={<HeatmapPage />} />
               <Route path="/options/:symbol?" element={<OptionsChainPage />} />

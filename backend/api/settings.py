@@ -14,7 +14,9 @@ DEFAULT_SETTINGS = [
     {"key": "default_risk_pct", "value": "2.0", "value_type": "float", "description": "Default risk percentage per trade"},
     {"key": "default_slippage", "value": "0.1", "value_type": "float", "description": "Default slippage percentage"},
     {"key": "enable_trading", "value": "true", "value_type": "boolean", "description": "Global kill switch for trading"},
-    {"key": "enable_auto_trader", "value": "false", "value_type": "boolean", "description": "Master toggle switch for AI Auto-Trader daemon"}
+    {"key": "enable_auto_trader", "value": "false", "value_type": "boolean", "description": "Master toggle switch for AI Auto-Trader daemon"},
+    {"key": "fyers_client_id", "value": "", "value_type": "string", "description": "Fyers App Client ID"},
+    {"key": "fyers_access_token", "value": "", "value_type": "string", "description": "Fyers Access Token (Update Daily)"}
 ]
 
 @router.get("/")
@@ -24,9 +26,13 @@ async def get_all_settings(
 ):
     """Get system settings. Admins or regular users."""
     settings = (await db.execute(select(SystemSettings))).scalars().all()
-    if not settings:
-        # Seed default settings
-        for s in DEFAULT_SETTINGS:
+    
+    # Ensure all defaults are present
+    existing_keys = {s.key for s in settings}
+    missing_defaults = [s for s in DEFAULT_SETTINGS if s["key"] not in existing_keys]
+    
+    if missing_defaults:
+        for s in missing_defaults:
             db.add(SystemSettings(**s))
         await db.commit()
         settings = (await db.execute(select(SystemSettings))).scalars().all()
@@ -70,5 +76,15 @@ async def update_settings(
         except (TypeError, ValueError) as exc:
             from fastapi import HTTPException
             raise HTTPException(status_code=422, detail=f"Invalid value for {key}: {exc}") from exc
+            
     await db.flush()
+    
+    # Invalidate cache if Fyers credentials were updated
+    if "fyers_client_id" in request.values or "fyers_access_token" in request.values:
+        try:
+            from backend.core.cache import cache_delete
+            await cache_delete("fyers_creds")
+        except Exception:
+            pass
+            
     return {key: item.get_typed_value() for key, item in existing.items()}

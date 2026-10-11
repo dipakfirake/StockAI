@@ -71,19 +71,13 @@ async def poll_market_data():
     """
     while True:
         try:
-            import time
-            # If Fyers rate limit cooldown is active, back off so the limit can reset
-            if time.time() < market_data_service._fyers_cooldown_until:
-                await asyncio.sleep(5.0)
-                continue
-
             # Collect all active subscribed symbols across all connections
             symbols = set()
             for conn in _market_connections.values():
                 symbols.update(conn.get("symbols", set()))
             
             if symbols:
-                quotes_map = await market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=False)
+                quotes_map = await market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=True)
                 for symbol, quote in quotes_map.items():
                     if quote and quote.get("price", 0) > 0:
                         await broadcast_market_update(
@@ -100,23 +94,32 @@ async def poll_market_data():
         except Exception as e:
             logger.error(f"Error in real-time market data streaming poller: {e}")
         
-        # Real-time tick broadcast frequency (1 second per Fyers quota guidelines)
-        await asyncio.sleep(1.0)
+        # Real-time tick broadcast frequency: 3.0 seconds (protects against Cloudflare WAF Error 1015)
+        await asyncio.sleep(3.0)
 
 
 async def broadcast_alert(alert_payload: dict, user_id: str | None = None):
-    """Deliver an alert only to its owner when a recipient is provided."""
+    """Deliver an alert toast notification to its owner (or all connected clients if user_id is None)."""
+    if "type" not in alert_payload:
+        envelope = {
+            "type": "alert_toast",
+            "data": alert_payload
+        }
+    else:
+        envelope = alert_payload
+
     disconnected = []
     for conn_id, conn_data in list(_market_connections.items()):
         if user_id is not None and conn_data.get("user_id") != user_id:
             continue
         try:
-            await conn_data["ws"].send_text(json.dumps(alert_payload))
+            await conn_data["ws"].send_text(json.dumps(envelope))
         except Exception:
             disconnected.append(conn_id)
 
     for conn_id in disconnected:
         _market_connections.pop(conn_id, None)
+
 
 async def broadcast_market_update(
     symbol: str, 
@@ -152,22 +155,5 @@ async def broadcast_market_update(
             except Exception:
                 disconnected.append(conn_id)
 
-    for conn_id in disconnected:
-        _market_connections.pop(conn_id, None)
-
-async def broadcast_alert(message: dict):
-    """Broadcast custom alert toast notifications to all connected clients."""
-    payload = {
-        "type": "alert_toast",
-        "data": message
-    }
-    disconnected = []
-    # Send to all general connections (we can reuse _market_connections since it holds all connected ws clients)
-    for conn_id, conn_data in list(_market_connections.items()):
-        try:
-            await conn_data["ws"].send_text(json.dumps(payload))
-        except Exception:
-            disconnected.append(conn_id)
-            
     for conn_id in disconnected:
         _market_connections.pop(conn_id, None)

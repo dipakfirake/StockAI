@@ -23,14 +23,15 @@ class TimeSyncService:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._sync()
+            # Sync in background daemon thread to avoid blocking application startup
+            threading.Thread(target=cls._instance._sync, daemon=True).start()
         return cls._instance
 
     def _sync(self):
         """Synchronize with worldtimeapi to find the clock offset."""
         try:
             # We use UTC endpoint to keep calculations simple
-            response = requests.get("https://worldtimeapi.org/api/timezone/Etc/UTC", timeout=3)
+            response = requests.get("https://worldtimeapi.org/api/timezone/Etc/UTC", timeout=2)
             if response.status_code == 200:
                 data = response.json()
                 true_time = datetime.datetime.fromisoformat(data["datetime"].replace('Z', '+00:00'))
@@ -42,7 +43,7 @@ class TimeSyncService:
                     
                 logger.info(f"Time synced successfully. System clock offset: {self._offset_seconds:.2f} seconds.")
         except Exception as e:
-            logger.warning(f"Failed to sync time with WorldTimeAPI: {e}. Using system time.")
+            logger.debug(f"External time sync bypassed ({e}). Using system time.")
             
     def get_true_now(self, tzinfo=None) -> datetime.datetime:
         """

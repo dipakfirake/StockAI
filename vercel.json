@@ -4,6 +4,14 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "https://stockai-backend.onrender.com/api/$1"
+    },
+    {
+      "source": "/ws/(.*)",
+      "destination": "https://stockai-backend.onrender.com/ws/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

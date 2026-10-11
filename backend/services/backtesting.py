@@ -107,6 +107,8 @@ class BacktestEngine:
             return {
                 "total_return_pct": 0.0,
                 "sharpe_ratio": 0.0,
+                "sortino_ratio": 0.0,
+                "calmar_ratio": 0.0,
                 "max_drawdown_pct": 0.0,
                 "win_rate": 0.0,
                 "total_trades": 0,
@@ -129,7 +131,7 @@ class BacktestEngine:
             returns = pd.Series(eq_vals).pct_change().dropna()
             sharpe = float(returns.mean() / returns.std() * np.sqrt(252)) if returns.std() > 0 else 0.0
             
-            # Sortino
+            # Sortino ratio
             downside_returns = returns[returns < 0]
             downside_std = downside_returns.std()
             sortino = float(returns.mean() / downside_std * np.sqrt(252)) if pd.notna(downside_std) and downside_std > 0 else 0.0
@@ -146,15 +148,23 @@ class BacktestEngine:
         else:
             max_drawdown_pct = 0.0
 
-        # Calmar
+        # Calmar ratio (Annualized return / Max Drawdown)
         if len(equity_curve) > 0 and max_drawdown_pct < 0:
-            # Check for negative returns causing complex numbers with fractional powers
-            ann_ret = (1 + (total_return_pct/100)) ** (252 / len(equity_curve)) - 1 if (1 + (total_return_pct/100)) >= 0 else 0
-            calmar = float(ann_ret / abs(max_drawdown_pct / 100))
+            years = max(1.0 / 252.0, len(equity_curve) / 252.0)
+            if total_return_pct > -100:
+                ann_ret = ((1.0 + (total_return_pct / 100.0)) ** (1.0 / years)) - 1.0
+            else:
+                ann_ret = -1.0
+            calmar = float(ann_ret / abs(max_drawdown_pct / 100.0))
         else:
             calmar = 0.0
 
-        profit_factor = abs(sum(wins) / sum(losses)) if losses and sum(losses) != 0 else 9999.0
+        if losses and sum(losses) != 0:
+            profit_factor = abs(sum(wins) / sum(losses))
+        elif wins:
+            profit_factor = round(sum(wins), 2)
+        else:
+            profit_factor = 0.0
 
         return {
             "total_return_pct": round(total_return_pct, 2),
@@ -197,8 +207,22 @@ class BacktestEngine:
                 pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
                 equity += pnl
                 trades.append({"entry": position["entry"], "exit": exit_p, "pnl": pnl, "entry_date": position["entry_date"], "exit_date": ts.isoformat()})
-                equity_curve.append({"date": ts.isoformat(), "equity": round(equity, 2)})
                 position = None
+
+            # Mark to market for daily equity curve
+            cur_pnl = ((price * (1 - slippage_pct) - position["entry"]) * position["qty"] - commission * 2) if position else 0.0
+            equity_curve.append({"date": ts.isoformat(), "equity": round(equity + cur_pnl, 2)})
+
+        # Close any lingering open position at final candle
+        if position is not None and not df.empty:
+            final_ts = df.index[-1].isoformat()
+            final_price = float(df["Close"].iloc[-1])
+            exit_p = final_price * (1 - slippage_pct)
+            pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+            equity += pnl
+            trades.append({"entry": position["entry"], "exit": exit_p, "pnl": pnl, "entry_date": position["entry_date"], "exit_date": final_ts})
+            if equity_curve:
+                equity_curve[-1]["equity"] = round(equity, 2)
 
         metrics = BacktestEngine._compute_metrics(trades, equity_curve, capital)
         return {"symbol": symbol, "strategy": "rsi_mean_reversion", "params": params, "metrics": metrics, "trades": trades[-20:], "equity_curve": equity_curve}
@@ -237,10 +261,24 @@ class BacktestEngine:
                     pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
                     equity += pnl
                     trades.append({"entry": position["entry"], "exit": exit_p, "pnl": pnl, "entry_date": position["entry_date"], "exit_date": ts.isoformat()})
-                    equity_curve.append({"date": ts.isoformat(), "equity": round(equity, 2)})
                     position = None
 
             prev_fast, prev_slow = cur_fast, cur_slow
+
+            # Mark to market daily equity curve
+            cur_pnl = ((price * (1 - slippage_pct) - position["entry"]) * position["qty"] - commission * 2) if position else 0.0
+            equity_curve.append({"date": ts.isoformat(), "equity": round(equity + cur_pnl, 2)})
+
+        # Close any lingering open position at final candle
+        if position is not None and not df.empty:
+            final_ts = df.index[-1].isoformat()
+            final_price = float(df["Close"].iloc[-1])
+            exit_p = final_price * (1 - slippage_pct)
+            pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+            equity += pnl
+            trades.append({"entry": position["entry"], "exit": exit_p, "pnl": pnl, "entry_date": position["entry_date"], "exit_date": final_ts})
+            if equity_curve:
+                equity_curve[-1]["equity"] = round(equity, 2)
 
         metrics = BacktestEngine._compute_metrics(trades, equity_curve, capital)
         return {"symbol": symbol, "strategy": "ema_crossover", "params": params, "metrics": metrics, "trades": trades[-20:], "equity_curve": equity_curve}
@@ -272,10 +310,24 @@ class BacktestEngine:
                     pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
                     equity += pnl
                     trades.append({"entry": position["entry"], "exit": exit_p, "pnl": pnl, "entry_date": position["entry_date"], "exit_date": ts.isoformat()})
-                    equity_curve.append({"date": ts.isoformat(), "equity": round(equity, 2)})
                     position = None
 
             prev_hist = hist
+
+            # Mark to market daily equity curve
+            cur_pnl = ((price * (1 - slippage_pct) - position["entry"]) * position["qty"] - commission * 2) if position else 0.0
+            equity_curve.append({"date": ts.isoformat(), "equity": round(equity + cur_pnl, 2)})
+
+        # Close any lingering open position at final candle
+        if position is not None and not df.empty:
+            final_ts = df.index[-1].isoformat()
+            final_price = float(df["Close"].iloc[-1])
+            exit_p = final_price * (1 - slippage_pct)
+            pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+            equity += pnl
+            trades.append({"entry": position["entry"], "exit": exit_p, "pnl": pnl, "entry_date": position["entry_date"], "exit_date": final_ts})
+            if equity_curve:
+                equity_curve[-1]["equity"] = round(equity, 2)
 
         metrics = BacktestEngine._compute_metrics(trades, equity_curve, capital)
         return {"symbol": symbol, "strategy": "macd_signal", "params": params, "metrics": metrics, "trades": trades[-20:], "equity_curve": equity_curve}
@@ -328,7 +380,6 @@ class BacktestEngine:
         equity = capital
 
         for ts, row in df.iterrows():
-            # Construct indicator dict exactly as ai_engine expects
             indicators = {
                 "close": float(row["Close"]),
                 "volume": float(row["Volume"]),
@@ -346,7 +397,6 @@ class BacktestEngine:
                 "vol_sma_20": float(row["vol_sma_20"])
             }
             
-            # Use LightGBM scoring method to simulate the AI fast (without computing SHAP explanations)
             ai_result = ai_engine_service.score(indicators, symbol, compute_shap=False)
             score = ai_result.get("score", "HOLD")
             probs = ai_result.get("probabilities", {})
@@ -355,7 +405,6 @@ class BacktestEngine:
             price = float(row["Close"])
             current_atr = float(row["atr"]) if float(row["atr"]) > 0 else 1.0
 
-            # Dynamic Position Sizing (Phase 2.2)
             if qty_mode == "atr":
                 risk_amount = equity * risk_pct
                 stop_distance = current_atr * 1.5
@@ -370,21 +419,33 @@ class BacktestEngine:
                     sl = entry - (current_atr * 1.5)
                     position = {"entry": entry, "qty": qty, "entry_date": ts.isoformat(), "highest_price": entry, "sl": sl}
             else:
-                # Update trailing stop loss (Phase 2.2)
                 if price > position["highest_price"]:
                     position["highest_price"] = price
                     new_sl = price - (current_atr * 1.5)
                     if new_sl > position["sl"]:
                         position["sl"] = new_sl
 
-                # Exit logic (AI says SELL or Stop Loss hit)
                 if score == "SELL" or price <= position["sl"]:
                     exit_p = price * (1 - slippage_pct)
                     pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
                     equity += pnl
                     trades.append({"entry": position["entry"], "exit": exit_p, "pnl": pnl, "entry_date": position["entry_date"], "exit_date": ts.isoformat()})
-                    equity_curve.append({"date": ts.isoformat(), "equity": round(equity, 2)})
                     position = None
+
+            # Mark to market daily equity curve
+            cur_pnl = ((price * (1 - slippage_pct) - position["entry"]) * position["qty"] - commission * 2) if position else 0.0
+            equity_curve.append({"date": ts.isoformat(), "equity": round(equity + cur_pnl, 2)})
+
+        # Close any lingering open position at final candle
+        if position is not None and not df.empty:
+            final_ts = df.index[-1].isoformat()
+            final_price = float(df["Close"].iloc[-1])
+            exit_p = final_price * (1 - slippage_pct)
+            pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+            equity += pnl
+            trades.append({"entry": position["entry"], "exit": exit_p, "pnl": pnl, "entry_date": position["entry_date"], "exit_date": final_ts})
+            if equity_curve:
+                equity_curve[-1]["equity"] = round(equity, 2)
 
         metrics = BacktestEngine._compute_metrics(trades, equity_curve, capital)
         return {"symbol": symbol, "strategy": "ai_machine_learning", "params": params, "metrics": metrics, "trades": trades[-20:], "equity_curve": equity_curve}

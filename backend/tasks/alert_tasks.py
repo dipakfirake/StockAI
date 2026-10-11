@@ -171,6 +171,19 @@ async def _evaluate_alerts_async():
                                     triggered = True
                                     current_value = 2
                                     extra_msg = "Bullish Engulfing detected on daily chart"
+                            elif alert.condition_value == 3 and len(candles) > 1: # 3 = Bearish Engulfing
+                                p = candles[-2]
+                                if p["close"] > p["open"] and c["close"] < c["open"] and c["close"] < p["open"] and c["open"] > p["close"]:
+                                    triggered = True
+                                    current_value = 3
+                                    extra_msg = "Bearish Engulfing detected on daily chart"
+                            elif alert.condition_value == 4 and len(candles) > 2: # 4 = Order Block (Bullish)
+                                p1 = candles[-3]
+                                p2 = candles[-2]
+                                if p1["close"] < p1["open"] and p2["close"] > p2["open"] and p2["close"] > p1["open"] and c["close"] > p2["close"]:
+                                    triggered = True
+                                    current_value = 4
+                                    extra_msg = "Bullish Order Block detected on daily chart"
 
                 if triggered:
                     alert.triggered_at = datetime.now(timezone.utc)
