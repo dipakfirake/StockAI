@@ -52,13 +52,16 @@ async def seed_admin_user(email: str, password: str, name: str) -> None:
         print(f"[ERROR] Password does not meet security requirements: {e}", file=sys.stderr)
         sys.exit(1)
 
+    display_name = name or "StockAI Super Admin"
     async with AsyncSessionLocal() as db:
         res = await db.execute(select(User).where(User.email == email))
         user = res.scalar_one_or_none()
 
         if user:
             user.hashed_password = hash_password(password)
-            user.name = name or user.name
+            if name:
+                user.name = name
+            display_name = user.name
             user.is_admin = True
             user.subscription_tier = "PRO"
             user.pro_status = "APPROVED"
@@ -68,7 +71,7 @@ async def seed_admin_user(email: str, password: str, name: str) -> None:
         else:
             user = User(
                 email=email,
-                name=name or "StockAI Super Admin",
+                name=display_name,
                 hashed_password=hash_password(password),
                 is_admin=True,
                 subscription_tier="PRO",
@@ -84,7 +87,7 @@ async def seed_admin_user(email: str, password: str, name: str) -> None:
     print("=" * 60)
     print(f" Status:              {action}")
     print(f" Email:               {email}")
-    print(f" Name:                {user.name}")
+    print(f" Name:                {display_name}")
     print(f" System Role:         SUPER_ADMIN (is_admin=True)")
     print(f" Subscription Tier:   PRO (pro_status=APPROVED)")
     print(f" Account Active:      YES")

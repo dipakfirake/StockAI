@@ -16,12 +16,24 @@ else:
     engine_kwargs["pool_size"] = settings.DATABASE_POOL_SIZE
     engine_kwargs["max_overflow"] = settings.DATABASE_MAX_OVERFLOW
 
+import urllib.parse
+
+
 def get_async_db_url(url: str) -> str:
-    """Ensure database URL uses postgresql+asyncpg driver."""
+    """Ensure database URL uses postgresql+asyncpg driver and strips unsupported asyncpg query params."""
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+asyncpg://", 1)
-    if url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    
+    # Strip channel_binding if present since asyncpg does not support it
+    if "channel_binding" in url:
+        parsed = urllib.parse.urlsplit(url)
+        query_params = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        filtered_params = [(k, v) for k, v in query_params if k != "channel_binding"]
+        new_query = urllib.parse.urlencode(filtered_params)
+        url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+
     return url
 
 db_url = get_async_db_url(settings.DATABASE_URL)
