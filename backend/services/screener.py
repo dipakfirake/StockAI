@@ -214,8 +214,13 @@ class ScreenerService:
             # Extract the raw 0-100 technical score from the new signal engine
             tech_raw = sig.get("composite_rating", 50)
             
-            # 3. AI ML Score
-            ai_res = ai_engine_service.score(indicators if indicators else {}, symbol=symbol, compute_shap=True)
+            # 3. AI ML Score (Tri-Model Ensemble: LightGBM + BiLSTM + Transformer)
+            ai_res = ai_engine_service.score(
+                indicators if indicators else {},
+                symbol=symbol,
+                compute_shap=True,
+                candles=candles if isinstance(candles, list) else None,
+            )
             
             # 4. Fundamental Score (35% Weight)
             # Evaluate basic health metrics
@@ -348,6 +353,7 @@ class ScreenerService:
                     "target_1": round(t1, 2),
                     "target_2": round(t2, 2),
                     "target_3": round(t3, 2),
+                    "risk_amount": round(risk_amount, 2),
                     "expected_gain_pct": round(gain_pct, 2),
                     "risk_pct": round(risk_pct, 2),
                     "reward_to_risk": round(gain_pct / risk_pct, 2) if risk_pct > 0 else 0.0,

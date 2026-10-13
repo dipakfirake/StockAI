@@ -15,12 +15,12 @@ async def get_ai_score(
     timeframe: str = Query("1d"),
     current_user=Depends(require_pro_tier),
 ):
-    """Get AI buy/hold/sell score with SHAP-style explanation."""
+    """Get AI buy/hold/sell score with SHAP-style explanation and Tri-Model Ensemble (LightGBM + BiLSTM + Transformer)."""
     candles = await market_data_service.fetch_candles(symbol.upper(), timeframe, limit=250)
     if len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data for AI scoring")
     indicators = indicator_service.compute_all(candles)
-    return ai_engine_service.score(indicators, symbol.upper())
+    return ai_engine_service.score(indicators, symbol.upper(), candles=candles)
 
 
 @router.get("/scan")
@@ -40,7 +40,7 @@ async def scan_stocks(
             candles = await market_data_service.fetch_candles(sym, timeframe, limit=250)
             if len(candles) >= 30:
                 indicators = indicator_service.compute_all(candles)
-                score = ai_engine_service.score(indicators, sym)
+                score = ai_engine_service.score(indicators, sym, candles=candles)
                 results.append(score)
         except Exception:
             results.append({"symbol": sym, "score": "ERROR", "confidence": 0})

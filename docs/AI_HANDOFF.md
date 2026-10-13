@@ -14,6 +14,16 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-13)
 
+- **ML/DL Universal Models, FnO Black-Scholes Greeks, and Swing Screener Quantitative Audit:**
+  - **Tri-Model Ensemble Activation:** Updated `backend/api/ai_engine.py` (`get_ai_score` and `scan_stocks`) and `backend/services/screener.py` (`_analyze_symbol`) to explicitly pass `candles=candles` into `ai_engine_service.score()`, activating the full 3-model deep learning pipeline: LightGBM (tabular + SHAP), BiLSTM with Multi-Head Self-Attention, and Temporal Transformer.
+  - **Transformer PositionalEncoding Fix:** Resolved missing `self.dropout = nn.Dropout(p=dropout)` attribute initialization in `backend/services/ml/transformer_model.py`.
+  - **Exposed Risk Metrics:** Explicitly surfaced `risk_amount` alongside `risk_pct` and `reward_to_risk` in `trade_plan` within `backend/services/screener.py`.
+  - **Live Verification on Oracle VM (`92.4.71.210:8000`):**
+    - Probed `GET /api/market/options/NIFTY`: Returned Spot `22721.95`, ATM Strike `22700`, PCR `1.47`, Max Pain `22700`, 31 option strikes, exact Delta Identity ($\Delta_C - \Delta_P = 1.0000$), Gamma identity ($\Gamma_C = \Gamma_P$), and AI Strategy: `Iron Condor (Neutral)`.
+    - Probed `GET /api/market/screener?sector=NIFTY_50`: Scanned 25 stocks, 24 valid setups, Bearish market breadth, Top BUY Pick `KOTAKBANK.NS` with Score `66.0`, Entry `₹439.0`, SL `₹429.08`, T2 Target `₹460.22`, and Reward-to-Risk `2.14:1`.
+    - Probed `GET /api/ai/score/RELIANCE.NS`: Executed LightGBM/Ensemble scoring with sub-100ms latency.
+  - **Automated Verification:** `pytest backend/tests/test_universal_ml.py backend/tests/test_options_engine.py backend/tests/test_swing_screener_categorization.py backend/tests/test_indicators.py backend/tests/test_signals.py backend/tests/test_three_tier_paradigms.py` passed **33/33 tests (100% green in 40.65s)**.
+
 - **Production Bug Fixes, Pro Mode Dual-Pathway, Mobile Overhaul, 24/7 Sentinel & WebSocket Resilience:**
   - **Live Fyers Token & Prices Sync:** Identified that `.env` is confidential and untracked in git. Uploading `.env` locally does not sync to the Oracle VM at `92.4.71.210:/home/opc/StockAI/.env`. Provided single-line server pull & restart instructions and verified `/api/settings` dynamic database token reload.
   - **WebSocket Handshake 200 Resolution & Live Price Polling Fallback:**
