@@ -1246,13 +1246,15 @@ export default function ChartPage() {
 
       {/* Search + Controls */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 240, display: 'flex', gap: 8 }}>
-          <StockSearchBox placeholder="Search symbol or company..." width="300px" />
+        <div className="mobile-w-100" style={{ flex: '1 1 300px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 200px', minWidth: 160 }}>
+            <StockSearchBox placeholder="Search symbol or company..." width="100%" />
+          </div>
           
-          <div style={{ position: 'relative' }}>
+          <div style={{ position: 'relative', flex: '1 1 160px', minWidth: 140 }}>
             <StockSearchBox 
               placeholder="Compare company..." 
-              width={220}
+              width="100%"
               autoNavigate={false}
               clearOnSelect={false}
               value={compareInput}
@@ -1268,7 +1270,7 @@ export default function ChartPage() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="mobile-w-100" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select 
              value={selectedPattern || ""}
              onChange={(e) => {
@@ -1277,7 +1279,7 @@ export default function ChartPage() {
                else setSelectedPattern(val);
              }}
              className="input"
-             style={{ padding: '6px 12px', fontSize: 13, height: '34px', cursor: 'pointer', borderRadius: '6px', maxWidth: 160 }}
+             style={{ padding: '6px 12px', fontSize: 13, height: '34px', cursor: 'pointer', borderRadius: '6px', maxWidth: 160, flex: '1 1 auto' }}
           >
              <option value="" disabled>👁️ Patterns Overlay</option>
              <option value="clear">None (Hide Patterns)</option>
@@ -1289,10 +1291,10 @@ export default function ChartPage() {
              ))}
           </select>
 
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', background: 'var(--color-bg-secondary)', padding: '4px', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
+          <div className="mobile-scroll-tabs" style={{ display: 'flex', gap: 4, alignItems: 'center', background: 'var(--color-bg-secondary)', padding: '4px', borderRadius: '8px', border: '1px solid var(--color-border)', maxWidth: '100%' }}>
             <button 
               onClick={() => setShowIndicators(!showIndicators)}
-              className="btn btn-ghost" 
+              className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: showIndicators ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showIndicators ? 600 : 400 }}
               title="Toggle RSI, MACD & EMAs"
             >
@@ -1300,34 +1302,34 @@ export default function ChartPage() {
             </button>
             <button 
               onClick={() => setShowEvents(!showEvents)}
-              className="btn btn-ghost" 
+              className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: showEvents ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showEvents ? 600 : 400 }}
               title="Toggle Dividends & Earnings"
             >
               <Zap size={14} style={{ marginRight: 4 }} /> Events
             </button>
-            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px', flexShrink: 0 }} />
             <button 
               onClick={() => setShowVolumeProfile(!showVolumeProfile)}
-              className="btn btn-ghost" 
+              className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: showVolumeProfile ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showVolumeProfile ? 600 : 400 }}
               title="Toggle Volume Profile (VPVR)"
             >
               <BarChart2 size={14} style={{ marginRight: 4 }} /> VP
             </button>
-            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px', flexShrink: 0 }} />
             <button 
               onClick={() => setIsDrawing(!isDrawing)}
-              className="btn btn-ghost" 
+              className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: isDrawing ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: isDrawing ? 600 : 400 }}
               title="Draw Custom Trendline"
             >
               <Pencil size={14} style={{ marginRight: 4 }} /> {isDrawing ? 'Cancel' : 'Draw'}
             </button>
-            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px', flexShrink: 0 }} />
             <button 
               onClick={() => setIsAnchoringVwap(!isAnchoringVwap)}
-              className="btn btn-ghost" 
+              className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: isAnchoringVwap ? 'var(--color-accent-blue)' : (anchorDate ? '#ff7300' : 'var(--color-text-muted)'), fontWeight: isAnchoringVwap || anchorDate ? 600 : 400 }}
               title="Anchor VWAP to a specific candle"
             >
@@ -1335,24 +1337,24 @@ export default function ChartPage() {
             </button>
             <button 
               onClick={() => (window as any).clearDrawings?.()}
-              className="btn btn-ghost" 
+              className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: 'var(--color-text-muted)' }}
               title="Clear all drawings"
             >
               Clear
             </button>
-            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px' }} />
+            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px', flexShrink: 0 }} />
             <button 
               onClick={() => {
                 if (!replayMode) {
                   setReplayMode(true);
-                  setReplayIndex(Math.floor(rawCandles.length * 0.7)); // start replay from 70% of history
+                  setReplayIndex(Math.floor(rawCandles.length * 0.7));
                 } else {
                   setReplayMode(false);
                   setIsReplaying(false);
                 }
               }}
-              className="btn btn-ghost" 
+              className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: replayMode ? '#f59e0b' : 'var(--color-text-muted)', fontWeight: replayMode ? 600 : 400 }}
               title="Bar Replay Simulator"
             >
@@ -1360,16 +1362,16 @@ export default function ChartPage() {
             </button>
           </div>
           
-          <button onClick={() => setIsHeikinAshi(!isHeikinAshi)} className={`btn ${isHeikinAshi ? 'btn-primary' : 'btn-secondary'}`} style={{fontSize: 13, padding: '6px 12px'}}>
+          <button onClick={() => setIsHeikinAshi(!isHeikinAshi)} className={`btn ${isHeikinAshi ? 'btn-primary' : 'btn-secondary'} no-shrink`} style={{fontSize: 13, padding: '6px 12px'}}>
             <ListFilter size={14}/> Heikin Ashi
           </button>
           
-          <div style={{ marginLeft: 16, borderLeft: '1px solid var(--color-border)', paddingLeft: 16, display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
               className="input"
-              style={{ padding: '6px 12px', fontSize: 13, height: '34px', cursor: 'pointer', borderRadius: '6px' }}
+              style={{ padding: '6px 12px', fontSize: 13, height: '34px', cursor: 'pointer', borderRadius: '6px', width: 'auto' }}
             >
               {TIMEFRAMES.map(tf => (
                 <option key={tf} value={tf}>
@@ -1379,7 +1381,7 @@ export default function ChartPage() {
             </select>
             <button 
               onClick={generatePDFReport}
-              className="btn btn-secondary"
+              className="btn btn-secondary no-shrink"
               style={{ fontSize: 13, padding: '6px 12px', height: '34px', display: 'flex', alignItems: 'center', gap: 6 }}
               title="Export Institutional Report (PDF)"
             >
@@ -1391,7 +1393,7 @@ export default function ChartPage() {
 
       {/* Quote Summary */}
       {quote && (
-        <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 32, alignItems: 'center' }}>
+        <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{symbol.replace('.NS', '')}</div>
             <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>

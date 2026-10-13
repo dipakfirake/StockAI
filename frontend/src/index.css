@@ -458,15 +458,182 @@ a:hover { color: var(--color-accent-blue-hover); }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--color-bg-secondary); }
 ::-webkit-scrollbar-thumb { background: var(--color-border-light); border-radius: 3px; }
-
-@media (max-width: 768px) {
-  .hide-on-mobile {
-    display: none !important;
-  }
-}
 ::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
 
-/* ===== Responsive Breakpoints ===== */
+/* ===== Bootstrap-Parity Responsive Grid & Layout Engine ===== */
+
+/* 1. Fluid Containers */
+.container-fluid {
+  width: 100%;
+  padding-right: 16px;
+  padding-left: 16px;
+  margin-right: auto;
+  margin-left: auto;
+  box-sizing: border-box;
+}
+
+@media (max-width: 576px) {
+  .container-fluid {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+}
+
+/* 2. 12-Column Flexbox Grid System */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-right: -8px;
+  margin-left: -8px;
+}
+
+.row > * {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 100%;
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.col-12 { flex: 0 0 100%; max-width: 100%; }
+.col-6 { flex: 0 0 50%; max-width: 50%; }
+.col-4 { flex: 0 0 33.333333%; max-width: 33.333333%; }
+.col-3 { flex: 0 0 25%; max-width: 25%; }
+
+@media (min-width: 576px) {
+  .col-sm-12 { flex: 0 0 100%; max-width: 100%; }
+  .col-sm-6 { flex: 0 0 50%; max-width: 50%; }
+  .col-sm-4 { flex: 0 0 33.333333%; max-width: 33.333333%; }
+  .col-sm-3 { flex: 0 0 25%; max-width: 25%; }
+}
+
+@media (min-width: 768px) {
+  .col-md-12 { flex: 0 0 100%; max-width: 100%; }
+  .col-md-6 { flex: 0 0 50%; max-width: 50%; }
+  .col-md-4 { flex: 0 0 33.333333%; max-width: 33.333333%; }
+  .col-md-3 { flex: 0 0 25%; max-width: 25%; }
+  .col-md-auto { flex: 0 0 auto; width: auto; }
+}
+
+@media (min-width: 1024px) {
+  .col-lg-12 { flex: 0 0 100%; max-width: 100%; }
+  .col-lg-6 { flex: 0 0 50%; max-width: 50%; }
+  .col-lg-4 { flex: 0 0 33.333333%; max-width: 33.333333%; }
+  .col-lg-3 { flex: 0 0 25%; max-width: 25%; }
+  .col-lg-auto { flex: 0 0 auto; width: auto; }
+}
+
+/* 3. Fluid Responsive Grid Utilities */
+.responsive-grid-auto {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+.responsive-grid-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+/* 4. Display, Flex & Spacing Utilities */
+.d-flex { display: flex !important; }
+.d-inline-flex { display: inline-flex !important; }
+.d-block { display: block !important; }
+.d-none { display: none !important; }
+
+.flex-row { flex-direction: row !important; }
+.flex-column { flex-direction: column !important; }
+.flex-wrap { flex-wrap: wrap !important; }
+.flex-nowrap { flex-wrap: nowrap !important; }
+
+.justify-content-start { justify-content: flex-start !important; }
+.justify-content-end { justify-content: flex-end !important; }
+.justify-content-center { justify-content: center !important; }
+.justify-content-between { justify-content: space-between !important; }
+.justify-content-around { justify-content: space-around !important; }
+
+.align-items-start { align-items: flex-start !important; }
+.align-items-end { align-items: flex-end !important; }
+.align-items-center { align-items: center !important; }
+.align-items-stretch { align-items: stretch !important; }
+
+.flex-grow-1 { flex-grow: 1 !important; }
+.flex-shrink-0 { flex-shrink: 0 !important; }
+.no-shrink { flex-shrink: 0 !important; }
+
+.gap-1 { gap: 4px !important; }
+.gap-2 { gap: 8px !important; }
+.gap-3 { gap: 12px !important; }
+.gap-4 { gap: 16px !important; }
+.gap-5 { gap: 24px !important; }
+
+.w-100 { width: 100% !important; }
+.h-100 { height: 100% !important; }
+
+.text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 5. Smooth Native Touch Tabs on Mobile */
+.mobile-scroll-tabs {
+  display: flex;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  max-width: 100%;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+.mobile-scroll-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* 6. AI Assistant Widget Responsive Styles */
+.ai-assistant-toggle-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(59,130,246,0.4);
+  z-index: 9000;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ai-assistant-chat-panel {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  height: 540px;
+  max-height: calc(100vh - 80px);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.2);
+  z-index: 9000;
+  overflow: hidden;
+}
+
+/* 7. Comprehensive Breakpoints */
 @media (max-width: 1024px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
@@ -481,16 +648,53 @@ a:hover { color: var(--color-accent-blue-hover); }
   .navbar-mobile-header { display: flex !important; }
   .main-content {
     margin-top: 56px !important;
-    padding: 14px 12px !important;
+    padding: 12px 10px !important;
   }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr !important; }
   .hide-on-mobile { display: none !important; }
   .nav-menu-button { display: inline-flex !important; }
   .page-title { font-size: 20px !important; }
-  .card { padding: 14px !important; }
+  .card { padding: 14px 12px !important; }
+  
+  .mobile-column { flex-direction: column !important; }
+  .mobile-w-100 { width: 100% !important; max-width: 100% !important; }
+  .mobile-wrap { flex-wrap: wrap !important; }
+  .mobile-align-start { align-items: flex-start !important; }
+  .mobile-align-stretch { align-items: stretch !important; }
+  .mobile-gap-2 { gap: 8px !important; }
+  .mobile-hide { display: none !important; }
+  .mobile-show { display: block !important; }
+  .mobile-show-flex { display: flex !important; }
+}
+
+@media (max-width: 640px) {
+  .ai-assistant-toggle-btn {
+    bottom: 16px;
+    right: 16px;
+    width: 44px;
+    height: 44px;
+  }
+  .ai-assistant-chat-panel {
+    bottom: 10px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-width: none;
+    height: calc(100vh - 72px);
+    border-radius: 12px;
+  }
 }
 
 @media (max-width: 480px) {
   .main-content { padding: 10px 8px !important; }
   .card-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .page-title { font-size: 18px !important; }
+  .page-subtitle { font-size: 12px !important; }
+  .btn { padding: 7px 12px !important; font-size: 13px !important; }
+  .card { padding: 12px 10px !important; }
 }
+
+@media (min-width: 769px) {
+  .desktop-hide { display: none !important; }
+}
+

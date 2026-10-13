@@ -73,51 +73,19 @@ export default function AIAssistantWidget() {
       <button
         onClick={() => setIsOpen(true)}
         id="ai-assistant-toggle"
-        style={{
-          position: 'fixed',
-          bottom: 24,
-          right: 24,
-          background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
-          color: 'white',
-          border: 'none',
-          borderRadius: '50%',
-          width: 56,
-          height: 56,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          boxShadow: '0 4px 20px rgba(59,130,246,0.4)',
-          zIndex: 9000,
-          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)'; }}
+        className="ai-assistant-toggle-btn"
+        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.08)'; }}
         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = ''; }}
         title="AI Assistant (ask me anything!)"
       >
-        <Sparkles size={22} />
+        <Sparkles size={20} />
       </button>
     )
   }
 
   return (
     <div
-      className="animate-slide-right"
-      style={{
-        position: 'fixed',
-        bottom: 24,
-        right: 24,
-        width: 360,
-        height: 520,
-        background: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 14,
-        display: 'flex',
-        flexDirection: 'column',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.2)',
-        zIndex: 9000,
-        overflow: 'hidden'
-      }}
+      className="ai-assistant-chat-panel animate-slide-right"
     >
       {/* Header */}
       <div style={{

@@ -240,8 +240,8 @@ export default function PaperTradingPage() {
 
       {/* Floating Order Modal */}
       {isOrderModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 450, padding: 0, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div className="card" style={{ width: '100%', maxWidth: 450, padding: 0, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
             
             {/* Modal Header */}
             <div style={{ 

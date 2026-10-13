@@ -183,9 +183,9 @@ export default function SwingScreenerPage() {
     <div style={{ maxWidth: 1400, margin: '0 auto', paddingBottom: 60 }}>
       {/* Page Header */}
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-        <div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Sparkles size={24} style={{ color: 'var(--color-accent-blue)' }} />
+        <div style={{ flex: '1 1 300px', minWidth: 0 }}>
+          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <Sparkles size={24} style={{ color: 'var(--color-accent-blue)', flexShrink: 0 }} />
             AI Swing Trade Screener
           </h1>
           <p className="page-subtitle">
@@ -193,12 +193,12 @@ export default function SwingScreenerPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="mobile-w-100" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <select 
             className="input" 
             value={sector} 
             onChange={(e) => setSector(e.target.value)}
-            style={{ width: 230, height: 38, fontWeight: 500 }}
+            style={{ flex: '1 1 180px', minWidth: 160, height: 38, fontWeight: 500 }}
           >
             {SECTOR_OPTIONS.map(opt => (
               <option key={opt.id} value={opt.id}>{opt.label}</option>
@@ -208,19 +208,19 @@ export default function SwingScreenerPage() {
           <button 
             onClick={() => fetchScreener(true)} 
             disabled={refreshing || loading}
-            className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38 }}
+            className="btn btn-secondary no-shrink"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 38, whiteSpace: 'nowrap', flex: '0 0 auto' }}
             title="Scan entire market now"
           >
             <RefreshCw size={15} className={refreshing ? 'spin' : ''} />
-            {refreshing ? 'Scanning Market...' : 'Run Fresh Scan'}
+            <span>{refreshing ? 'Scanning...' : 'Run Fresh Scan'}</span>
           </button>
         </div>
       </div>
 
       {/* Institutional Summary Cards */}
       {data && data.summary && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <div className="responsive-grid-summary" style={{ marginBottom: 20 }}>
           {/* BUY Card */}
           <div 
             className="card" 
@@ -314,47 +314,47 @@ export default function SwingScreenerPage() {
       )}
 
       {/* Tabs & View Controls */}
-      <div className="card" style={{ marginBottom: 20, padding: '12px 16px' }}>
+      <div className="card" style={{ marginBottom: 20, padding: '12px 14px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           {/* Main Action Tabs */}
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="mobile-scroll-tabs" style={{ display: 'flex', gap: 8, maxWidth: '100%' }}>
             <button 
               onClick={() => setActiveTab('BUY')}
-              className={`btn ${activeTab === 'BUY' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              className={`btn ${activeTab === 'BUY' ? 'btn-primary' : 'btn-ghost'} no-shrink`}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}
             >
               <TrendingUp size={15} />
-              BUY Stocks ({data?.summary?.buy_count ?? 0})
+              BUY ({data?.summary?.buy_count ?? 0})
             </button>
             <button 
               onClick={() => setActiveTab('SELL')}
-              className={`btn ${activeTab === 'SELL' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              className={`btn ${activeTab === 'SELL' ? 'btn-primary' : 'btn-ghost'} no-shrink`}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}
             >
               <TrendingDown size={15} />
-              SELL Stocks ({data?.summary?.sell_count ?? 0})
+              SELL ({data?.summary?.sell_count ?? 0})
             </button>
             <button 
               onClick={() => setActiveTab('HOLD')}
-              className={`btn ${activeTab === 'HOLD' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              className={`btn ${activeTab === 'HOLD' ? 'btn-primary' : 'btn-ghost'} no-shrink`}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}
             >
               <Minus size={15} />
-              HOLD Stocks ({data?.summary?.hold_count ?? 0})
+              HOLD ({data?.summary?.hold_count ?? 0})
             </button>
             <button 
               onClick={() => setActiveTab('ALL')}
-              className={`btn ${activeTab === 'ALL' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              className={`btn ${activeTab === 'ALL' ? 'btn-primary' : 'btn-ghost'} no-shrink`}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}
             >
               <Layers size={15} />
-              All Ranked ({data?.summary?.valid_results ?? 0})
+              All ({data?.summary?.valid_results ?? 0})
             </button>
           </div>
 
           {/* Search, Filter & View Mode */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative', width: 200 }}>
+          <div className="mobile-w-100" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: '1 1 150px', minWidth: 130 }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--color-text-muted)' }} />
               <input 
                 type="text" 
@@ -362,7 +362,7 @@ export default function SwingScreenerPage() {
                 className="input" 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ paddingLeft: 30, height: 34, fontSize: 12 }}
+                style={{ paddingLeft: 30, height: 34, fontSize: 12, width: '100%' }}
               />
             </div>
 
@@ -370,7 +370,7 @@ export default function SwingScreenerPage() {
               className="input" 
               value={minScore} 
               onChange={(e) => setMinScore(Number(e.target.value))}
-              style={{ width: 140, height: 34, fontSize: 12 }}
+              style={{ flex: '1 1 120px', minWidth: 110, height: 34, fontSize: 12 }}
             >
               <option value={0}>Min Score: All</option>
               <option value={50}>Score &gt; 50</option>
@@ -378,7 +378,7 @@ export default function SwingScreenerPage() {
               <option value={70}>Score &gt; 70 (Elite)</option>
             </select>
 
-            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 2 }}>
+            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 2, flexShrink: 0 }}>
               <button 
                 onClick={() => setViewMode('cards')} 
                 className="btn btn-ghost" 
@@ -427,7 +427,7 @@ export default function SwingScreenerPage() {
 
       {/* CARDS VIEW */}
       {!loading && viewMode === 'cards' && displayedStocks.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: 16 }}>
           {displayedStocks.map((stock) => {
             const isBuy = stock.action === 'BUY'
             const isSell = stock.action === 'SELL'
@@ -443,16 +443,19 @@ export default function SwingScreenerPage() {
                   flexDirection: 'column', 
                   position: 'relative',
                   borderTop: `4px solid ${isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : '#f59e0b'}`,
-                  transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                  padding: '16px 14px',
+                  width: '100%',
+                  boxSizing: 'border-box'
                 }}
               >
                 {/* Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 8 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <Link 
                         to={`/chart/${stock.symbol}`}
-                        style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-text-primary)', textDecoration: 'none' }}
+                        style={{ fontSize: 17, fontWeight: 700, color: 'var(--color-text-primary)', textDecoration: 'none' }}
                         title="Open interactive chart"
                       >
                         {stock.symbol.replace('.NS', '')}
@@ -461,30 +464,30 @@ export default function SwingScreenerPage() {
                         {stock.action}
                       </span>
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {stock.name}
                     </div>
                   </div>
 
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : '#f59e0b' }}>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : '#f59e0b', whiteSpace: 'nowrap' }}>
                       {stock.total_score.toFixed(1)} <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>/ 100</span>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Conviction Score</div>
+                    <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>Conviction Score</div>
                   </div>
                 </div>
 
                 {/* Score Breakdown Pills */}
-                <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                  <div style={{ flex: 1, padding: '6px 8px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 14 }}>
+                  <div style={{ padding: '6px 4px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
                     <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Tech</div>
                     <div style={{ fontSize: 12, fontWeight: 600 }}>{stock.scores.technical.toFixed(1)}</div>
                   </div>
-                  <div style={{ flex: 1, padding: '6px 8px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
+                  <div style={{ padding: '6px 4px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
                     <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Fund</div>
                     <div style={{ fontSize: 12, fontWeight: 600 }}>{stock.scores.fundamental.toFixed(1)}</div>
                   </div>
-                  <div style={{ flex: 1, padding: '6px 8px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
+                  <div style={{ padding: '6px 4px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
                     <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Sentiment</div>
                     <div style={{ fontSize: 12, fontWeight: 600 }}>{stock.scores.sentiment.toFixed(1)}</div>
                   </div>
@@ -492,45 +495,45 @@ export default function SwingScreenerPage() {
 
                 {/* Trade Setup Metrics */}
                 {plan ? (
-                  <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 8, padding: 12, marginBottom: 16 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 12 }}>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 10 }}>
                       <div>
-                        <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                          {isHold ? 'Current Price' : 'Entry Price'}
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                          {isHold ? 'Current' : 'Entry'}
                         </div>
-                        <div style={{ fontSize: 15, fontWeight: 600 }}>₹{plan.entry_price.toFixed(2)}</div>
+                        <div style={{ fontSize: 14, fontWeight: 600 }}>₹{plan.entry_price.toFixed(2)}</div>
                       </div>
                       <div>
-                        <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                          {isSell ? 'Short Target' : isHold ? 'Upper Resistance' : 'Target Price'}
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                          {isSell ? 'Target' : isHold ? 'Resistance' : 'Target'}
                         </div>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: isSell ? 'var(--color-bearish)' : (isHold ? 'var(--color-text-primary)' : 'var(--color-bullish)') }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: isSell ? 'var(--color-bearish)' : (isHold ? 'var(--color-text-primary)' : 'var(--color-bullish)') }}>
                           ₹{plan.target_price.toFixed(2)}
-                          <span style={{ fontSize: 11, marginLeft: 4 }}>({isSell ? '-' : '+'}{plan.expected_gain_pct.toFixed(1)}%)</span>
+                          <div style={{ fontSize: 10, fontWeight: 500 }}>({isSell ? '-' : '+'}{plan.expected_gain_pct.toFixed(1)}%)</div>
                         </div>
                       </div>
                       <div>
-                        <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                          {isHold ? 'Lower Support' : 'Stop Loss'}
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                          {isHold ? 'Support' : 'Stop Loss'}
                         </div>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: isHold ? 'var(--color-text-primary)' : 'var(--color-bearish)' }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: isHold ? 'var(--color-text-primary)' : 'var(--color-bearish)' }}>
                           ₹{plan.stop_loss.toFixed(2)}
-                          <span style={{ fontSize: 11, marginLeft: 4 }}>(-{plan.risk_pct.toFixed(1)}%)</span>
+                          <div style={{ fontSize: 10, fontWeight: 500 }}>(-{plan.risk_pct.toFixed(1)}%)</div>
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--color-text-secondary)', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: 8 }}>
-                      <span>R:R Ratio: <strong style={{ color: plan.reward_to_risk >= 2 ? 'var(--color-bullish)' : 'inherit' }}>{plan.reward_to_risk}:1</strong></span>
-                      <span>Hold Period: <strong>{plan.estimated_hold_time}</strong></span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, fontSize: 11, color: 'var(--color-text-secondary)', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: 8 }}>
+                      <span>R:R: <strong style={{ color: plan.reward_to_risk >= 2 ? 'var(--color-bullish)' : 'inherit' }}>{plan.reward_to_risk}:1</strong></span>
+                      <span>Hold: <strong>{plan.estimated_hold_time}</strong></span>
                       <span>News: <strong>{stock.news_sentiment || 'NEUTRAL'}</strong></span>
                     </div>
 
                     {/* Staged Targets (if BUY or SELL) */}
                     {plan.targets && plan.targets.length > 0 && !isHold && (
-                      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--color-text-muted)' }}>
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, fontSize: 10, color: 'var(--color-text-muted)' }}>
                         {plan.targets.map((tgt, i) => (
-                          <div key={i}>
+                          <div key={i} style={{ whiteSpace: 'nowrap' }}>
                             <span>T{i+1}: <strong>₹{tgt.price}</strong> (+{tgt.gain_pct}%)</span>
                           </div>
                         ))}
@@ -538,17 +541,17 @@ export default function SwingScreenerPage() {
                     )}
                   </div>
                 ) : (
-                  <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8, marginBottom: 16, fontSize: 12, color: 'var(--color-text-muted)' }}>
+                  <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8, marginBottom: 14, fontSize: 12, color: 'var(--color-text-muted)' }}>
                     Trade setup calculation pending or insufficient candle depth.
                   </div>
                 )}
 
                 {/* Bottom Actions */}
-                <div style={{ marginTop: 'auto', display: 'flex', gap: 8 }}>
+                <div style={{ marginTop: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button 
                     onClick={() => navigate(`/chart/${stock.symbol}`)}
                     className="btn btn-ghost" 
-                    style={{ flex: 1, fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                    style={{ flex: '1 1 70px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px' }}
                   >
                     <ExternalLink size={13} /> Chart
                   </button>
@@ -558,7 +561,7 @@ export default function SwingScreenerPage() {
                       onClick={() => handleQuickTrade(stock)}
                       disabled={tradingSymbol === stock.symbol}
                       className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
-                      style={{ flex: 1.2, fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                      style={{ flex: '1.4 1 100px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px', whiteSpace: 'nowrap' }}
                     >
                       <Briefcase size={13} /> {tradingSymbol === stock.symbol ? 'Placing...' : `Paper ${stock.action}`}
                     </button>
@@ -568,7 +571,7 @@ export default function SwingScreenerPage() {
                     <button 
                       onClick={() => handleQuickAlert(stock)}
                       className="btn btn-ghost" 
-                      style={{ padding: '0 10px', height: 32 }}
+                      style={{ padding: '0 10px', height: 32, flex: '0 0 auto' }}
                       title="Set alert at target level"
                     >
                       <Bell size={13} />

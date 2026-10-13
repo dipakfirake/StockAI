@@ -21,9 +21,15 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
     - Added `isWebSocketSupportedOnHost()` utility in `frontend/src/services/websocket.ts` to detect and safely bypass WebSocket connection attempts on Vercel (`*.vercel.app`), eliminating console handshake errors and reconnection spam.
     - Added resilient 4-second and 5-second HTTP polling fallbacks to `LiveTicker.tsx`, `Dashboard.tsx`, and `ChartPage.tsx` so index prices, active stock quotes, and live candlestick updates continuously refresh on live production without requiring WebSockets.
   - **Pro Mode Dual-Pathway Protection:** Permanently blocked direct self-upgrade `/api/auth/upgrade` with HTTP 402. Built verified payment checkout flow (`/api/subscription/checkout`), admin approval request flow (`/api/subscription/request-pro`), and complete administrative console (`/admin` and `AdminPage.tsx`).
-  - **Mobile Responsiveness Overhaul:** Replaced desktop-only navbar with dual-mode responsive navbar (single row 56px with interactive slide-down menu on `< 768px`). Eliminated double-counted navbar padding, enforced `max-width: 100vw; overflow-x: hidden`, and wrapped all tables with touch-friendly `.table-container`.
+  - **Multi-Device Responsiveness Overhaul (PC, Laptop, Tablet, Mobile):**
+    - Built a Bootstrap-grade 12-column responsive flex and grid system (`.row`, `.col-*`, `.responsive-grid-summary`, `.responsive-grid-auto`) in `frontend/src/index.css`.
+    - Diagnosed and fixed root causes of mobile cutoff: replaced fixed pixel minimums (e.g. `minmax(400px, 1fr)`, `minmax(380px, 1fr)`, `width: 230`, `width: 300px`, `width: 450`) with fluid `minmax(min(100%, 320px), 1fr)`, fluid flex wrapping, and `maxWidth: 100%`.
+    - Refactored `SwingScreenerPage.tsx`: Header sector dropdown and "Run Fresh Scan" button wrap cleanly without squishing the button or breaking its text; summary cards use fluid responsive grid; tabs feature smooth touch scrolling (`.mobile-scroll-tabs`); stock setup cards wrap conviction score, target prices, and action buttons without clipping.
+    - Refactored `ChartPage.tsx`: Search boxes, compare input, and indicator toolbar support horizontal touch-scroll and fluid wrap without overflow; quote summary metrics wrap cleanly.
+    - Refactored `PricingPage.tsx`, `SMCWatchlist.tsx`, `PaperTradingPage.tsx`: Fluid grid cards and clamped mobile padding (`clamp(16px, 4vw, 32px)`), fluid order modals.
+    - Refactored `AIAssistantWidget.tsx`: Mobile-adaptive floating button (`44px` with `16px` margin) and full-screen-adaptive chat panel (`max-width: calc(100vw - 24px)`).
   - **24/7 Autonomous Sentinel Watchdog:** Created singleton background surveillance service (`backend/services/sentinel.py`) continuously inspecting DB, Redis, Celery, Broker Tokens, API Latencies, and security threats with MD5 incident deduplication and resolution. Added UI dashboard at `/admin/sentinel`.
-  - **Automated Verification:** 32 backend tests passed (8 new + 24 regression), frontend production build passed cleanly in 35.95s with 0 errors.
+  - **Automated Verification:** 32 backend tests passed (8 new + 24 regression), frontend production build passed cleanly in 39.79s with 0 errors.
 
 ## Latest verified checks (2026-10-11)
 

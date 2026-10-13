@@ -76,7 +76,7 @@ export default function SMCWatchlist() {
           <p className="text-muted">The AI did not find any high-probability FVG setups for today.</p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: '16px' }}>
           {Object.entries(zones).map(([symbol, data]) => (
             <div key={symbol} className="card" style={{ borderTop: '4px solid #8b5cf6', padding: 20 }}>
               {/* Header */}

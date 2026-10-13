@@ -140,13 +140,13 @@ export default function PricingPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '30px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '24px' }}>
         
         {/* FREE TIER CARD */}
         <div style={{ 
           background: 'var(--surface-color)', 
           borderRadius: '14px', 
-          padding: '32px',
+          padding: 'clamp(18px, 4vw, 32px)',
           border: '1px solid var(--border-color)',
           display: 'flex',
           flexDirection: 'column',
@@ -194,7 +194,7 @@ export default function PricingPage() {
         <div style={{ 
           background: 'linear-gradient(145deg, var(--surface-color) 0%, rgba(59, 130, 246, 0.12) 100%)', 
           borderRadius: '14px', 
-          padding: '32px',
+          padding: 'clamp(18px, 4vw, 32px)',
           border: '2px solid #3b82f6',
           display: 'flex',
           flexDirection: 'column',
