@@ -139,4 +139,28 @@ export const preferencesApi = {
   set: (preferences: Record<string, any>) => api.put('/preferences/', { preferences }),
 }
 
+// ===== Subscription endpoints =====
+export const subscriptionApi = {
+  getStatus: () => api.get('/subscription/status'),
+  requestPro: (note?: string) => api.post('/subscription/request-pro', { note }),
+  checkout: (data: { payment_method: string; payment_reference: string; amount?: number }) =>
+    api.post('/subscription/checkout', data),
+}
+
+// ===== Admin endpoints =====
+export const adminApi = {
+  listUsers: () => api.get('/admin/users'),
+  approvePro: (userId: string) => api.post(`/admin/users/${userId}/approve-pro`),
+  rejectPro: (userId: string) => api.post(`/admin/users/${userId}/reject-pro`),
+  revokePro: (userId: string) => api.post(`/admin/users/${userId}/revoke-pro`),
+}
+
+// ===== Sentinel Watchdog endpoints =====
+export const sentinelApi = {
+  getStatus: () => api.get('/sentinel/status'),
+  getIncidents: () => api.get('/sentinel/incidents'),
+  auditNow: () => api.post('/sentinel/audit-now'),
+  resolveIncident: (incidentId: string) => api.post(`/sentinel/resolve/${incidentId}`),
+}
+
 export default api

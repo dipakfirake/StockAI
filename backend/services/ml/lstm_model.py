@@ -17,9 +17,16 @@ from __future__ import annotations
 import os
 import logging
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    nn = None
+    F = None
+    HAS_TORCH = False
 
 from backend.services.ml.feature_engineering import N_FEATURES, SEQUENCE_LENGTH
 
@@ -27,8 +34,10 @@ logger = logging.getLogger(__name__)
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "models", "lstm_model.pt")
 
+_ModuleBase = nn.Module if HAS_TORCH else object
 
-class BidirectionalLSTMModel(nn.Module):
+
+class BidirectionalLSTMModel(_ModuleBase):
     """
     3-layer Bidirectional LSTM with Multi-Head Self-Attention for 3-class stock prediction.
     """
@@ -42,6 +51,8 @@ class BidirectionalLSTMModel(nn.Module):
         dropout: float = 0.3,
         num_classes: int = 3,
     ):
+        if not HAS_TORCH:
+            return
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -111,13 +122,14 @@ class LSTMPredictor:
 
     def __init__(self):
         self.model: BidirectionalLSTMModel | None = None
-        self.device = torch.device("cpu")
-        self._load()
+        self.device = torch.device("cpu") if HAS_TORCH else None
+        if HAS_TORCH:
+            self._load()
 
     def _load(self):
         """Load saved model weights if they exist."""
-        if not os.path.exists(MODEL_PATH):
-            logger.info("LSTM model not found at %s — will be trained first.", MODEL_PATH)
+        if not HAS_TORCH or not os.path.exists(MODEL_PATH):
+            logger.info("LSTM model not found or torch unavailable at %s.", MODEL_PATH)
             return
         try:
             state_dict = torch.load(MODEL_PATH, map_location=self.device, weights_only=True)

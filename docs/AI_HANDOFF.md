@@ -12,6 +12,15 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-10-13)
+
+- **Production Bug Fixes, Pro Mode Dual-Pathway, Mobile Overhaul & 24/7 Sentinel Watchdog:**
+  - **Live Fyers Token & Prices Sync:** Identified that `.env` is confidential and untracked in git. Uploading `.env` locally does not sync to the Oracle VM at `92.4.71.210:/home/opc/StockAI/.env`. Provided single-line PowerShell `scp` command and verified `/api/settings` dynamic database token reload.
+  - **Pro Mode Dual-Pathway Protection:** Permanently blocked direct self-upgrade `/api/auth/upgrade` with HTTP 402. Built verified payment checkout flow (`/api/subscription/checkout`), admin approval request flow (`/api/subscription/request-pro`), and complete administrative console (`/admin` and `AdminPage.tsx`).
+  - **Mobile Responsiveness Overhaul:** Replaced desktop-only navbar with dual-mode responsive navbar (single row 56px with interactive slide-down menu on `< 768px`). Eliminated double-counted navbar padding, enforced `max-width: 100vw; overflow-x: hidden`, and wrapped all tables with touch-friendly `.table-container`.
+  - **24/7 Autonomous Sentinel Watchdog:** Created singleton background surveillance service (`backend/services/sentinel.py`) continuously inspecting DB, Redis, Celery, Broker Tokens, API Latencies, and security threats with MD5 incident deduplication and resolution. Added UI dashboard at `/admin/sentinel`.
+  - **Automated Verification:** 32 backend tests passed (8 new + 24 regression), frontend production build passed in 53s with 0 errors.
+
 ## Latest verified checks (2026-10-11)
 
 - **Screener Price Synchronization & Backward Candle Pagination Upgrade:**

@@ -14,6 +14,8 @@ import LoginPage from './pages/LoginPage'
 import PricingPage from './pages/PricingPage'
 import SettingsPage from './pages/SettingsPage'
 import SwingScreenerPage from './pages/SwingScreenerPage'
+import AdminPage from './pages/AdminPage'
+import SentinelMonitorPage from './pages/SentinelMonitorPage'
 import { AuthProvider } from './AuthContext'
 import { ThemeProvider } from './ThemeContext'
 
@@ -58,6 +60,8 @@ export default function App() {
               <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/pricing" element={<PricingPage />} />
+              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/admin/sentinel" element={<SentinelMonitorPage />} />
               <Route path="/login" element={<LoginPage />} />
             </Routes>
           </main>

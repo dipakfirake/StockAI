@@ -743,25 +743,42 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
 
 ---
 
-### Session Entry 27: Oracle Cloud Always Free VM Provisioning, Networking, and Deployment
-**Timestamp**: 2026-10-11 23:45:00 IST (18:15:00 UTC)
+---
+
+### Session Entry 28: Live Production Bug Fixes, Pro Mode Dual-Pathway, Mobile Overhaul & 24/7 Sentinel Watchdog
+**Timestamp**: 2026-10-13 16:00:00 IST (10:30:00 UTC)
 **User Prompt**:
-  - Inquired on full free hosting without 700-hour Render limits.
-  - Guided through Oracle Cloud Always Free tier (`VM.Standard.A1.Flex`, Ampere ARM64, 1 OCPU, 6 GB RAM, Region `ap-mumbai-1`).
-  - Addressed VCN subnet generation, attached Ephemeral Public IPv4 (`92.4.71.210`), and configured Ingress Rule for ports `80-8000`.
-  - Resolved Windows OpenSSH file permissions on private key via `icacls`.
-  - Initiated automated Docker CE and Compose installation on Oracle Linux 9 server via SSH.
+  `"there are many bugs i found while it gets live that : 1)the prices are not updating as i uploaded . env files of latest token of fyers updated and in live website it is not changing but it changes in local host docker 2) the pro mode if a normal user clicks on buy pro mode the it gets automatically updated his profile to pro without any permission and payment and like all or without admin permission . it want to be like that it want to have 2 ways that first pay and get subscription and another way is admin can approve his pro membership like that both want to have in our system. 3) most critical bug that the UI is not as per mobile device half website gets cut in the UI i checked i want interactive and any device friendly UI. and also you have to make one another system to keep an eye on this system that can automaticallyt finds newly bugs and make a list of bugs and tell me the system want to check every corner every single second 24/7 to keep eye on systems bugs or any failure or any threats and like that. /plan /goal"`
 **Agent Technical Actions**:
-1. Verified zero-cost constraint (₹0 spend guaranteed under Always Free tier).
-2. Guided user through creating VCN and attaching Ephemeral Public IPv4 `92.4.71.210`.
-3. Guided user through VCN Security List configuration opening TCP ports `80-8000`.
-4. Resolved Windows OpenSSH private key permission error via `icacls` inheritance reset and single-user grant.
-5. Established stable SSH connection with keep-alive (`-o ServerAliveInterval=30`).
-6. Executed Docker CE, containerd, and Compose plugin installation commands on Oracle Linux 9 (`stockai-server`).
-**Verification Evidence**:
-- Oracle Cloud instance status: `RUNNING` on Ampere ARM64 with 6 GB RAM.
-- Public IP address: `92.4.71.210` active and reachable via SSH.
-- User logged in as `opc@stockai-server` and Docker installation running.
+1. **Live Price Updates Root Cause Resolution**:
+   - Diagnosed root cause: `.env` is gitignored and confidential. Updating `.env` on local Windows machine updates local Docker containers, but does NOT copy to remote Oracle VM (`92.4.71.210:/home/opc/StockAI/.env`).
+   - Root commit updating `vercel.json` and `frontend/vercel.json` destination to `http://92.4.71.210:8000` was 3 commits ahead of `origin/main` (unpushed).
+   - Delivered single-command PowerShell SCP sync instructions and enabled dynamic token update via `/api/settings` without requiring SSH.
+2. **Pro Mode Dual-Pathway Access Control**:
+   - Hardened `backend/api/auth.py`: Direct `/api/auth/upgrade` endpoint permanently blocked with `HTTP 402 Payment Required`.
+   - Updated `User` model with `is_admin`, `pro_status`, `pro_requested_at`, `payment_method`, and `payment_reference`. Added `SubscriptionOrder` model.
+   - Built `backend/api/subscription.py`:
+     - Pathway 1: Verified payment checkout (`POST /api/subscription/checkout`).
+     - Pathway 2: Admin approval request (`POST /api/subscription/request-pro`).
+   - Built `backend/api/admin.py` protected by `require_admin` dependency: `/api/admin/users`, `/api/admin/users/{id}/approve-pro`, `/reject-pro`, and `/revoke-pro`.
+   - Built `frontend/src/pages/PricingPage.tsx` with modal checkout simulator and admin review submission.
+   - Built `frontend/src/pages/AdminPage.tsx` user management console.
+3. **Mobile Responsiveness Overhaul**:
+   - Fixed `frontend/src/index.css`: Eliminated double-counted navbar padding; added `max-width: 100vw; overflow-x: hidden` on `html, body, .app`.
+   - Added `.table-container` with smooth touch-scrolling wrapper across `SwingScreenerPage`, `PortfolioPage`, `PaperTradingPage`, `ScannerPage`, and `AlertsPage`.
+   - Rebuilt `frontend/src/components/NavBar.tsx` with dual-mode responsive layout: 2-row desktop view and 56px single-row mobile bar with interactive slide-down menu drawer.
+4. **24/7 Autonomous Sentinel Watchdog**:
+   - Built `backend/services/sentinel.py`: Background daemon performing 1-2s surveillance loop across TimescaleDB, Redis, Celery, Broker API tokens, HTTP endpoints, and security threat logs.
+   - Built incident deduplication engine using MD5 error fingerprints and in-memory fallback.
+   - Built `backend/api/sentinel.py` (`/status`, `/incidents`, `/audit-now`, `/resolve/{id}`).
+   - Built `frontend/src/pages/SentinelMonitorPage.tsx` (`/admin/sentinel`) with 24/7 pulse radar, health gauge, and live incident ledger.
+5. **Proportionate Verification Evidence**:
+   - `pytest backend/tests/test_auth_pro_access.py backend/tests/test_sentinel_watchdog.py` -> **8/8 passed (100% green)**.
+   - `pytest backend/tests/test_cybersecurity.py backend/tests/test_system_design.py` -> **24/24 passed (100% green)**.
+   - Total backend tests passing: **32/32 (100%)**.
+   - Frontend production build (`npm run build`) -> **Exit code 0 (Clean build, 0 errors)**.
+**System Response**: Documented all 4 solutions with verification evidence, operational commands, and updated handoff documentation.
+
 
 
 

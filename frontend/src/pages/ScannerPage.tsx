@@ -294,8 +294,8 @@ export default function ScannerPage() {
               <p>No stocks matched the selected criteria.</p>
             </div>
           ) : (
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <div className="card table-container" style={{ padding: 0, overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
                     <th style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)' }}>Symbol</th>

@@ -6,6 +6,9 @@ interface User {
   email: string;
   name: string;
   subscription_tier: 'FREE' | 'PRO';
+  is_admin?: boolean;
+  pro_status?: string;
+  pro_requested_at?: string;
 }
 
 interface AuthContextType {
@@ -16,6 +19,7 @@ interface AuthContextType {
   login: (token: string) => void;
   logout: () => void;
   upgradeToPro: () => void;
+  reloadUser: () => Promise<void>;
   /** Persist one or more preferences to the backend and update context */
   savePreferences: (prefs: Record<string, any>) => Promise<void>;
 }
@@ -27,6 +31,7 @@ const AuthContext = createContext<AuthContextType>({
   login: () => {},
   logout: () => {},
   upgradeToPro: () => {},
+  reloadUser: async () => {},
   savePreferences: async () => {},
 });
 
@@ -104,7 +109,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, preferences, login, logout, upgradeToPro, savePreferences }}>
+    <AuthContext.Provider value={{ user, loading, preferences, login, logout, upgradeToPro, reloadUser: loadUser, savePreferences }}>
       {children}
     </AuthContext.Provider>
   );

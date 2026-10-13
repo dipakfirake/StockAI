@@ -17,7 +17,13 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     subscription_tier: Mapped[str] = mapped_column(String(50), default="FREE")
+    pro_status: Mapped[str] = mapped_column(String(50), default="NONE")  # NONE, REQUESTED, APPROVED, ACTIVE, REJECTED
+    pro_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pro_approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    payment_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

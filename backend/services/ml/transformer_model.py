@@ -20,10 +20,16 @@ from __future__ import annotations
 import os
 import math
 import logging
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    nn = None
+    F = None
+    HAS_TORCH = False
 
 from backend.services.ml.feature_engineering import N_FEATURES, SEQUENCE_LENGTH
 
@@ -33,13 +39,16 @@ MODEL_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "models", "transformer_model.pt"
 )
 
+_ModuleBase = nn.Module if HAS_TORCH else object
 
-class PositionalEncoding(nn.Module):
+
+class PositionalEncoding(_ModuleBase):
     """Standard sinusoidal positional encoding."""
 
     def __init__(self, d_model: int, max_len: int = 256, dropout: float = 0.1):
+        if not HAS_TORCH:
+            return
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
 
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
@@ -56,7 +65,7 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-class StockTransformer(nn.Module):
+class StockTransformer(_ModuleBase):
     """
     Transformer Encoder for 3-class stock direction prediction.
     Uses a learnable CLS token prepended to the sequence for classification.
@@ -143,13 +152,14 @@ class TransformerPredictor:
 
     def __init__(self):
         self.model: StockTransformer | None = None
-        self.device = torch.device("cpu")
-        self._load()
+        self.device = torch.device("cpu") if HAS_TORCH else None
+        if HAS_TORCH:
+            self._load()
 
     def _load(self):
         """Load saved model weights if they exist."""
-        if not os.path.exists(MODEL_PATH):
-            logger.info("Transformer model not found at %s — will be trained first.", MODEL_PATH)
+        if not HAS_TORCH or not os.path.exists(MODEL_PATH):
+            logger.info("Transformer model not found or torch unavailable at %s.", MODEL_PATH)
             return
         try:
             state_dict = torch.load(MODEL_PATH, map_location=self.device, weights_only=True)

@@ -149,45 +149,47 @@ export default function AlertsPage() {
           </div>
         )}
         {alerts.length > 0 && (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Condition</th>
-                <th>Value</th>
-                <th>Status</th>
-                <th>Last Triggered</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map(a => (
-                <tr key={a.alert_id}>
-                  <td><span className="mono" style={{ fontWeight: 600 }}>{a.symbol}</span></td>
-                  <td style={{ color: 'var(--color-text-secondary)' }}>{CONDITION_TYPES.find(c => c.value === a.condition_type)?.label || a.condition_type}</td>
-                  <td className="mono">
-                    {a.condition_type === 'PATTERN' 
-                      ? (PATTERN_TYPES.find(p => String(p.value) === String(a.condition_value))?.label || a.condition_value)
-                      : a.condition_value}
-                  </td>
-                  <td>
-                    <span style={{ color: a.is_active ? 'var(--color-bullish)' : 'var(--color-text-muted)', fontSize: 13 }}>
-                      {a.is_active ? '● Active' : '○ Inactive'}
-                    </span>
-                  </td>
-                  <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
-                    {a.triggered_at ? new Date(a.triggered_at).toLocaleString('en-IN') : 'Never'}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {a.is_active && <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDeactivate(a.alert_id)}><BellOff size={13} /></button>}
-                      <button className="btn btn-danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDelete(a.alert_id)}><Trash2 size={13} /></button>
-                    </div>
-                  </td>
+          <div className="table-container">
+            <table className="table" style={{ minWidth: '600px' }}>
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Condition</th>
+                  <th>Value</th>
+                  <th>Status</th>
+                  <th>Last Triggered</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {alerts.map(a => (
+                  <tr key={a.alert_id}>
+                    <td><span className="mono" style={{ fontWeight: 600 }}>{a.symbol}</span></td>
+                    <td style={{ color: 'var(--color-text-secondary)' }}>{CONDITION_TYPES.find(c => c.value === a.condition_type)?.label || a.condition_type}</td>
+                    <td className="mono">
+                      {a.condition_type === 'PATTERN' 
+                        ? (PATTERN_TYPES.find(p => String(p.value) === String(a.condition_value))?.label || a.condition_value)
+                        : a.condition_value}
+                    </td>
+                    <td>
+                      <span style={{ color: a.is_active ? 'var(--color-bullish)' : 'var(--color-text-muted)', fontSize: 13 }}>
+                        {a.is_active ? '● Active' : '○ Inactive'}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
+                      {a.triggered_at ? new Date(a.triggered_at).toLocaleString('en-IN') : 'Never'}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {a.is_active && <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDeactivate(a.alert_id)}><BellOff size={13} /></button>}
+                        <button className="btn btn-danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDelete(a.alert_id)}><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

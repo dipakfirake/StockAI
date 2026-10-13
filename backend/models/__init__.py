@@ -10,6 +10,8 @@ from backend.models.settings import SystemSettings
 from backend.models.notification import Notification
 from backend.models.prediction_archive import PredictionArchive
 from backend.models.user_preference import UserPreference
+from backend.models.subscription import SubscriptionOrder
+from backend.models.sentinel_incident import SentinelIncident
 
 __all__ = [
     "User",
@@ -24,4 +26,7 @@ __all__ = [
     "Notification",
     "PredictionArchive",
     "UserPreference",
+    "SubscriptionOrder",
+    "SentinelIncident",
 ]
+

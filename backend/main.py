@@ -18,7 +18,8 @@ from backend.core.logging_config import setup_logging, get_logger
 from backend.core.rate_limiter import RateLimitMiddleware
 from backend.core.security_middleware import SecurityHeadersMiddleware
 from backend.core.audit_logger import log_security_event
-from backend.api import stocks, alerts, paper_trading, backtesting, ai_engine, portfolio, watchlist, auth, market, scanner, ml, settings as api_settings, notifications, preferences
+from backend.api import stocks, alerts, paper_trading, backtesting, ai_engine, portfolio, watchlist, auth, market, scanner, ml, settings as api_settings, notifications, preferences, subscription, admin, sentinel
+from backend.services.sentinel import sentinel_service
 from backend.api.websocket import ws_router
 
 logger = get_logger(__name__)
@@ -45,10 +46,15 @@ async def lifespan(app: FastAPI):
     lifecycle.register_task(task1)
     lifecycle.register_task(task2)
     lifecycle.register_task(task3)
+
+    # Launch 24/7 Autonomous Sentinel & Threat Surveillance Watchdog
+    sentinel_service.start_background_surveillance()
     
     yield
     
+    sentinel_service.stop_background_surveillance()
     await lifecycle.shutdown()
+
 
 
 app = FastAPI(
@@ -161,8 +167,12 @@ app.include_router(ml.router, prefix="/api/ml", tags=["Machine Learning"])
 app.include_router(api_settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(preferences.router, prefix="/api/preferences", tags=["Preferences"])
+app.include_router(subscription.router, prefix="/api", tags=["Subscription"])
+app.include_router(admin.router, prefix="/api", tags=["Admin"])
+app.include_router(sentinel.router, prefix="/api", tags=["Sentinel 24/7 Watchdog"])
 app.include_router(ws_router)
 app.include_router(telemetry_router)
+
 
 
 @app.get("/metrics", tags=["Observability & Telemetry"])

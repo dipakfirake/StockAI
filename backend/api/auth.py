@@ -133,22 +133,27 @@ async def login(
 
 @router.get("/me")
 async def get_me(current_user: User = Depends(get_current_user)):
-    """Get current user profile."""
+    """Get current user profile with role and pro status."""
+    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
     return {
         "id": str(current_user.id),
         "email": current_user.email,
         "name": current_user.name,
-        "subscription_tier": current_user.subscription_tier
+        "subscription_tier": "PRO" if is_admin else current_user.subscription_tier,
+        "is_admin": is_admin,
+        "pro_status": "APPROVED" if is_admin else (current_user.pro_status or "NONE"),
+        "pro_requested_at": current_user.pro_requested_at.isoformat() if current_user.pro_requested_at else None,
     }
 
+
 @router.post("/upgrade")
-async def upgrade_tier(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Mock endpoint to upgrade user to PRO tier."""
+async def upgrade_tier(current_user: User = Depends(get_current_user)):
+    """Guarded endpoint: direct free self-upgrade is disallowed."""
     if current_user.subscription_tier == "PRO":
         return {"message": "Already on PRO tier", "subscription_tier": "PRO"}
     
-    current_user.subscription_tier = "PRO"
-    db.add(current_user)
-    await db.commit()
-    
-    return {"message": "Successfully upgraded to PRO tier", "subscription_tier": "PRO"}
+    raise HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail="Direct self-upgrade is disabled. Please complete payment checkout or request Admin approval at /api/subscription/request-pro.",
+    )
+

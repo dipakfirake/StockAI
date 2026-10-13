@@ -65,45 +65,47 @@ export default function PortfolioPage() {
             </div>
             {portfolio.allocation?.length === 0 && <div className="empty-state">No open positions. Place paper trades to see allocation.</div>}
             {portfolio.allocation?.length > 0 && (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>Direction</th>
-                    <th>Product</th>
-                    <th>Qty</th>
-                    <th>Entry</th>
-                    <th>Current</th>
-                    <th>Unrealized PnL</th>
-                    <th>Value</th>
-                    <th>Weight</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {portfolio.allocation.map((a: any, i: number) => (
-                    <tr key={i}>
-                      <td className="mono" style={{ fontWeight: 600 }}>{a.symbol}</td>
-                      <td><span className={`badge ${a.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{a.direction}</span></td>
-                      <td><span className="badge badge-secondary">{a.product_type}</span></td>
-                      <td>{a.quantity}</td>
-                      <td className="mono">₹{a.entry_price?.toFixed(2)}</td>
-                      <td className="mono">₹{a.current_price?.toFixed(2)}</td>
-                      <td className={a.unrealized_pnl >= 0 ? 'positive mono' : 'negative mono'}>
-                        {a.unrealized_pnl >= 0 ? '+' : ''}₹{a.unrealized_pnl?.toFixed(2)}
-                      </td>
-                      <td className="mono">₹{a.value?.toLocaleString('en-IN')}</td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{ width: 60, height: 6, background: 'var(--color-bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
-                            <div style={{ width: `${a.weight_pct}%`, height: '100%', background: a.unrealized_pnl >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)', borderRadius: 3 }} />
-                          </div>
-                          <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{a.weight_pct}%</span>
-                        </div>
-                      </td>
+              <div className="table-container">
+                <table className="table" style={{ minWidth: '750px' }}>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Direction</th>
+                      <th>Product</th>
+                      <th>Qty</th>
+                      <th>Entry</th>
+                      <th>Current</th>
+                      <th>Unrealized PnL</th>
+                      <th>Value</th>
+                      <th>Weight</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {portfolio.allocation.map((a: any, i: number) => (
+                      <tr key={i}>
+                        <td className="mono" style={{ fontWeight: 600 }}>{a.symbol}</td>
+                        <td><span className={`badge ${a.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{a.direction}</span></td>
+                        <td><span className="badge badge-secondary">{a.product_type}</span></td>
+                        <td>{a.quantity}</td>
+                        <td className="mono">₹{a.entry_price?.toFixed(2)}</td>
+                        <td className="mono">₹{a.current_price?.toFixed(2)}</td>
+                        <td className={a.unrealized_pnl >= 0 ? 'positive mono' : 'negative mono'}>
+                          {a.unrealized_pnl >= 0 ? '+' : ''}₹{a.unrealized_pnl?.toFixed(2)}
+                        </td>
+                        <td className="mono">₹{a.value?.toLocaleString('en-IN')}</td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 60, height: 6, background: 'var(--color-bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{ width: `${a.weight_pct}%`, height: '100%', background: a.unrealized_pnl >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)', borderRadius: 3 }} />
+                            </div>
+                            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{a.weight_pct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </>

@@ -146,9 +146,9 @@ export default function PaperTradingPage() {
       </div>
 
       {/* Content based on Active Tab */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="card table-container" style={{ padding: 0, overflowX: 'auto' }}>
         {activeTab === 'POSITIONS' && (
-          <table className="table" style={{ margin: 0 }}>
+          <table className="table" style={{ margin: 0, minWidth: '650px' }}>
             <thead style={{ background: 'var(--color-bg-card-hover)' }}>
               <tr>
                 <th>Product</th><th>Instrument</th><th>Qty.</th><th>Avg. Cost</th><th>LTP</th><th>Current Value</th><th>P&L</th><th>Action</th>
@@ -180,7 +180,7 @@ export default function PaperTradingPage() {
         )}
 
         {activeTab === 'ORDERS' && (
-          <table className="table" style={{ margin: 0 }}>
+          <table className="table" style={{ margin: 0, minWidth: '650px' }}>
             <thead style={{ background: 'var(--color-bg-card-hover)' }}>
               <tr>
                 <th>Time</th><th>Type</th><th>Instrument</th><th>Product</th><th>Qty.</th><th>Status</th><th>Action</th>
@@ -211,7 +211,7 @@ export default function PaperTradingPage() {
         )}
 
         {activeTab === 'HISTORY' && (
-          <table className="table" style={{ margin: 0 }}>
+          <table className="table" style={{ margin: 0, minWidth: '650px' }}>
             <thead style={{ background: 'var(--color-bg-card-hover)' }}>
               <tr>
                 <th>Instrument</th><th>Direction</th><th>Qty.</th><th>Avg. Cost</th><th>Exit Price</th><th>Realized P&L</th><th>Date</th>

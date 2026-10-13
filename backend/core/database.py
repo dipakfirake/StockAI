@@ -64,9 +64,24 @@ async def create_db_tables():
             # Create all tables first
             await conn.run_sync(Base.metadata.create_all)
             
+            # Ensure columns exist on users table for existing databases
+            from sqlalchemy import text
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users') THEN
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_status VARCHAR(50) DEFAULT 'NONE';
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_requested_at TIMESTAMPTZ;
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_approved_by VARCHAR(255);
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_reference VARCHAR(255);
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50);
+                    END IF;
+                END $$;
+            """))
+
             # Now create TimescaleDB hypertable for candles if it doesn't exist
             # We catch exceptions gracefully in case it's already a hypertable or TimescaleDB isn't installed
-            from sqlalchemy import text
             try:
                 await conn.execute(text(
                     "SELECT create_hypertable('candles', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);"
