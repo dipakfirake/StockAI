@@ -78,6 +78,14 @@ class SentinelService:
             try:
                 await self.run_full_system_audit()
                 self._audit_runs += 1
+
+                # Automated Hourly Cybersecurity & System Validation Sweep
+                if self._audit_runs % 1800 == 1:
+                    try:
+                        from backend.services.system_validator import system_validator
+                        asyncio.create_task(system_validator.run_all_tests(trigger_source="AUTOMATED_HOURLY"))
+                    except Exception as ve:
+                        logger.warning(f"🛡️ [Sentinel] Automated hourly validator sweep skipped: {ve}")
             except Exception as e:
                 logger.error(f"🛡️ [Sentinel] Error inside surveillance loop: {e}")
             

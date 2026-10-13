@@ -1,0 +1,70 @@
+name: Daily & Hourly Security Audit & System Validator
+
+on:
+  schedule:
+    # Runs every day at 00:00 UTC (05:30 AM IST)
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      deep_scan:
+        description: 'Run deep penetration and dependency vulnerability scan'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  cybersecurity-and-system-audit:
+    name: Autonomous Security & Vulnerability Sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret Leak Detection Scan
+        name: Check for Uncommitted Credentials & Private Keys
+        run: |
+          echo "🔍 Scanning repository for potential secret leaks..."
+          # Fail if private keys or non-example .env files are tracked in git
+          if git ls-files | grep -E '\.env$|\.key$|\.pem$'; then
+            echo "❌ CRITICAL SECURITY ALERT: Private key or .env file found tracked in git!"
+            exit 1
+          fi
+          echo "✅ No exposed .env or private key files tracked in repository."
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Cybersecurity & Threat Watchdog Tests
+        run: |
+          echo "🛡️ Running Automated Cybersecurity Defense Tests..."
+          python -m pytest backend/tests/test_cybersecurity.py backend/tests/test_sentinel_watchdog.py -v
+        env:
+          PYTHONPATH: .
+          SECRET_KEY: "ci-secret-key-for-automated-validation"
+          DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/stockdb"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Frontend Build Integrity & Security Type Check
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run build

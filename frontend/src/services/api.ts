@@ -163,4 +163,12 @@ export const sentinelApi = {
   resolveIncident: (incidentId: string) => api.post(`/sentinel/resolve/${incidentId}`),
 }
 
+// ===== System Validator & Cybersecurity Scanner endpoints =====
+export const validatorApi = {
+  getStatus: () => api.get('/validator/status'),
+  getHistory: () => api.get('/validator/history'),
+  runAll: () => api.post('/validator/run'),
+  runSingle: (testId: string) => api.post(`/validator/run/${testId}`),
+}
+
 export default api

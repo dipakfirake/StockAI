@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { sentinelApi } from '../services/api';
+import { sentinelApi, validatorApi } from '../services/api';
 import { Link } from 'react-router-dom';
 
 interface SubsystemInfo {
@@ -35,6 +35,30 @@ interface HealthSummary {
   server_time: string;
 }
 
+interface ValidatorTestResult {
+  test_id: string;
+  name: string;
+  category: 'CYBERSECURITY' | 'SYSTEM' | 'QUANT' | string;
+  status: 'PASSED' | 'WARNING' | 'FAILED';
+  duration_ms: number;
+  details: string;
+  recommendation?: string | null;
+  telemetry?: Record<string, any>;
+}
+
+interface ValidationReport {
+  suite_id: string;
+  timestamp: string;
+  trigger_source: string;
+  total_tests: number;
+  passed_tests: number;
+  warning_tests: number;
+  failed_tests: number;
+  overall_status: 'PASSED' | 'WARNING' | 'FAILED' | 'READY';
+  execution_duration_ms: number;
+  results: ValidatorTestResult[];
+}
+
 const formatCheckTime = (dateStr?: string, fallbackStr?: string): string => {
   const target = dateStr || fallbackStr;
   if (!target) return 'Active';
@@ -58,6 +82,12 @@ export default function SentinelMonitorPage() {
   const [resolveLoading, setResolveLoading] = useState<string | null>(null);
   const timerRef = useRef<any>(null);
 
+  // System Validator & Cybersecurity Tester State
+  const [valReport, setValReport] = useState<ValidationReport | null>(null);
+  const [valLoading, setValLoading] = useState(false);
+  const [runningTestId, setRunningTestId] = useState<string | null>(null);
+  const [activeValCategory, setActiveValCategory] = useState<'ALL' | 'CYBERSECURITY' | 'SYSTEM' | 'QUANT'>('ALL');
+
   const fetchHealth = async (showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
@@ -70,8 +100,18 @@ export default function SentinelMonitorPage() {
     }
   };
 
+  const fetchValidatorStatus = async () => {
+    try {
+      const res = await validatorApi.getStatus();
+      if (res.data) setValReport(res.data);
+    } catch (err) {
+      console.error('Validator fetch error', err);
+    }
+  };
+
   useEffect(() => {
     fetchHealth(true);
+    fetchValidatorStatus();
 
     if (autoRefresh) {
       timerRef.current = setInterval(() => {
@@ -109,6 +149,60 @@ export default function SentinelMonitorPage() {
     } finally {
       setResolveLoading(null);
     }
+  };
+
+  const handleRunValidationSuite = async () => {
+    setValLoading(true);
+    try {
+      const res = await validatorApi.runAll();
+      if (res.data) setValReport(res.data);
+    } catch (err) {
+      console.error('Run validation suite error', err);
+    } finally {
+      setValLoading(false);
+    }
+  };
+
+  const handleRunSingleTest = async (testId: string) => {
+    setRunningTestId(testId);
+    try {
+      const res = await validatorApi.runSingle(testId);
+      if (res.data && valReport) {
+        const updated = valReport.results.map((r) => (r.test_id === testId ? res.data : r));
+        setValReport({ ...valReport, results: updated });
+      }
+    } catch (err) {
+      console.error('Run single test error', err);
+    } finally {
+      setRunningTestId(null);
+    }
+  };
+
+  const handleExportAuditReport = () => {
+    if (!valReport) return;
+    const content = `# StockAI System & Cybersecurity Audit Report
+Generated: ${new Date(valReport.timestamp).toLocaleString()}
+Suite ID: ${valReport.suite_id}
+Trigger: ${valReport.trigger_source}
+Overall Status: ${valReport.overall_status}
+Passed: ${valReport.passed_tests} | Warnings: ${valReport.warning_tests} | Failed: ${valReport.failed_tests}
+Execution Duration: ${valReport.execution_duration_ms}ms
+
+## Test Results
+${valReport.results.map((r) => `### [${r.status}] ${r.test_id}: ${r.name}
+- Category: ${r.category}
+- Duration: ${r.duration_ms}ms
+- Details: ${r.details}
+${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
+`).join('\n')}
+`;
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `security_audit_report_${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const score = data?.health_score ?? 100;
@@ -461,6 +555,270 @@ export default function SentinelMonitorPage() {
                 })}
               </tbody>
             </table>
+          )}
+        </div>
+      </div>
+
+      {/* =========================================================================
+          INTERACTIVE SYSTEM VALIDATOR & CYBERSECURITY TESTER
+         ========================================================================= */}
+      <div style={{ marginTop: '40px', borderTop: '1px solid var(--border-color)', paddingTop: '30px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '18px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>
+                🔬 System Validator & Threat Testing Lab
+              </h2>
+              <span style={{
+                background: 'rgba(59, 130, 246, 0.15)',
+                color: '#60a5fa',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                border: '1px solid rgba(59, 130, 246, 0.3)'
+              }}>
+                Dual-Pathway: Automated Hourly + Manual QA
+              </span>
+            </div>
+            <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.88rem' }}>
+              Autonomous hourly & daily scans probe vulnerabilities, credential leaks, and data integrity. Use this manual lab to execute real-time tests on demand.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              onClick={handleExportAuditReport}
+              disabled={!valReport || valReport.results.length === 0}
+              style={{
+                padding: '9px 14px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--surface-color)',
+                color: 'var(--text-color)',
+                cursor: valReport && valReport.results.length > 0 ? 'pointer' : 'not-allowed',
+                fontWeight: 600,
+                fontSize: '0.85rem'
+              }}
+            >
+              📥 Export Audit Report (.md)
+            </button>
+
+            <button
+              onClick={handleRunValidationSuite}
+              disabled={valLoading}
+              style={{
+                padding: '9px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: 'linear-gradient(90deg, #10b981, #059669)',
+                color: 'white',
+                cursor: valLoading ? 'not-allowed' : 'pointer',
+                fontWeight: 700,
+                fontSize: '0.88rem',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              {valLoading ? '⏳ Running 10-Point Suite...' : '🚀 Run Full 10-Point Suite'}
+            </button>
+          </div>
+        </div>
+
+        {/* Validation Suite KPI Summary */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '12px',
+          marginBottom: '20px'
+        }}>
+          <div style={{ background: 'var(--surface-color)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Overall Suite Status</div>
+            <div style={{
+              fontSize: '1.4rem',
+              fontWeight: 800,
+              marginTop: '4px',
+              color: valReport?.overall_status === 'PASSED' ? '#22c55e' : valReport?.overall_status === 'WARNING' ? '#f59e0b' : valReport?.overall_status === 'FAILED' ? '#ef4444' : '#60a5fa'
+            }}>
+              {valReport?.overall_status || 'READY'}
+            </div>
+          </div>
+
+          <div style={{ background: 'var(--surface-color)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Passed Checks</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#22c55e', marginTop: '4px' }}>
+              {valReport?.passed_tests ?? 0} <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 500 }}>/ {valReport?.total_tests ?? 10}</span>
+            </div>
+          </div>
+
+          <div style={{ background: 'var(--surface-color)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Warnings / Fallbacks</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>
+              {valReport?.warning_tests ?? 0}
+            </div>
+          </div>
+
+          <div style={{ background: 'var(--surface-color)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Security Failures</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: (valReport?.failed_tests ?? 0) > 0 ? '#ef4444' : '#22c55e', marginTop: '4px' }}>
+              {valReport?.failed_tests ?? 0}
+            </div>
+          </div>
+
+          <div style={{ background: 'var(--surface-color)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Suite Runtime</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-color)', marginTop: '4px' }}>
+              {valReport?.execution_duration_ms ? `${valReport.execution_duration_ms}ms` : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Category Filters */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          {(['ALL', 'CYBERSECURITY', 'SYSTEM', 'QUANT'] as const).map((cat) => {
+            const labels = {
+              ALL: 'All Tests (10)',
+              CYBERSECURITY: '🛡️ Cybersecurity (5)',
+              SYSTEM: '⚙️ Subsystems & DB (2)',
+              QUANT: '📊 Data & Quant (3)',
+            };
+            const active = activeValCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setActiveValCategory(cat)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '20px',
+                  border: active ? '1px solid #3b82f6' : '1px solid var(--border-color)',
+                  background: active ? 'rgba(59, 130, 246, 0.2)' : 'var(--surface-color)',
+                  color: active ? '#60a5fa' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {labels[cat]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Test Matrix */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '14px' }}>
+          {(!valReport?.results || valReport.results.length === 0) ? (
+            <div style={{ gridColumn: '1 / -1', padding: '30px', textAlign: 'center', background: 'var(--surface-color)', borderRadius: '12px', border: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}>
+              Click <strong>"🚀 Run Full 10-Point Suite"</strong> above to execute interactive cybersecurity and subsystem validation.
+            </div>
+          ) : (
+            valReport.results.filter((r) => activeValCategory === 'ALL' || r.category === activeValCategory).map((t) => {
+              const isPass = t.status === 'PASSED';
+              const isWarn = t.status === 'WARNING';
+              const statusCol = isPass ? '#22c55e' : isWarn ? '#f59e0b' : '#ef4444';
+              const statusBg = isPass ? 'rgba(34, 197, 94, 0.12)' : isWarn ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+              const isRunningThis = runningTestId === t.test_id;
+
+              return (
+                <div
+                  key={t.test_id}
+                  style={{
+                    background: 'var(--surface-color)',
+                    borderRadius: '12px',
+                    border: `1px solid ${isPass ? 'rgba(34, 197, 94, 0.2)' : isWarn ? 'rgba(245, 158, 11, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                    padding: '16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: 'rgba(255,255,255,0.06)',
+                          color: 'var(--text-secondary)'
+                        }}>
+                          {t.test_id}
+                        </span>
+                        <span style={{
+                          fontSize: '0.7rem',
+                          fontWeight: 600,
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: 'rgba(59, 130, 246, 0.12)',
+                          color: '#60a5fa'
+                        }}>
+                          {t.category}
+                        </span>
+                      </div>
+
+                      <span style={{
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        background: statusBg,
+                        color: statusCol
+                      }}>
+                        {t.status}
+                      </span>
+                    </div>
+
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: '6px' }}>
+                      {t.name}
+                    </div>
+
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                      {t.details}
+                    </div>
+
+                    {t.recommendation && (
+                      <div style={{
+                        background: 'rgba(245, 158, 11, 0.08)',
+                        borderLeft: '3px solid #f59e0b',
+                        padding: '6px 10px',
+                        borderRadius: '4px',
+                        fontSize: '0.78rem',
+                        color: '#fbbf24',
+                        marginBottom: '10px'
+                      }}>
+                        💡 {t.recommendation}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '10px', marginTop: '6px' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      Latency: <strong style={{ color: 'var(--text-color)' }}>{t.duration_ms}ms</strong>
+                    </span>
+
+                    <button
+                      onClick={() => handleRunSingleTest(t.test_id)}
+                      disabled={isRunningThis || valLoading}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: 'transparent',
+                        color: 'var(--text-color)',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: isRunningThis || valLoading ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {isRunningThis ? '⏳ Testing...' : '▶ Re-test'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>

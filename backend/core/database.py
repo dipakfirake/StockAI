@@ -20,17 +20,21 @@ import urllib.parse
 
 
 def get_async_db_url(url: str) -> str:
-    """Ensure database URL uses postgresql+asyncpg driver and strips unsupported asyncpg query params."""
+    """Ensure database URL uses postgresql+asyncpg driver and adapts query params for asyncpg."""
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+asyncpg://", 1)
     elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
     
-    # Strip channel_binding if present since asyncpg does not support it
-    if "channel_binding" in url:
-        parsed = urllib.parse.urlsplit(url)
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.query:
         query_params = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-        filtered_params = [(k, v) for k, v in query_params if k != "channel_binding"]
+        # asyncpg takes 'ssl', not 'sslmode', and does not support 'channel_binding'
+        filtered_params = [
+            ("ssl" if k == "sslmode" else k, v)
+            for k, v in query_params
+            if k != "channel_binding"
+        ]
         new_query = urllib.parse.urlencode(filtered_params)
         url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
 
@@ -72,6 +76,7 @@ async def get_db() -> AsyncSession:
 async def create_db_tables():
     """Create all tables on startup (use Alembic for production migrations)."""
     try:
+        import backend.models  # noqa: F401
         async with engine.begin() as conn:
             # Create all tables first
             await conn.run_sync(Base.metadata.create_all)
