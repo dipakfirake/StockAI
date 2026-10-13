@@ -33,10 +33,7 @@ async def get_sentinel_incidents():
 async def run_immediate_audit(current_user: User = Depends(get_current_user)):
     """Trigger an immediate full-stack diagnostic audit across all subsystems."""
     summary = await sentinel_service.run_full_system_audit()
-    return {
-        "message": "Full-stack diagnostic audit completed successfully",
-        "result": summary,
-    }
+    return summary
 
 
 @router.post("/resolve")

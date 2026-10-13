@@ -44,12 +44,12 @@ class SentinelService:
         self._is_running = False
         self._task: asyncio.Task | None = None
         self._subsystem_status: Dict[str, Dict[str, Any]] = {
-            "database": {"status": "HEALTHY", "latency_ms": 0.0, "last_check": None, "error": None},
-            "redis": {"status": "HEALTHY", "latency_ms": 0.0, "last_check": None, "error": None},
-            "celery": {"status": "HEALTHY", "active_workers": 1, "last_check": None, "error": None},
-            "broker_api": {"status": "HEALTHY", "token_valid": True, "last_check": None, "error": None},
-            "api_endpoints": {"status": "HEALTHY", "latency_ms": 0.0, "last_check": None, "error": None},
-            "security": {"status": "HEALTHY", "threat_level": "LOW", "last_check": None, "active_threats": 0},
+            "database": {"status": "HEALTHY", "latency_ms": 0.0, "last_check": None, "checked_at": None, "error": None},
+            "redis": {"status": "HEALTHY", "latency_ms": 0.0, "last_check": None, "checked_at": None, "error": None},
+            "celery": {"status": "HEALTHY", "active_workers": 1, "last_check": None, "checked_at": None, "error": None},
+            "broker_api": {"status": "HEALTHY", "token_valid": True, "last_check": None, "checked_at": None, "error": None},
+            "api_endpoints": {"status": "HEALTHY", "latency_ms": 0.0, "last_check": None, "checked_at": None, "error": None},
+            "security": {"status": "HEALTHY", "threat_level": "LOW", "last_check": None, "checked_at": None, "active_threats": 0},
         }
         self._recent_incidents: List[Dict[str, Any]] = []
         self._audit_runs = 0
@@ -91,31 +91,37 @@ class SentinelService:
         # 1. Probe Database
         db_res = await self._probe_database()
         db_res["last_check"] = now_iso
+        db_res["checked_at"] = now_iso
         self._subsystem_status["database"] = db_res
 
         # 2. Probe Redis
         redis_res = await self._probe_redis()
         redis_res["last_check"] = now_iso
+        redis_res["checked_at"] = now_iso
         self._subsystem_status["redis"] = redis_res
 
         # 3. Probe Celery
         celery_res = await self._probe_celery()
         celery_res["last_check"] = now_iso
+        celery_res["checked_at"] = now_iso
         self._subsystem_status["celery"] = celery_res
 
         # 4. Probe Broker Token & Quote Stream
         broker_res = await self._probe_broker()
         broker_res["last_check"] = now_iso
+        broker_res["checked_at"] = now_iso
         self._subsystem_status["broker_api"] = broker_res
 
         # 5. Probe API Endpoints
         api_res = await self._probe_api_endpoints()
         api_res["last_check"] = now_iso
+        api_res["checked_at"] = now_iso
         self._subsystem_status["api_endpoints"] = api_res
 
         # 6. Probe Cybersecurity Threats
         sec_res = await self._probe_security_logs()
         sec_res["last_check"] = now_iso
+        sec_res["checked_at"] = now_iso
         self._subsystem_status["security"] = sec_res
 
         return self.get_health_summary()

@@ -871,7 +871,38 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - `frontend/src/index.css`: Enhanced `.navbar-brand` with `cursor: pointer; text-decoration: none; user-select: none; transition: opacity var(--transition-fast);` and hover state `opacity: 0.88`.
 3. **Verification**:
    - Executed `npm run build` in `frontend/` -> TypeScript check passed, Vite bundled cleanly in 1m 25s with 0 errors.
-**System Response**: Documented navbar link behavior update, confirmed compilation passing, and pushed to `main`.
+---
+
+### Session Entry 33: Sentinel 24/7 Watchdog Verification & Subsystem "Invalid Date" Remediation
+**Timestamp**: 2026-10-13 19:15:00 IST (13:45:00 UTC)
+**User Prompt**:
+  `"is this component really working check and before that what is that invalid date in cards ? /goal"`
+**Agent Technical Actions**:
+1. **Diagnosis & Root Cause Identification**:
+   - Inspected subsystem health card rendering in `frontend/src/pages/SentinelMonitorPage.tsx`.
+   - Identified that card footer executed `new Date(sub.checked_at).toLocaleTimeString()`.
+   - Root cause: The backend `SentinelService` emitted `last_check: <ISO_TIMESTAMP>` instead of `checked_at`. Because `sub.checked_at` was `undefined`, JavaScript evaluated `new Date(undefined).toLocaleTimeString()`, which strictly produces `"Invalid Date"`.
+   - Additionally discovered that `POST /api/sentinel/audit-now` returned `{ message, result }`, which conflicted with `SentinelMonitorPage.tsx` expecting `HealthSummary` directly upon clicking `⚡ Audit Now`.
+2. **Empirical Verification of Real-Time Sentinel Operation**:
+   - Queried live Oracle VM API endpoint `GET http://92.4.71.210:8000/api/sentinel/status`.
+   - Confirmed live background watchdog execution:
+     - `audit_runs`: Increased autonomously from 45 to 178 cycles.
+     - `database`: PostgreSQL round-trip query (`SELECT 1`) actively probed at 1.44ms latency.
+     - `redis`: Redis cache ping actively probed at 0.31ms latency.
+     - `api_endpoints`: In-memory service probe measured at 0.01ms.
+     - `server_time`: Advances continuously with active UTC timestamps.
+3. **Implementation & Hardening**:
+   - `backend/services/sentinel.py`: Emitted both `checked_at` and `last_check` across all 6 subsystem audit probes (database, redis, celery, broker_api, api_endpoints, security).
+   - `backend/api/sentinel.py`: Updated `POST /api/sentinel/audit-now` to return the `HealthSummary` payload directly.
+   - `frontend/src/pages/SentinelMonitorPage.tsx`:
+     - Built safe date formatting utility `formatCheckTime(dateStr?, fallbackStr?)` and `formatCheckDate(dateStr?)` with `isNaN(d.getTime())` guards.
+     - Refactored subsystem cards to render `formatCheckTime(sub.checked_at || sub.last_check, data?.server_time)`.
+     - Refactored `handleAuditNow` to accept either `res.data.result` or `res.data`.
+     - Added formatted `Time` column to the Live Incident Ledger table.
+4. **Verification Evidence**:
+   - `pytest backend/tests/test_sentinel_watchdog.py backend/tests/test_auth_pro_access.py`: 8/8 tests passed (100% green in 78.35s).
+   - Frontend `npm run build`: TypeScript compile and Vite production build passed cleanly in 1m 32s with 0 errors.
+**System Response**: Documented root cause of "Invalid Date", confirmed live Sentinel operation evidence with real probe latencies and autonomous cycle progression, and deployed fixes.
 
 
 

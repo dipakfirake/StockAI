@@ -6,7 +6,9 @@ interface SubsystemInfo {
   status: 'HEALTHY' | 'WARNING' | 'DEGRADED' | 'DOWN';
   latency_ms?: number;
   message?: string;
-  checked_at: string;
+  checked_at?: string;
+  last_check?: string;
+  error?: string | null;
   [key: string]: any;
 }
 
@@ -32,6 +34,21 @@ interface HealthSummary {
   recent_incidents: SentinelIncident[];
   server_time: string;
 }
+
+const formatCheckTime = (dateStr?: string, fallbackStr?: string): string => {
+  const target = dateStr || fallbackStr;
+  if (!target) return 'Active';
+  const d = new Date(target);
+  if (isNaN(d.getTime())) return 'Active';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+
+const formatCheckDate = (dateStr?: string): string => {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString();
+};
 
 export default function SentinelMonitorPage() {
   const [data, setData] = useState<HealthSummary | null>(null);
@@ -71,7 +88,10 @@ export default function SentinelMonitorPage() {
     setAuditing(true);
     try {
       const res = await sentinelApi.auditNow();
-      setData(res.data);
+      const payload = res.data?.result || res.data;
+      if (payload && payload.subsystems) {
+        setData(payload);
+      }
     } catch (err) {
       console.error('Deep audit error', err);
     } finally {
@@ -258,10 +278,10 @@ export default function SentinelMonitorPage() {
         }}>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Sentinel Time Horizon</div>
           <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '8px', color: 'var(--text-color)' }}>
-            {data?.server_time ? new Date(data.server_time).toLocaleTimeString() : '—'}
+            {formatCheckTime(data?.server_time)}
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-            {data?.server_time ? new Date(data.server_time).toLocaleDateString() : '—'}
+            {formatCheckDate(data?.server_time)}
           </div>
         </div>
       </div>
@@ -308,12 +328,14 @@ export default function SentinelMonitorPage() {
                 </div>
 
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px', minHeight: '38px' }}>
-                  {sub.message || 'Operational and responsive'}
+                  {sub.message || (sub.error ? `Error: ${sub.error}` : 'Operational and responsive')}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
                   <span>Latency: <strong style={{ color: 'var(--text-color)' }}>{sub.latency_ms !== undefined ? `${sub.latency_ms}ms` : 'N/A'}</strong></span>
-                  <span>{new Date(sub.checked_at).toLocaleTimeString()}</span>
+                  <span style={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                    {formatCheckTime(sub.checked_at || sub.last_check, data?.server_time)}
+                  </span>
                 </div>
               </div>
             );
@@ -349,6 +371,7 @@ export default function SentinelMonitorPage() {
                 <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', background: 'rgba(255,255,255,0.02)' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Severity</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Subsystem</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Time</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Incident / Bug Title</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Occurrences</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Suggested Action</th>
@@ -377,6 +400,9 @@ export default function SentinelMonitorPage() {
                       </td>
                       <td style={{ padding: '12px 16px', fontWeight: 600 }}>
                         {inc.subsystem}
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: '0.78rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                        {formatCheckTime(inc.last_seen_at || inc.first_seen_at, data.server_time)}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ fontWeight: 600, color: 'var(--text-color)' }}>{inc.title}</div>
