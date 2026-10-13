@@ -169,6 +169,9 @@ export const validatorApi = {
   getHistory: () => api.get('/validator/history'),
   runAll: () => api.post('/validator/run'),
   runSingle: (testId: string) => api.post(`/validator/run/${testId}`),
+  getParadigms: () => api.get('/validator/paradigms'),
+  probeCustom: (data: { method: string; endpoint: string; payload?: any; headers?: any }) =>
+    api.post('/validator/probe-custom', data),
 }
 
 export default api

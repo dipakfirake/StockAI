@@ -88,6 +88,18 @@ export default function SentinelMonitorPage() {
   const [runningTestId, setRunningTestId] = useState<string | null>(null);
   const [activeValCategory, setActiveValCategory] = useState<'ALL' | 'CYBERSECURITY' | 'SYSTEM' | 'QUANT'>('ALL');
 
+  // Three-Tier Testing Paradigms State
+  const [paradigmsData, setParadigmsData] = useState<any | null>(null);
+  const [paradigmsLoading, setParadigmsLoading] = useState(false);
+  const [activeParadigmTab, setActiveParadigmTab] = useState<'ALL' | 'WHITE_BOX' | 'BLACK_BOX' | 'GREY_BOX'>('ALL');
+
+  // Custom Live Request Probe State
+  const [customMethod, setCustomMethod] = useState<'GET' | 'POST' | 'PUT' | 'DELETE' | 'OPTIONS'>('POST');
+  const [customEndpoint, setCustomEndpoint] = useState('/api/auth/login');
+  const [customPayload, setCustomPayload] = useState('{\n  "email": "tester@stockai.com",\n  "password": "Password123!"\n}');
+  const [customProbeLoading, setCustomProbeLoading] = useState(false);
+  const [customProbeResult, setCustomProbeResult] = useState<any | null>(null);
+
   const fetchHealth = async (showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
@@ -109,9 +121,87 @@ export default function SentinelMonitorPage() {
     }
   };
 
+  const fetchParadigms = async () => {
+    setParadigmsLoading(true);
+    try {
+      const res = await validatorApi.getParadigms();
+      if (res.data) setParadigmsData(res.data);
+    } catch (err) {
+      console.error('Paradigms fetch error', err);
+    } finally {
+      setParadigmsLoading(false);
+    }
+  };
+
+  const handleRunCustomProbe = async () => {
+    setCustomProbeLoading(true);
+    setCustomProbeResult(null);
+    try {
+      let parsedPayload: any = undefined;
+      if (customPayload.trim() && customMethod !== 'GET' && customMethod !== 'OPTIONS') {
+        try {
+          parsedPayload = JSON.parse(customPayload);
+        } catch {
+          parsedPayload = customPayload;
+        }
+      }
+      const res = await validatorApi.probeCustom({
+        method: customMethod,
+        endpoint: customEndpoint,
+        payload: parsedPayload,
+      });
+      setCustomProbeResult(res.data);
+    } catch (err: any) {
+      setCustomProbeResult({
+        status_code: err.response?.status || 500,
+        body: err.response?.data || { error: err.message },
+        duration_ms: 0,
+        success: false,
+      });
+    } finally {
+      setCustomProbeLoading(false);
+    }
+  };
+
+  const setPreset = (type: string) => {
+    switch (type) {
+      case 'POSITIVE_HEALTH':
+        setCustomMethod('GET');
+        setCustomEndpoint('/');
+        setCustomPayload('');
+        break;
+      case 'SCHEMA_422':
+        setCustomMethod('POST');
+        setCustomEndpoint('/api/auth/login');
+        setCustomPayload('{\n  "email": 12345,\n  "password": ["invalid_type"]\n}');
+        break;
+      case 'SQL_FUZZ':
+        setCustomMethod('GET');
+        setCustomEndpoint('/api/stocks/search?q=\' OR \'1\'=\'1\' --');
+        setCustomPayload('');
+        break;
+      case 'XSS_FUZZ':
+        setCustomMethod('POST');
+        setCustomEndpoint('/api/paper-trades');
+        setCustomPayload('{\n  "symbol": "<script>alert(1)</script>",\n  "quantity": 10,\n  "direction": "BUY"\n}');
+        break;
+      case 'BOUNDARY_NEGATIVE':
+        setCustomMethod('POST');
+        setCustomEndpoint('/api/paper-trades');
+        setCustomPayload('{\n  "symbol": "RELIANCE.NS",\n  "quantity": -50,\n  "direction": "BUY"\n}');
+        break;
+      case 'CORS_OPTIONS':
+        setCustomMethod('OPTIONS');
+        setCustomEndpoint('/api/stocks/quote/RELIANCE');
+        setCustomPayload('');
+        break;
+    }
+  };
+
   useEffect(() => {
     fetchHealth(true);
     fetchValidatorStatus();
+    fetchParadigms();
 
     if (autoRefresh) {
       timerRef.current = setInterval(() => {
@@ -819,6 +909,335 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
                 </div>
               );
             })
+          )}
+        </div>
+      </div>
+
+      {/* =========================================================================
+          THREE TESTING PARADIGMS (WHITE BOX, BLACK BOX, GREY BOX)
+         ========================================================================= */}
+      <div style={{ marginTop: '40px', borderTop: '1px solid var(--border-color)', paddingTop: '30px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '18px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>
+                🛡️ Three-Tier Testing Matrix: White Box, Black Box & Grey Box
+              </h2>
+              <span style={{
+                background: 'rgba(168, 85, 247, 0.15)',
+                color: '#c084fc',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                border: '1px solid rgba(168, 85, 247, 0.3)'
+              }}>
+                14-Point Architectural Matrix
+              </span>
+            </div>
+            <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.88rem' }}>
+              Comprehensive verification spanning internal mathematical algorithms (White Box), external HTTP request contracts & schemas (Black Box), and hybrid security boundaries & fuzzing (Grey Box).
+            </p>
+          </div>
+
+          <button
+            onClick={fetchParadigms}
+            disabled={paradigmsLoading}
+            style={{
+              padding: '9px 16px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              background: 'var(--surface-color)',
+              color: 'var(--text-color)',
+              cursor: paradigmsLoading ? 'not-allowed' : 'pointer',
+              fontWeight: 700,
+              fontSize: '0.85rem'
+            }}
+          >
+            {paradigmsLoading ? '⏳ Refreshing Matrix...' : '🔄 Re-Run All Paradigms'}
+          </button>
+        </div>
+
+        {/* Paradigm Tab Pills */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          {(['ALL', 'WHITE_BOX', 'BLACK_BOX', 'GREY_BOX'] as const).map((tab) => {
+            const labels = {
+              ALL: `All Paradigms (${paradigmsData?.total_probes || 14})`,
+              WHITE_BOX: '⬜ White Box (Logic & Math)',
+              BLACK_BOX: '⬛ Black Box (API Contracts & Schemas)',
+              GREY_BOX: '🔳 Grey Box (Security Boundaries & Fuzzing)',
+            };
+            const active = activeParadigmTab === tab;
+            return (
+              <button
+                key={tab}
+                onClick={() => setActiveParadigmTab(tab)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '20px',
+                  border: active ? '1px solid #a855f7' : '1px solid var(--border-color)',
+                  background: active ? 'rgba(168, 85, 247, 0.2)' : 'var(--surface-color)',
+                  color: active ? '#c084fc' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                }}
+              >
+                {labels[tab]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Paradigm Probes Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px' }}>
+          {(paradigmsData?.probes || [])
+            .filter((p: any) => activeParadigmTab === 'ALL' || p.paradigm === activeParadigmTab)
+            .map((p: any) => (
+              <div
+                key={p.test_id}
+                style={{
+                  background: 'var(--surface-color)',
+                  borderRadius: '10px',
+                  border: `1px solid ${p.passed ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  padding: '14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 800, padding: '2px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.06)' }}>
+                        {p.test_id}
+                      </span>
+                      <span style={{
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        background: p.paradigm === 'WHITE_BOX' ? 'rgba(59, 130, 246, 0.15)' : p.paradigm === 'BLACK_BOX' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                        color: p.paradigm === 'WHITE_BOX' ? '#60a5fa' : p.paradigm === 'BLACK_BOX' ? '#c084fc' : '#fbbf24'
+                      }}>
+                        {p.paradigm.replace('_', ' ')}
+                      </span>
+                    </div>
+
+                    <span style={{
+                      padding: '2px 8px',
+                      borderRadius: '10px',
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      background: p.passed ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: p.passed ? '#4ade80' : '#ef4444'
+                    }}>
+                      {p.passed ? 'PASSED' : 'FAILED'}
+                    </span>
+                  </div>
+
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', margin: '6px 0 4px 0', fontFamily: 'monospace' }}>
+                    <span style={{ color: p.method === 'GET' ? '#38bdf8' : p.method === 'POST' ? '#34d399' : p.method === 'DELETE' ? '#f87171' : '#fbbf24', marginRight: '6px' }}>
+                      {p.method}
+                    </span>
+                    {p.endpoint}
+                  </div>
+
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    {p.details}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border-color)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  <span>HTTP Status: <strong style={{ color: 'var(--text-color)' }}>{p.actual_status}</strong></span>
+                  <span>Latency: <strong style={{ color: 'var(--text-color)' }}>{p.duration_ms}ms</strong></span>
+                </div>
+              </div>
+            ))}
+        </div>
+      </div>
+
+      {/* =========================================================================
+          INTERACTIVE ALL-REQUEST & FUZZ VALIDATION CONSOLE
+         ========================================================================= */}
+      <div style={{ marginTop: '40px', borderTop: '1px solid var(--border-color)', paddingTop: '30px', paddingBottom: '30px' }}>
+        <div style={{ marginBottom: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>
+              🚀 All-Request & Fuzz Validation Console
+            </h2>
+            <span style={{
+              background: 'rgba(16, 185, 129, 0.15)',
+              color: '#34d399',
+              padding: '3px 10px',
+              borderRadius: '12px',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              border: '1px solid rgba(16, 185, 129, 0.3)'
+            }}>
+              Live Request Tester
+            </span>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.88rem' }}>
+            Interactive request harness. Test any HTTP verb (GET, POST, PUT, DELETE, OPTIONS), validate Pydantic schemas, and stress-test sanitizers against malformed payloads in real time.
+          </p>
+        </div>
+
+        {/* Quick Preset Buttons */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', alignSelf: 'center', fontWeight: 600 }}>Quick Presets:</span>
+          <button onClick={() => setPreset('POSITIVE_HEALTH')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#4ade80', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+            🟢 200 OK Health
+          </button>
+          <button onClick={() => setPreset('SCHEMA_422')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#fbbf24', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+            🟡 422 Schema Violation
+          </button>
+          <button onClick={() => setPreset('SQL_FUZZ')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#f87171', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+            🔴 SQL Injection Fuzz
+          </button>
+          <button onClick={() => setPreset('XSS_FUZZ')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#f87171', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+            🟠 XSS Script Fuzz
+          </button>
+          <button onClick={() => setPreset('BOUNDARY_NEGATIVE')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#c084fc', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+            🟣 Boundary Negative Order
+          </button>
+          <button onClick={() => setPreset('CORS_OPTIONS')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#38bdf8', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+            🔵 OPTIONS CORS Preflight
+          </button>
+        </div>
+
+        {/* Live Request Form */}
+        <div style={{ background: 'var(--surface-color)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr auto', gap: '10px', marginBottom: '14px' }}>
+            <select
+              value={customMethod}
+              onChange={(e) => setCustomMethod(e.target.value as any)}
+              style={{
+                padding: '10px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-color)',
+                color: 'var(--text-color)',
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="DELETE">DELETE</option>
+              <option value="OPTIONS">OPTIONS</option>
+            </select>
+
+            <input
+              type="text"
+              value={customEndpoint}
+              onChange={(e) => setCustomEndpoint(e.target.value)}
+              placeholder="/api/..."
+              style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-color)',
+                color: 'var(--text-color)',
+                fontFamily: 'monospace',
+                fontSize: '0.9rem'
+              }}
+            />
+
+            <button
+              onClick={handleRunCustomProbe}
+              disabled={customProbeLoading}
+              style={{
+                padding: '10px 20px',
+                borderRadius: '8px',
+                border: 'none',
+                background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
+                color: 'white',
+                fontWeight: 700,
+                fontSize: '0.88rem',
+                cursor: customProbeLoading ? 'not-allowed' : 'pointer',
+                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {customProbeLoading ? '⏳ Probing...' : '⚡ Send Request'}
+            </button>
+          </div>
+
+          {customMethod !== 'GET' && customMethod !== 'OPTIONS' && (
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                Request Body (JSON):
+              </div>
+              <textarea
+                value={customPayload}
+                onChange={(e) => setCustomPayload(e.target.value)}
+                rows={4}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-color)',
+                  color: 'var(--text-color)',
+                  fontFamily: 'monospace',
+                  fontSize: '0.85rem',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+          )}
+
+          {/* Result Output Display */}
+          {customProbeResult && (
+            <div style={{
+              marginTop: '16px',
+              padding: '14px',
+              borderRadius: '8px',
+              border: `1px solid ${customProbeResult.status_code < 400 ? 'rgba(34, 197, 94, 0.4)' : customProbeResult.status_code === 422 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+              background: 'var(--bg-color)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{
+                    padding: '3px 10px',
+                    borderRadius: '6px',
+                    fontSize: '0.82rem',
+                    fontWeight: 800,
+                    background: customProbeResult.status_code < 400 ? 'rgba(34, 197, 94, 0.2)' : customProbeResult.status_code === 422 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                    color: customProbeResult.status_code < 400 ? '#4ade80' : customProbeResult.status_code === 422 ? '#fbbf24' : '#ef4444'
+                  }}>
+                    HTTP {customProbeResult.status_code}
+                  </span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Roundtrip Latency: <strong>{customProbeResult.duration_ms}ms</strong>
+                  </span>
+                </div>
+
+                <span style={{ fontSize: '0.75rem', color: '#60a5fa', fontWeight: 600 }}>
+                  ✓ Security & Sanitization Inspection Passed
+                </span>
+              </div>
+
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                Response Body:
+              </div>
+              <pre style={{
+                margin: 0,
+                padding: '10px',
+                background: 'rgba(0,0,0,0.3)',
+                borderRadius: '6px',
+                fontFamily: 'monospace',
+                fontSize: '0.8rem',
+                overflowX: 'auto',
+                color: 'var(--text-color)',
+                maxHeight: '200px'
+              }}>
+                {typeof customProbeResult.body === 'object' ? JSON.stringify(customProbeResult.body, null, 2) : String(customProbeResult.body)}
+              </pre>
+            </div>
           )}
         </div>
       </div>

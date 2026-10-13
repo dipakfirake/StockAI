@@ -107,3 +107,95 @@ Instead of Jenkins, your repository is configured with **GitHub Actions**:
 | **Hourly (Every 1800 cycles)** | Sentinel Autonomous Sweep | Automatically executes full 10-point System Validator suite in background. |
 | **On-Demand (Manual QA)** | Admin Lab at `/admin/sentinel` | Click **"🚀 Run Full 10-Point Suite"** to verify all 10 tests live and export markdown report. |
 | **Daily (Every Midnight UTC)** | GitHub Actions Cron | Executes secret scanning, security pytest suites, and production build checks. |
+
+---
+
+## 5. The Three Testing Paradigms: White Box, Black Box & Grey Box Matrix
+
+The platform is fortified across all three industry-standard software testing methodologies:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        StockAI Three-Tier Testing Matrix                               │
+├──────────────────────────┬─────────────────────────────┬───────────────────────────────┤
+│ ⬜ White Box Testing      │ ⬛ Black Box Testing         │ 🔳 Grey Box Testing           │
+│ (Internal Structure/Math)│ (External HTTP Contracts)   │ (Security & Hybrid Boundaries)│
+├──────────────────────────┼─────────────────────────────┼───────────────────────────────┤
+│ • Algorithmic Math & RSI │ • Public Endpoints (GET /)  │ • SQL Injection Fuzzing       │
+│ • ATR True Range Limits  │ • Prometheus /metrics       │ • XSS Script Tag Injection    │
+│ • Zero-Division Guards   │ • Pydantic Schema (422)     │ • Token Bucket Throttling(429)│
+│ • PyTorch 36-Tensor Dim  │ • Data Type Mismatch (422)  │ • RBAC Admin Elevation (403)  │
+│ • ORM Model Attributes   │ • Non-Existent Routes (404) │ • Financial Idempotency Replay│
+│ • NaN & Inf Sanitizers   │ • Unsupported Verbs (405)   │ • Unauthenticated Guard (401) │
+│ • State Machine Logic    │ • CORS Preflight (OPTIONS)  │ • Transaction Rollback Safety │
+└──────────────────────────┴─────────────────────────────┴───────────────────────────────┘
+```
+
+### A. ⬜ White Box Testing (Internal Structural & Algorithmic Verification)
+- **Definition**: Tests internal algorithms, mathematical boundary conditions, and code branches with full access to source code.
+- **Automated Modules**: `backend/tests/test_three_tier_paradigms.py::test_white_box_paradigm_probes`, `backend/tests/test_indicators.py`, `backend/tests/test_signals.py`, `backend/tests/test_risk_analysis.py`.
+- **Target Verification**:
+  - `WB-01`: Indicator Engine Numerical Sanity (RSI strictly $0 \le RSI \le 100$, ATR $> 0$, zero `NaN` or `inf`).
+  - `WB-02`: Machine Learning Universal Scale-Invariant Feature Engine calibrated at exactly 36 normalized feature dimensions.
+
+### B. ⬛ Black Box Testing (External Contract & Schema Verification)
+- **Definition**: Tests the system from the outside without knowledge of internal code, treating each endpoint as an opaque interface and evaluating HTTP status codes, headers, and payload contracts.
+- **Automated Modules**: `backend/tests/test_three_tier_paradigms.py::test_black_box_paradigm_probes`, `backend/services/request_validator.py`.
+- **Target Verification**:
+  - `BB-01`: `GET /` responds with HTTP 200 OK and system metadata.
+  - `BB-02`: `GET /metrics` delivers RFC-compliant Prometheus telemetry format.
+  - `BB-03`: `POST /api/auth/login` with missing body returns `HTTP 422 Unprocessable Entity`.
+  - `BB-04`: `POST /api/auth/login` with invalid data types returns `HTTP 422` schema error before hitting DB.
+  - `BB-05`: `GET /api/non_existent_route` returns standard `HTTP 404 Not Found`.
+  - `BB-06`: `DELETE /api/auth/login` on POST-only endpoint returns standard `HTTP 405 Method Not Allowed`.
+  - `BB-07`: `OPTIONS /api/stocks/quote/RELIANCE` returns `200/204` with CORS Access-Control headers.
+
+### C. 🔳 Grey Box Testing (Hybrid Architecture & Security Boundary Testing)
+- **Definition**: Combines black box external inputs with internal structural awareness of database states, Redis token buckets, and cryptographic role boundaries.
+- **Automated Modules**: `backend/tests/test_three_tier_paradigms.py::test_grey_box_paradigm_probes`, `backend/tests/test_cybersecurity.py`.
+- **Target Verification**:
+  - `GB-01`: SQL injection attack payload (`' OR '1'='1' --`) safely escaped by parameterized binders.
+  - `GB-02`: XSS script tags (`<script>alert(1)</script>`) strictly sanitized without code execution.
+  - `GB-03`: Unauthenticated access to `/api/admin/users` blocked with `HTTP 401/403`.
+  - `GB-04`: Negative order shares (`quantity: -99`) rejected by Pydantic boundary validation.
+  - `GB-05`: Token bucket burst exhaustion triggers anti-bruteforce throttling.
+
+---
+
+## 6. All-Request Validation & Fuzz Testing Console (Admin UI)
+
+Accessible directly within the Admin Console at `/admin/sentinel`:
+1. **HTTP Verb Selector**: Test `GET`, `POST`, `PUT`, `DELETE`, and `OPTIONS`.
+2. **Endpoint Address Bar**: Input any target path (e.g. `/api/auth/login`, `/api/paper-trades`).
+3. **One-Click Presets**:
+   - `🟢 200 OK Health`: Probes live application health contract.
+   - `🟡 422 Schema Violation`: Sends bad data types to verify Pydantic rejection.
+   - `🔴 SQL Injection Fuzz`: Tests query parameter escaping.
+   - `🟠 XSS Script Fuzz`: Tests HTML/script sanitization.
+   - `🟣 Boundary Negative Order`: Verifies numeric range constraints.
+   - `🔵 OPTIONS CORS Preflight`: Verifies cross-origin header compliance.
+4. **Live Response Inspector**: Displays status code badge, roundtrip latency in milliseconds, headers, and formatted JSON response body.
+
+---
+
+## 7. Repository Security Hygiene Audit Evidence Report
+
+An automated audit of the repository was conducted against the Security Hygiene Manifesto:
+
+| Check Category | Item Audited | Status | Evidence & Verification |
+|---|---|---|---|
+| **A. Git / Public Repo** | `.env` file | ✅ SECURE | Verified ignored by `.gitignore`. Zero `.env` files tracked in `git ls-files`. |
+| **A. Git / Public Repo** | SSH Private Keys (`.key`, `.pem`, `id_rsa`) | ✅ SECURE | Zero `.key`, `.pem`, or `id_rsa` files in git repository. Blocked in `.gitignore`. |
+| **A. Git / Public Repo** | Database dumps (`*.sql`, `*.dump`) | ✅ SECURE | Only `backend/init_db.sql` (9-line extension enabler) is tracked. Zero data dumps. |
+| **A. Git / Public Repo** | Hardcoded secrets in code | ✅ SECURE | Regex scan across `backend/` and `frontend/` found 0 hardcoded passwords or keys. |
+| **A. Git / Public Repo** | Shell history (`.bash_history`) | ✅ SECURE | Blocked in `.gitignore`. Zero history files tracked in repository. |
+| **B. Frontend** | Backend secrets in React code | ✅ SECURE | Zero database URLs or private keys in `frontend/src/`. |
+| **B. Frontend** | `localStorage` inspection | ✅ SECURE | Only caches `auth_token` (short-lived JWT) and `app-theme`. Zero plaintext credentials. |
+| **B. Frontend** | Server-side authorization | ✅ SECURE | All admin actions protected by `@router.post(..., dependencies=[Depends(require_admin)])`. |
+| **B. Frontend** | Stack trace disclosure | ✅ SECURE | Global exception handler sanitizes all backend tracebacks into safe HTTP errors. |
+| **C. Backend** | Password hashing algorithm | ✅ SECURE | Passwords hashed using bcrypt via Passlib `CryptContext(schemes=["bcrypt"])`. |
+| **C. Backend** | `DEBUG` mode in production | ✅ SECURE | `Settings.DEBUG` defaults strictly to `False`. |
+| **C. Backend** | CORS policy | ✅ SECURE | CORS strictly restricted to trusted origins (`https://stock-ai-iota-seven.vercel.app`). |
+| **C. Backend** | Parameterized queries | ✅ SECURE | Queries use SQLAlchemy ORM or `text("... :param")` parameter binding. |
+| **D. Logs** | Redaction of secrets & tokens | ✅ SECURE | `security_audit.log` sanitizes Authorization headers and sensitive parameters. |
+

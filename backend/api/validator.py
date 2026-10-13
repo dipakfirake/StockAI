@@ -46,3 +46,37 @@ async def trigger_single_test(
     """Trigger an individual targeted system or cybersecurity test."""
     res = await system_validator.run_single_test(test_id)
     return res
+
+
+@router.get("/paradigms")
+async def get_testing_paradigms_status() -> Dict[str, Any]:
+    """Get the complete Black Box, White Box, and Grey Box validation matrix."""
+    from backend.services.request_validator import request_validator
+    return await request_validator.run_all_paradigms()
+
+
+@router.post("/probe-custom")
+async def execute_custom_request_probe(
+    data: Dict[str, Any],
+    current_user: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Live interactive custom request & payload validator console."""
+    from backend.services.request_validator import request_validator
+    method = data.get("method", "GET")
+    endpoint = data.get("endpoint", "/")
+    payload = data.get("payload")
+    headers = data.get("headers")
+
+    log_security_event(
+        event_type="CUSTOM_PROBE_EXECUTED",
+        severity="INFO",
+        user_id=str(current_user.id),
+        details={"method": method, "endpoint": endpoint, "triggered_by": current_user.email},
+    )
+
+    return await request_validator.execute_custom_probe(
+        method=method,
+        endpoint=endpoint,
+        payload=payload,
+        headers=headers,
+    )

@@ -48,3 +48,19 @@ backend/logs/
 fyersApi.log
 generate_fyers_token.bat
 scratch/
+
+# Security, Keys, Credentials & Dumps (Never upload to Git)
+*.key
+*.pem
+id_rsa*
+*.pub
+*.dump
+*.sql
+!backend/init_db.sql
+*.sqlite
+*.sqlite3
+*.db
+.bash_history
+*.history
+.env*
+!.env.example
