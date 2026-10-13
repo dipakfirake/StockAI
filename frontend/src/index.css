@@ -288,6 +288,14 @@ a:hover { color: var(--color-accent-blue-hover); }
   display: flex;
   align-items: center;
   gap: 8px;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity var(--transition-fast);
+}
+
+.navbar-brand:hover {
+  opacity: 0.88;
 }
 
 .navbar-brand span { color: var(--color-accent-blue); }

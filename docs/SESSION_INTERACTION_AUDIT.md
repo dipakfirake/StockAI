@@ -856,7 +856,22 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - `python -m backend.seed_admin --help`: Confirmed CLI flags and usage.
    - `pytest backend/tests/test_auth_pro_access.py`: Passed 4/4 tests (100% green in 38.38s).
    - `npm run build`: Passed cleanly in 41.70s with 0 errors.
-**System Response**: Delivered structured breakdown comparing Server CLI execution (recommended gold standard) vs. Swagger registration (convenience route), detailing the exact copy-paste command for Oracle Cloud VM.
+---
+
+### Session Entry 32: Desktop Navbar Brand Navigation to Dashboard
+**Timestamp**: 2026-10-13 18:45:00 IST (13:15:00 UTC)
+**User Prompt**:
+  `"when click on nav bar's AI Stock then it want to redirect to dashboard."`
+**Agent Technical Actions**:
+1. **Inspection**:
+   - Located desktop brand header in `frontend/src/components/NavBar.tsx` (lines 66-69).
+   - Found that the desktop brand was rendered as an inert `<div className="navbar-brand">` without navigation routing, whereas mobile header already used `<NavLink to="/dashboard">`.
+2. **Implementation**:
+   - `frontend/src/components/NavBar.tsx`: Converted desktop `<div className="navbar-brand">` to `<NavLink to="/dashboard" className="navbar-brand" style={{ flexShrink: 0, marginRight: 20, textDecoration: 'none', cursor: 'pointer' }}>`.
+   - `frontend/src/index.css`: Enhanced `.navbar-brand` with `cursor: pointer; text-decoration: none; user-select: none; transition: opacity var(--transition-fast);` and hover state `opacity: 0.88`.
+3. **Verification**:
+   - Executed `npm run build` in `frontend/` -> TypeScript check passed, Vite bundled cleanly in 1m 25s with 0 errors.
+**System Response**: Documented navbar link behavior update, confirmed compilation passing, and pushed to `main`.
 
 
 

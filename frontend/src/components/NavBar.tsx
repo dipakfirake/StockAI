@@ -63,10 +63,10 @@ export default function NavBar() {
           DESKTOP VIEW (Screens > 768px): Dual-Row Header
          ========================================================================= */}
       <div className="navbar-desktop-row" style={{ display: 'flex', alignItems: 'center', height: '60px', padding: '0 20px', borderBottom: '1px solid var(--color-border)', width: '100%', boxSizing: 'border-box' }}>
-        <div className="navbar-brand" style={{ flexShrink: 0, marginRight: 20 }}>
+        <NavLink to="/dashboard" className="navbar-brand" style={{ flexShrink: 0, marginRight: 20, textDecoration: 'none', cursor: 'pointer' }}>
           <TrendingUp size={22} />
           AI<span>Stock</span>
-        </div>
+        </NavLink>
 
         {user && <LiveTicker />}
 
