@@ -29,7 +29,11 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
     - Refactored `PricingPage.tsx`, `SMCWatchlist.tsx`, `PaperTradingPage.tsx`: Fluid grid cards and clamped mobile padding (`clamp(16px, 4vw, 32px)`), fluid order modals.
     - Refactored `AIAssistantWidget.tsx`: Mobile-adaptive floating button (`44px` with `16px` margin) and full-screen-adaptive chat panel (`max-width: calc(100vw - 24px)`).
   - **24/7 Autonomous Sentinel Watchdog:** Created singleton background surveillance service (`backend/services/sentinel.py`) continuously inspecting DB, Redis, Celery, Broker Tokens, API Latencies, and security threats with MD5 incident deduplication and resolution. Added UI dashboard at `/admin/sentinel`.
-  - **Automated Verification:** 32 backend tests passed (8 new + 24 regression), frontend production build passed cleanly in 39.79s with 0 errors.
+  - **Production Admin Seeding & Security Hardening (`backend/seed_admin.py`, `backend/api/auth.py`, `backend/api/admin.py`):**
+    - Built enterprise admin seeding CLI (`python -m backend.seed_admin`) supporting masked prompts (`getpass`), high-entropy password generation, complexity validation, and idempotent DB upserts (`is_admin=True`, `subscription_tier="PRO"`, `pro_status="APPROVED"`).
+    - Updated `POST /api/auth/register` to explicitly record `is_admin` and `pro_status="APPROVED"` when registering `admin@stockai.com`.
+    - Added `POST /api/admin/users/{user_id}/set-admin` endpoint for super admins to promote/demote user accounts via API/Swagger.
+  - **Automated Verification:** 36 backend tests passed, frontend production build passed cleanly in 41.70s with 0 errors.
 
 ## Latest verified checks (2026-10-11)
 

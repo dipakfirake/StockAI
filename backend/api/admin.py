@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
@@ -178,3 +179,49 @@ async def revoke_pro_membership(
         "subscription_tier": "FREE",
         "pro_status": "NONE",
     }
+
+
+class AdminRoleUpdateRequest(BaseModel):
+    is_admin: bool
+
+
+@router.post("/users/{user_id}/set-admin")
+async def set_user_admin_status(
+    user_id: str,
+    payload: AdminRoleUpdateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin grants or revokes administrative privileges for a platform user."""
+    try:
+        u_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
+
+    result = await db.execute(select(User).where(User.id == u_uuid))
+    target_user = result.scalars().first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    target_user.is_admin = payload.is_admin
+    db.add(target_user)
+    await db.commit()
+
+    log_security_event(
+        event_type="ADMIN_ROLE_UPDATED",
+        severity="INFO",
+        ip_address="internal",
+        user_id=str(admin.id),
+        details={
+            "admin_email": admin.email,
+            "target_user": target_user.email,
+            "is_admin": payload.is_admin,
+        },
+    )
+
+    return {
+        "message": f"User {target_user.email} admin privileges set to {payload.is_admin}.",
+        "user_id": str(target_user.id),
+        "is_admin": target_user.is_admin,
+    }
+

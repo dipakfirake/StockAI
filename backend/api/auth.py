@@ -61,7 +61,9 @@ async def register(request: RegisterRequest, req: Request, db: AsyncSession = De
         email=request.email.lower().strip(),
         name=request.name,
         hashed_password=hash_password(request.password),
-        subscription_tier="PRO" if is_admin else "FREE"
+        is_admin=is_admin,
+        subscription_tier="PRO" if is_admin else "FREE",
+        pro_status="APPROVED" if is_admin else "NONE",
     )
     db.add(user)
     await db.flush()
