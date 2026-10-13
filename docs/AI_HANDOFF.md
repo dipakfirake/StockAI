@@ -14,12 +14,16 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-13)
 
-- **Production Bug Fixes, Pro Mode Dual-Pathway, Mobile Overhaul & 24/7 Sentinel Watchdog:**
-  - **Live Fyers Token & Prices Sync:** Identified that `.env` is confidential and untracked in git. Uploading `.env` locally does not sync to the Oracle VM at `92.4.71.210:/home/opc/StockAI/.env`. Provided single-line PowerShell `scp` command and verified `/api/settings` dynamic database token reload.
+- **Production Bug Fixes, Pro Mode Dual-Pathway, Mobile Overhaul, 24/7 Sentinel & WebSocket Resilience:**
+  - **Live Fyers Token & Prices Sync:** Identified that `.env` is confidential and untracked in git. Uploading `.env` locally does not sync to the Oracle VM at `92.4.71.210:/home/opc/StockAI/.env`. Provided single-line server pull & restart instructions and verified `/api/settings` dynamic database token reload.
+  - **WebSocket Handshake 200 Resolution & Live Price Polling Fallback:**
+    - Diagnosed root cause of `WebSocket connection to 'wss://stock-ai-iota-seven.vercel.app/ws' failed: Error during WebSocket handshake: Unexpected response code: 200`. Vercel serverless edge rewrites do not support persistent WebSockets; Vercel routes non-API paths to `/index.html` (HTTP 200), breaking the WebSocket 101 upgrade protocol.
+    - Added `isWebSocketSupportedOnHost()` utility in `frontend/src/services/websocket.ts` to detect and safely bypass WebSocket connection attempts on Vercel (`*.vercel.app`), eliminating console handshake errors and reconnection spam.
+    - Added resilient 4-second and 5-second HTTP polling fallbacks to `LiveTicker.tsx`, `Dashboard.tsx`, and `ChartPage.tsx` so index prices, active stock quotes, and live candlestick updates continuously refresh on live production without requiring WebSockets.
   - **Pro Mode Dual-Pathway Protection:** Permanently blocked direct self-upgrade `/api/auth/upgrade` with HTTP 402. Built verified payment checkout flow (`/api/subscription/checkout`), admin approval request flow (`/api/subscription/request-pro`), and complete administrative console (`/admin` and `AdminPage.tsx`).
   - **Mobile Responsiveness Overhaul:** Replaced desktop-only navbar with dual-mode responsive navbar (single row 56px with interactive slide-down menu on `< 768px`). Eliminated double-counted navbar padding, enforced `max-width: 100vw; overflow-x: hidden`, and wrapped all tables with touch-friendly `.table-container`.
   - **24/7 Autonomous Sentinel Watchdog:** Created singleton background surveillance service (`backend/services/sentinel.py`) continuously inspecting DB, Redis, Celery, Broker Tokens, API Latencies, and security threats with MD5 incident deduplication and resolution. Added UI dashboard at `/admin/sentinel`.
-  - **Automated Verification:** 32 backend tests passed (8 new + 24 regression), frontend production build passed in 53s with 0 errors.
+  - **Automated Verification:** 32 backend tests passed (8 new + 24 regression), frontend production build passed cleanly in 35.95s with 0 errors.
 
 ## Latest verified checks (2026-10-11)
 

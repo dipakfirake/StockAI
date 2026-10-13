@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, HistogramData, LineData } from 'lightweight-charts'
 import { stocksApi, aiApi } from '../services/api'
+import { isWebSocketSupportedOnHost } from '../services/websocket'
 import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
@@ -930,9 +931,47 @@ export default function ChartPage() {
     }
   }
 
-  // WebSocket for live quote updates
+  // Continuous polling fallback to update live quote and active candle every 4 seconds
   useEffect(() => {
     if (!symbol) return
+
+    const pollTimer = setInterval(async () => {
+      try {
+        const res = await stocksApi.getQuote(symbol)
+        if (res.data && res.data.price > 0) {
+          const newPrice = Number(res.data.price)
+          setQuote((prev: any) => prev ? {
+            ...prev,
+            price: newPrice,
+            change: res.data.change !== undefined ? res.data.change : prev.change,
+            change_pct: res.data.change_pct !== undefined ? res.data.change_pct : prev.change_pct,
+          } : res.data)
+
+          // Dynamically update the latest live candle in the chart in real-time
+          if (candleSeriesRef.current && lastCandleRef.current) {
+            const currentLast = lastCandleRef.current
+            const updatedCandle: CandlestickData = {
+              time: currentLast.time,
+              open: currentLast.open,
+              high: Math.max(Number(currentLast.high), newPrice),
+              low: Math.min(Number(currentLast.low), newPrice),
+              close: newPrice,
+            }
+            lastCandleRef.current = updatedCandle
+            try {
+              candleSeriesRef.current.update(updatedCandle)
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }, 4000)
+
+    return () => clearInterval(pollTimer)
+  }, [symbol])
+
+  // WebSocket for live quote updates (when supported by hosting proxy)
+  useEffect(() => {
+    if (!symbol || !isWebSocketSupportedOnHost()) return
 
     const token = localStorage.getItem('auth_token')
     if (!token) return

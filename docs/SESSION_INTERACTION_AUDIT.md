@@ -779,6 +779,29 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - Frontend production build (`npm run build`) -> **Exit code 0 (Clean build, 0 errors)**.
 **System Response**: Documented all 4 solutions with verification evidence, operational commands, and updated handoff documentation.
 
+---
+
+### Session Entry 29: Resolution of WebSocket Handshake 200 Error on Vercel & Real-Time HTTP Polling Fallbacks
+**Timestamp**: 2026-10-13 16:35:00 IST (11:05:00 UTC)
+**User Prompt**:
+  `"index-BcDj5mMd.js:375 WebSocket connection to 'wss://stock-ai-iota-seven.vercel.app/ws?token=...' failed: Error during WebSocket handshake: Unexpected response code: 200"`
+**Agent Technical Actions**:
+1. **Root Cause Analysis**:
+   - Vercel Serverless Edge rewrites (`destination: http://92.4.71.210:8000/...`) do NOT support persistent WebSocket connections (`ws://` / `wss://`).
+   - When the frontend client attempted `wss://stock-ai-iota-seven.vercel.app/ws?token=...`, Vercel routed the non-API request to `index.html` and returned `HTTP 200 OK` instead of `HTTP 101 Switching Protocols`.
+   - The browser's native WebSocket engine raised `Unexpected response code: 200` and retried every few seconds, generating console error spam.
+   - Crucially, components (`LiveTicker`, `Dashboard`, `ChartPage`) previously relied on WebSockets for live price updates after initial mount. When WebSockets failed on Vercel, prices stayed static.
+2. **Implementation & Fixes**:
+   - Added `isWebSocketSupportedOnHost()` utility in `frontend/src/services/websocket.ts` that detects Vercel hosting domains (`*.vercel.app`) and cleanly suppresses futile WebSocket attempts.
+   - Updated `AlertWebSocket.connect()` to return early on unsupported proxies and capped retry attempts to 2.
+   - Added 4-second continuous polling fallback in `frontend/src/components/LiveTicker.tsx` using `marketApi.getIndices()`.
+   - Added 5-second continuous polling fallback in `frontend/src/pages/Dashboard.tsx` to refresh indices dynamically.
+   - Added 4-second continuous polling fallback in `frontend/src/pages/ChartPage.tsx` using `stocksApi.getQuote(symbol)` to dynamically update live quote prices and candlestick charts in real time.
+3. **Verification**:
+   - Executed `npm run build` in `frontend/` -> Passed cleanly in 35.95s with 0 errors.
+   - Verified clean git diff across all 4 modified files.
+**System Response**: Delivered complete explanation of Vercel WebSocket architectural limitation, confirmed resolution with polling fallback, and provided exact instructions for server and git synchronization.
+
 
 
 

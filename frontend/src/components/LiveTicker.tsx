@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { marketApi } from '../services/api'
+import { isWebSocketSupportedOnHost } from '../services/websocket'
 import { NavLink } from 'react-router-dom'
 
 interface IndexData {
@@ -37,10 +38,11 @@ export default function LiveTicker() {
     }
 
     fetchIndices()
-    // We fetch once to get the initial names/symbols, then let WebSocket update prices.
+    // Automatically poll every 4 seconds to guarantee live prices update even when cloud proxies block WebSockets
+    const pollInterval = setInterval(fetchIndices, 4000)
 
     const token = localStorage.getItem('auth_token')
-    if (!token) return
+    if (!token || !isWebSocketSupportedOnHost()) return () => clearInterval(pollInterval)
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     let ws: WebSocket | null = null
@@ -57,16 +59,7 @@ export default function LiveTicker() {
 
       ws.onerror = () => {}
 
-      ws.onclose = () => {
-        setTimeout(() => {
-          // Re-trigger the effect by forcing a small state update if we wanted, 
-          // or just re-establish the ws here. But since we are in useEffect, 
-          // the easiest way to reconnect without dependency loops is to just reload or re-call connect.
-          // Since this is a simple ticker, let's just let the user refresh if it completely dies, 
-          // or we can implement a basic reconnect inside the closure.
-        }, 3000)
-      }
-
+      ws.onclose = () => {}
 
       ws.onmessage = (event) => {
         try {
@@ -101,6 +94,7 @@ export default function LiveTicker() {
     }
 
     return () => {
+      clearInterval(pollInterval)
       if (ws) {
         if (ws.readyState === WebSocket.OPEN) {
           ws.close()

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { marketApi, aiApi } from '../services/api'
+import { isWebSocketSupportedOnHost } from '../services/websocket'
 import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, Sparkles, RefreshCw, Target, ArrowRight } from 'lucide-react'
 import AnimatedNumber from '../components/AnimatedNumber'
 
@@ -155,9 +156,24 @@ export default function Dashboard() {
     }
   }
 
-  // Real-time tick updates for indices via WebSocket
+  // Continuous polling fallback to guarantee live index prices update without WebSocket dependency
   useEffect(() => {
-    if (indices.length === 0) return
+    const pollTimer = setInterval(async () => {
+      try {
+        const res = await marketApi.getIndices()
+        if (res.data?.indices) {
+          setIndices(res.data.indices)
+          setLastUpdated(new Date())
+        }
+      } catch (_) {}
+    }, 5000)
+
+    return () => clearInterval(pollTimer)
+  }, [])
+
+  // Real-time tick updates for indices via WebSocket (when supported)
+  useEffect(() => {
+    if (indices.length === 0 || !isWebSocketSupportedOnHost()) return
 
     const token = localStorage.getItem('auth_token')
     if (!token) return
