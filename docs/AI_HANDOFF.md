@@ -12,7 +12,23 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-10-13)
+## Latest verified checks (2026-10-14)
+
+- **1-Second Real-Time Price Update Pipeline & Docker Frontend Optimization:**
+  - **Identified Root Causes of 3-5s Latency:**
+    1. Frontend polling intervals were hardcoded to 4000ms (`LiveTicker.tsx`, `ChartPage.tsx`) and 5000ms (`Dashboard.tsx`).
+    2. Backend WebSocket poller loop in `backend/api/websocket.py` had `await asyncio.sleep(3.0)`.
+    3. Backend Redis cache TTL was 60s for individual quotes (`CACHE_TTL_QUOTE = 60`) and 15s for index quotes (`CACHE_TTL_INDEX_QUOTE = 15`), causing repeated queries to receive stale cached data.
+  - **Latency Resolution & Throughput Upgrade:**
+    1. Lowered `backend/core/config.py` Redis TTLs to 1s (`CACHE_TTL_QUOTE = 1`, `CACHE_TTL_INDEX_QUOTE = 1`, `CACHE_TTL_INTRADAY = 5`), ensuring sub-second freshness without stale cache hits.
+    2. Lowered `backend/api/websocket.py` tick broadcast frequency to 1.0 second (`await asyncio.sleep(1.0)`).
+    3. Lowered polling fallbacks in `Dashboard.tsx`, `LiveTicker.tsx`, and `ChartPage.tsx` to 1000ms (1 second).
+    4. Lowered `WatchlistSidebar.tsx` refresh from 30s to 2000ms when open.
+  - **Docker Frontend Optimization:**
+    - Diagnosed `stockfrontend` 7-minute startup freeze on Windows due to `npm install` running over NTFS volume mount `./frontend:/app`. Added anonymous volume `/app/node_modules` and condition `[ -d node_modules/vite ] || npm install` in `docker-compose.yml`.
+  - **Verification:** `npm run build` passed cleanly in 1m 35s. Pytest backend test suite passed 20/20 tests in 39.57s. Pushed to `origin/main` (commit `4e2c49d`).
+
+## Verified checks (2026-10-13)
 
 - **ML/DL Universal Models, FnO Black-Scholes Greeks, and Swing Screener Quantitative Audit:**
   - **Tri-Model Ensemble Activation:** Updated `backend/api/ai_engine.py` (`get_ai_score` and `scan_stocks`) and `backend/services/screener.py` (`_analyze_symbol`) to explicitly pass `candles=candles` into `ai_engine_service.score()`, activating the full 3-model deep learning pipeline: LightGBM (tabular + SHAP), BiLSTM with Multi-Head Self-Attention, and Temporal Transformer.

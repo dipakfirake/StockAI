@@ -1010,6 +1010,30 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - Frontend `npm run build`: Production bundle built clean with 0 errors.
 **System Response**: Delivered full quantitative audit report covering all ML/DL models, FnO Black-Scholes math, Swing Screener setup formulas, live runtime evidence, and quantitative justification to safely drop the retraining plan. Concluded with `<!-- GOAL_COMPLETE -->`.
 
+---
+
+### Session Entry 37: 1-Second Price Update Acceleration & Docker Frontend Optimization
+**Timestamp**: 2026-10-14 12:25:00 IST (06:55:00 UTC)
+**User Prompt**:
+  `"why the prcies on dashboard and searched stocks not updating every second it takes 3-5 seconds approx to update check and handle that"`
+**Agent Technical Actions**:
+1. **Diagnosis of Price Update Latency (3-5s Root Causes)**:
+   - **Frontend Polling Delays**: Found hardcoded polling intervals of 4000ms in `LiveTicker.tsx` and `ChartPage.tsx`, and 5000ms in `Dashboard.tsx`.
+   - **Backend WebSocket Sleep**: In `backend/api/websocket.py`, the market data poller loop had `await asyncio.sleep(3.0)`, capping tick broadcasts to once every 3 seconds.
+   - **Redis Cache Stale Holds**: In `backend/core/config.py`, quotes had `CACHE_TTL_QUOTE = 60` and `CACHE_TTL_INDEX_QUOTE = 15`. Repeated requests within 15-60s were returning stale cached prices.
+2. **Implementation of 1-Second Real-Time Pipeline**:
+   - Lowered `CACHE_TTL_QUOTE` and `CACHE_TTL_INDEX_QUOTE` to **1 second** in `backend/core/config.py`.
+   - Lowered WebSocket tick poller sleep to **1.0 second** (`await asyncio.sleep(1.0)`) in `backend/api/websocket.py`.
+   - Updated polling fallbacks in `frontend/src/pages/Dashboard.tsx`, `frontend/src/components/LiveTicker.tsx`, and `frontend/src/pages/ChartPage.tsx` to **1000ms** (1.0 second).
+   - Updated `WatchlistSidebar.tsx` active refresh to **2000ms**.
+3. **Docker Frontend Optimization**:
+   - Diagnosed 7-minute startup freeze in `docker-compose.yml` on Windows due to `npm install` over NTFS volume `./frontend:/app`. Added anonymous volume `/app/node_modules` and condition `[ -d node_modules/vite ] || npm install`.
+4. **Verification Evidence**:
+   - Frontend production build (`npm run build`): Passed cleanly in 1m 35s with 0 errors.
+   - Backend automated tests (`pytest backend/tests/test_options_engine.py backend/tests/test_signals.py backend/tests/test_indicators.py`): 20/20 passed (100% green in 39.57s).
+   - Committed and pushed to `origin/main` (commit `4e2c49d`).
+**System Response**: Delivered technical explanation of the 3-5s delay causes, documented the 1-second pipeline upgrade across frontend and backend, and provided verification evidence. Concluded with `<!-- GOAL_COMPLETE -->`.
+
 
 
 
