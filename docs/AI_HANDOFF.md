@@ -14,6 +14,19 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-14)
 
+- **Enterprise Admin Seeding, Security Architecture & Currency Standardisation:**
+  - **Admin Seeding Security Architecture:**
+    - Audited both the Swagger UI route and the internal container CLI route for administrator privilege elevation.
+    - Verified that `POST /api/auth/register` automatically flags `admin@stockai.com` as `is_admin=True`, `subscription_tier="PRO"`, and `pro_status="APPROVED"` while enforcing strict password complexity via `validate_password_strength`.
+    - Confirmed production-grade CLI utility `backend/seed_admin.py` allowing zero-network credential injection directly inside the Docker container via:
+      `sudo docker compose exec backend python -m backend.seed_admin --email admin@stockai.com --password "YourStrongPassword!123"`
+    - Ran automated security and auth suite: `backend/tests/test_auth_pro_access.py` (4/4 passed in 98s).
+  - **Indian Currency Number Formatting Standardisation:**
+    - Standardized price and currency displays using `formatINR` (`Intl.NumberFormat('en-IN')`) across `LiveTicker.tsx`, `WatchlistSidebar.tsx`, `SMCWatchlist.tsx`, `PaperTradingPage.tsx`, and `ChartPage.tsx` for proper Lakhs and Crores grouping (e.g., `₹1,23,456.00`).
+  - **TypeScript Build & Lint Verification:**
+    - Fixed missing `useLocalStorage` import and typed boolean callbacks in `ChartPage.tsx`.
+    - Ran full production frontend build: `tsc && vite build` passed cleanly with exit code 0.
+
 - **1-Second Real-Time Price Update Pipeline & Docker Frontend Optimization:**
   - **Identified Root Causes of 3-5s Latency:**
     1. Frontend polling intervals were hardcoded to 4000ms (`LiveTicker.tsx`, `ChartPage.tsx`) and 5000ms (`Dashboard.tsx`).

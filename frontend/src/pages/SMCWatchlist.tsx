@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Target, Activity, ShieldAlert, Zap, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react'
 import api from '../services/api'
+import { formatINR } from '../utils/formatters'
 
 // TradePlan removed, replaced by multi-timeframe POI approach
 
@@ -83,7 +84,7 @@ export default function SMCWatchlist() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: '1.3rem' }}>{symbol.replace('.NS', '')}</h2>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>LTP: ₹{data.last_price}</span>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>LTP: {formatINR(data.last_price)}</span>
                 </div>
                 <span className="badge" style={{ backgroundColor: 'rgba(139, 92, 246, 0.2)', color: '#a78bfa', padding: '4px 10px' }}>
                   <Activity size={12} style={{ marginRight: 4 }} /> SMC Target
@@ -121,7 +122,7 @@ export default function SMCWatchlist() {
 
                     {/* Zone + Gap % */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: 6 }}>
-                      <span>Zone: <strong>₹{fvg.bottom} – ₹{fvg.top}</strong></span>
+                      <span>Zone: <strong>{formatINR(fvg.bottom)} – {formatINR(fvg.top)}</strong></span>
                       <span style={{ color: 'var(--color-text-muted)' }}>Gap: {fvg.gap_pct}%</span>
                     </div>
 

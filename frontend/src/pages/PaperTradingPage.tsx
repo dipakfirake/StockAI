@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { paperTradingApi, stocksApi } from '../services/api'
 import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
+import { formatINR, formatNumber2Dec } from '../utils/formatters'
 
 export default function PaperTradingPage() {
   const [trades, setTrades] = useState<any[]>([])
@@ -92,25 +93,25 @@ export default function PaperTradingPage() {
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Total Realized P&L</div>
             <div style={{ fontSize: 28, fontWeight: 500 }} className={totalPnL >= 0 ? 'positive' : 'negative'}>
-              {totalPnL >= 0 ? '+' : ''}₹{totalPnL.toFixed(2)}
+              {totalPnL >= 0 ? '+' : ''}{formatINR(totalPnL)}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Day's Open P&L</div>
             <div style={{ fontSize: 28, fontWeight: 500 }} className={openPnL >= 0 ? 'positive' : 'negative'}>
-              {openPnL >= 0 ? '+' : ''}₹{openPnL.toFixed(2)}
+              {openPnL >= 0 ? '+' : ''}{formatINR(openPnL)}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Invested</div>
             <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--color-text-primary)', marginTop: 8 }}>
-              ₹{totalInvested.toFixed(2)}
+              {formatINR(totalInvested)}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Current Value</div>
             <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--color-text-primary)', marginTop: 8 }}>
-              ₹{currentOpenValue.toFixed(2)}
+              {formatINR(currentOpenValue)}
             </div>
           </div>
         </div>
@@ -162,11 +163,11 @@ export default function PaperTradingPage() {
                   <td><span className="badge badge-secondary">{t.product_type}</span></td>
                   <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
                   <td className={t.direction === 'BUY' ? 'positive' : 'negative'}>{t.direction === 'BUY' ? t.quantity : `-${t.quantity}`}</td>
-                  <td className="mono">{parseFloat(t.entry_price).toFixed(2)}</td>
-                  <td className="mono">{t.current_price ? t.current_price.toFixed(2) : '—'}</td>
-                  <td className="mono">{t.current_price ? (t.current_price * t.quantity).toFixed(2) : '—'}</td>
+                  <td className="mono">{formatNumber2Dec(t.entry_price)}</td>
+                  <td className="mono">{t.current_price ? formatNumber2Dec(t.current_price) : '—'}</td>
+                  <td className="mono">{t.current_price ? formatNumber2Dec(t.current_price * t.quantity) : '—'}</td>
                   <td className={t.unrealized_pnl >= 0 ? 'positive mono' : 'negative mono'} style={{ fontWeight: 500 }}>
-                    {t.unrealized_pnl !== undefined ? `${t.unrealized_pnl >= 0 ? '+' : ''}${t.unrealized_pnl.toFixed(2)}` : '—'}
+                    {t.unrealized_pnl !== undefined ? `${t.unrealized_pnl >= 0 ? '+' : ''}${formatNumber2Dec(t.unrealized_pnl)}` : '—'}
                   </td>
                   <td>
                     <button className="btn btn-secondary" style={{ padding: '4px 12px', fontSize: 12, border: '1px solid var(--color-border)' }} onClick={() => handleClose(t.trade_id)}>
@@ -225,10 +226,10 @@ export default function PaperTradingPage() {
                   <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
                   <td><span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction}</span></td>
                   <td>{t.quantity}</td>
-                  <td className="mono">{t.entry_price ? parseFloat(t.entry_price).toFixed(2) : '—'}</td>
-                  <td className="mono">{t.exit_price ? parseFloat(t.exit_price).toFixed(2) : '—'}</td>
+                  <td className="mono">{t.entry_price ? formatNumber2Dec(t.entry_price) : '—'}</td>
+                  <td className="mono">{t.exit_price ? formatNumber2Dec(t.exit_price) : '—'}</td>
                   <td className={t.realized_pnl >= 0 ? 'positive mono' : 'negative mono'} style={{ fontWeight: 600 }}>
-                    {t.realized_pnl !== undefined ? `${t.realized_pnl >= 0 ? '+' : ''}${t.realized_pnl.toFixed(2)}` : '—'}
+                    {t.realized_pnl !== undefined ? `${t.realized_pnl >= 0 ? '+' : ''}${formatNumber2Dec(t.realized_pnl)}` : '—'}
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{t.closed_at ? new Date(t.closed_at).toLocaleDateString() : '—'}</td>
                 </tr>
@@ -321,8 +322,8 @@ export default function PaperTradingPage() {
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--color-border-light)' }}>
                   <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                    <div>Margin Required: <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>₹{orderValue ? orderValue.toFixed(2) : '0.00'}</span></div>
-                    {quote?.price && <div>LTP: <span className="mono">₹{quote.price.toFixed(2)}</span></div>}
+                    <div>Margin Required: <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{formatINR(orderValue || 0)}</span></div>
+                    {quote?.price && <div>LTP: <span className="mono">{formatINR(quote.price)}</span></div>}
                   </div>
                   
                   <button type="submit" disabled={submitting} className={`btn`} style={{ 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { marketApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
 import { NavLink } from 'react-router-dom'
+import { formatNumber2Dec } from '../utils/formatters'
 
 interface IndexData {
   name: string
@@ -131,7 +132,7 @@ export default function LiveTicker() {
         lineHeight: 1.2
       }}>
         <span style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', fontWeight: 700, letterSpacing: '0.5px' }}>{data.name.toUpperCase()}</span>
-        <span className="mono" style={{ color: color, fontSize: '0.85rem', fontWeight: 600 }}>{data.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+        <span className="mono" style={{ color: color, fontSize: '0.85rem', fontWeight: 600 }}>{formatNumber2Dec(data.price)}</span>
         <span className="mono" style={{ color: color, fontSize: '0.7rem' }}>
           {change > 0 ? '+' : ''}{change.toFixed(2)} ({changePercent.toFixed(2)}%)
         </span>

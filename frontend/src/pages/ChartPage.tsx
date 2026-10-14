@@ -9,8 +9,9 @@ import { useTheme } from '../ThemeContext'
 import { toast } from '../components/Toast'
 import StockSearchBox from '../components/StockSearchBox'
 import ChartReplayControls from '../components/ChartReplayControls'
-import { useLocalStorage } from '../hooks/useLocalStorage'
 import { TrendlinePrimitive, Point } from '../components/DrawingEngine'
+import { formatINR, formatNumber2Dec } from '../utils/formatters'
+import { useLocalStorage } from '../hooks/useLocalStorage'
 
 const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '1d', '1w', '1mo']
 const TIMEFRAME_LABELS: Record<string, string> = {
@@ -197,9 +198,9 @@ export default function ChartPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       switch (e.key.toLowerCase()) {
-        case 'i': setShowIndicators(v => !v); toast.info('Indicators toggled'); break;
-        case 'e': setShowEvents(v => !v); toast.info('Events toggled'); break;
-        case 'v': setShowVolumeProfile(v => !v); toast.info('Volume Profile toggled'); break;
+        case 'i': setShowIndicators((v: boolean) => !v); toast.info('Indicators toggled'); break;
+        case 'e': setShowEvents((v: boolean) => !v); toast.info('Events toggled'); break;
+        case 'v': setShowVolumeProfile((v: boolean) => !v); toast.info('Volume Profile toggled'); break;
         case 'escape': setSelectedPattern(null); setIsDrawing(false); break;
       }
     }
@@ -1397,7 +1398,7 @@ export default function ChartPage() {
           <div>
             <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{symbol.replace('.NS', '')}</div>
             <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-              ₹{quote.price?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              {formatINR(quote.price)}
               {quote.change !== undefined && (
                 <span style={{ fontSize: 16, marginLeft: 8, color: quote.change >= 0 ? '#10b981' : '#ef4444' }}>
                   {quote.change > 0 ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_pct?.toFixed(2)}%)
@@ -1406,8 +1407,8 @@ export default function ChartPage() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W High</div><div className="mono">₹{quote['52w_high'] ? Number(quote['52w_high']).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}</div></div>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W Low</div><div className="mono">₹{quote['52w_low'] ? Number(quote['52w_low']).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W High</div><div className="mono">{formatINR(quote['52w_high'])}</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W Low</div><div className="mono">{formatINR(quote['52w_low'])}</div></div>
             <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Volume</div><div className="mono">{quote.volume ? Number(quote.volume).toLocaleString('en-IN') : '—'}</div></div>
             <div>
               <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Market Cap</div>
@@ -1568,15 +1569,15 @@ export default function ChartPage() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 16 }}>
                 <div style={{ background: 'var(--color-bg-secondary)', padding: '10px', borderRadius: 8 }}>
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Entry</div>
-                  <div className="mono" style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{liveSetup.entry.toFixed(2)}</div>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{formatINR(liveSetup.entry)}</div>
                 </div>
                 <div style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '10px', borderRadius: 8, border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                   <div style={{ fontSize: 11, color: 'var(--color-bearish)' }}>Stop Loss</div>
-                  <div className="mono" style={{ fontWeight: 600, color: 'var(--color-bearish)' }}>₹{liveSetup.sl.toFixed(2)}</div>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--color-bearish)' }}>{formatINR(liveSetup.sl)}</div>
                 </div>
                 <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '10px', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                   <div style={{ fontSize: 11, color: 'var(--color-bullish)' }}>Target</div>
-                  <div className="mono" style={{ fontWeight: 600, color: 'var(--color-bullish)' }}>₹{liveSetup.target.toFixed(2)}</div>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--color-bullish)' }}>{formatINR(liveSetup.target)}</div>
                 </div>
               </div>
               <button
@@ -1593,7 +1594,7 @@ export default function ChartPage() {
                       stop_loss: liveSetup.sl,
                       target_price: liveSetup.target,
                     })
-                    toast.success(`Paper ${liveSetup.action} order placed!`, `${symbol} @ ₹${liveSetup.entry.toFixed(2)} | SL: ₹${liveSetup.sl.toFixed(2)} | Target: ₹${liveSetup.target.toFixed(2)}`)
+                    toast.success(`Paper ${liveSetup.action} order placed!`, `${symbol} @ ${formatINR(liveSetup.entry)} | SL: ${formatINR(liveSetup.sl)} | Target: ${formatINR(liveSetup.target)}`)
                   } catch (err: any) {
                     toast.error('Trade failed', err?.response?.data?.detail || 'Could not place paper trade. Check positions page.')
                   }

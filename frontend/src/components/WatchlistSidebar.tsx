@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { X, TrendingUp, TrendingDown, Star, Trash2, Plus } from 'lucide-react';
 import { watchlistApi } from '../services/api';
 import StockSearchBox from './StockSearchBox';
+import { formatINR } from '../utils/formatters';
 import './WatchlistSidebar.css';
 
 interface WatchlistSidebarProps {
@@ -118,7 +119,7 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
                   >
                     <div className="wl-left">
                       <span className="wl-symbol">{q.symbol.replace('.NS', '')}</span>
-                      <span className="wl-price">₹{q.price?.toFixed(2) || '0.00'}</span>
+                      <span className="wl-price">{formatINR(q.price)}</span>
                     </div>
                     <div className={`wl-right ${isUp ? 'text-green' : 'text-red'}`}>
                       {isUp ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
