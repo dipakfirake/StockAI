@@ -22,10 +22,10 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
-    CACHE_TTL_QUOTE: int = 60          # 1 minute
+    CACHE_TTL_QUOTE: int = 1           # 1 second for ultra-responsive live price updates
     CACHE_TTL_DAILY_CANDLES: int = 3600 # 1 hour
-    CACHE_TTL_INTRADAY: int = 60       # 1 minute
-    CACHE_TTL_INDEX_QUOTE: int = 15    # 15 seconds; indices change faster than reference data
+    CACHE_TTL_INTRADAY: int = 5        # 5 seconds
+    CACHE_TTL_INDEX_QUOTE: int = 1     # 1 second for live index quotes
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"

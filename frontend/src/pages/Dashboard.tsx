@@ -156,7 +156,7 @@ export default function Dashboard() {
     }
   }
 
-  // Continuous polling fallback to guarantee live index prices update without WebSocket dependency
+  // Continuous polling fallback to guarantee live index prices update every second
   useEffect(() => {
     const pollTimer = setInterval(async () => {
       try {
@@ -166,7 +166,7 @@ export default function Dashboard() {
           setLastUpdated(new Date())
         }
       } catch (_) {}
-    }, 5000)
+    }, 1000)
 
     return () => clearInterval(pollTimer)
   }, [])

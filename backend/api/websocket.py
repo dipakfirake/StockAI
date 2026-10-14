@@ -94,8 +94,8 @@ async def poll_market_data():
         except Exception as e:
             logger.error(f"Error in real-time market data streaming poller: {e}")
         
-        # Real-time tick broadcast frequency: 3.0 seconds (protects against Cloudflare WAF Error 1015)
-        await asyncio.sleep(3.0)
+        # Real-time tick broadcast frequency: 1.0 second for true per-second price updates
+        await asyncio.sleep(1.0)
 
 
 async def broadcast_alert(alert_payload: dict, user_id: str | None = None):

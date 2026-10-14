@@ -38,8 +38,8 @@ export default function LiveTicker() {
     }
 
     fetchIndices()
-    // Automatically poll every 4 seconds to guarantee live prices update even when cloud proxies block WebSockets
-    const pollInterval = setInterval(fetchIndices, 4000)
+    // Automatically poll every 1 second to guarantee real-time price updates across all devices
+    const pollInterval = setInterval(fetchIndices, 1000)
 
     const token = localStorage.getItem('auth_token')
     if (!token || !isWebSocketSupportedOnHost()) return () => clearInterval(pollInterval)

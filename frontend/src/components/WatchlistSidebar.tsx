@@ -32,7 +32,7 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
     if (!isOpen) return;
     setLoading(true);
     fetchWatchlist();
-    const interval = setInterval(fetchWatchlist, 30000); // 30s refresh
+    const interval = setInterval(fetchWatchlist, 2000); // 2s active refresh
     return () => clearInterval(interval);
   }, [isOpen]);
 

@@ -931,7 +931,7 @@ export default function ChartPage() {
     }
   }
 
-  // Continuous polling fallback to update live quote and active candle every 4 seconds
+  // Continuous polling fallback to update live quote and active candle every 1 second
   useEffect(() => {
     if (!symbol) return
 
@@ -964,7 +964,7 @@ export default function ChartPage() {
           }
         }
       } catch (_) {}
-    }, 4000)
+    }, 1000)
 
     return () => clearInterval(pollTimer)
   }, [symbol])
