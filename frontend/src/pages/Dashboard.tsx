@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { marketApi, aiApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
 import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, Sparkles, RefreshCw, Target, ArrowRight } from 'lucide-react'
-import AnimatedNumber from '../components/AnimatedNumber'
 
 interface Index {
   name: string
@@ -394,11 +393,11 @@ export default function Dashboard() {
                   <span className={`live-dot ${regime?.is_market_open ? '' : 'closed'}`} style={{ marginLeft: 'auto' }} />
                 </div>
                 <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                  <AnimatedNumber value={idx.price} decimals={2} duration={600} />
+                  ₹{(idx.price ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 <div style={{ fontSize: 14, marginTop: 4, color, fontWeight: 600 }}>
-                  {isUp ? '▲' : '▼'} <AnimatedNumber value={Math.abs(idx.change_pct)} decimals={2} suffix="%" duration={700} />
-                  &nbsp;(<AnimatedNumber value={idx.change} decimals={2} prefix={idx.change >= 0 ? '+' : ''} duration={700} />)
+                  {isUp ? '▲' : '▼'} {Math.abs(idx.change_pct ?? 0).toFixed(2)}%
+                  &nbsp;({(idx.change ?? 0) >= 0 ? '+' : ''}{(idx.change ?? 0).toFixed(2)})
                 </div>
                 <div style={{ marginTop: 7, fontSize: 10, color: 'var(--color-text-muted)' }} title={idx.source}>
                   {idx.data_status === 'exchange_feed' || idx.data_status === 'realtime' ? 'Exchange feed' : 'Provider fallback'}
@@ -435,7 +434,7 @@ export default function Dashboard() {
               <div>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>India VIX (Fear Gauge)</div>
                 <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-mono)', color: vixColor }}>
-                  <AnimatedNumber value={vix.vix} decimals={2} duration={900} />
+                  {(vix.vix ?? 0).toFixed(2)}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>{vix.interpretation}</div>
               </div>
