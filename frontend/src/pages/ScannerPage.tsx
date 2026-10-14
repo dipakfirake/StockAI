@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { stocksApi } from '../services/api'
 import api from '../services/api'
 import { Search, Filter, Activity, BarChart2, Plus, Trash2 } from 'lucide-react'
@@ -29,6 +29,7 @@ const SECTORS = [
 ]
 
 export default function ScannerPage() {
+  const navigate = useNavigate()
   // Persisted filter state — restores on page revisit
   const [selectedRule, setSelectedRule] = useLocalStorage('scanner_rule', SCANNER_RULES[0].id)
   const [selectedSector, setSelectedSector] = useLocalStorage('scanner_sector', SECTORS[0].id)
@@ -311,9 +312,13 @@ export default function ScannerPage() {
                       <td style={{ padding: '12px 16px' }}><span className="badge badge-watch">{scanMode === 'basic' ? r.rule : 'CUSTOM'}</span></td>
                       <td style={{ padding: '12px 16px', fontSize: 13, color: 'var(--color-text-muted)' }}>{r.detail}</td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <a href={`/chart/${r.symbol}`} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 12px' }}>
+                        <button 
+                          onClick={() => navigate('/chart', { state: { symbol: r.symbol } })} 
+                          className="btn btn-secondary" 
+                          style={{ fontSize: 12, padding: '4px 12px', cursor: 'pointer' }}
+                        >
                           View Chart
-                        </a>
+                        </button>
                       </td>
                     </tr>
                   ))}

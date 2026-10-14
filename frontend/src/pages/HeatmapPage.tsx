@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { marketApi } from '../services/api'
 import { Activity } from 'lucide-react'
 
 export default function HeatmapPage() {
+  const navigate = useNavigate()
   const [heatmap, setHeatmap] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -64,9 +66,11 @@ export default function HeatmapPage() {
               }
 
               return (
-                <a 
+                <div 
                   key={stock.symbol}
-                  href={`/chart/${stock.symbol}`}
+                  onClick={() => navigate('/chart', { state: { symbol: stock.symbol } })}
+                  role="button"
+                  tabIndex={0}
                   style={{
                     flexGrow,
                     flexBasis,
@@ -77,7 +81,7 @@ export default function HeatmapPage() {
                     flexDirection: 'column',
                     justifyContent: 'center',
                     alignItems: 'center',
-                    textDecoration: 'none',
+                    cursor: 'pointer',
                     color: '#fff',
                     transition: 'transform 0.2s, opacity 0.2s',
                     minWidth: 80,
@@ -93,7 +97,7 @@ export default function HeatmapPage() {
                   <div style={{ fontSize: 'clamp(10px, 1vw, 13px)', opacity: 0.9 }}>
                     {stock.change_pct > 0 ? '+' : ''}{stock.change_pct.toFixed(2)}%
                   </div>
-                </a>
+                </div>
               )
             })}
           </div>

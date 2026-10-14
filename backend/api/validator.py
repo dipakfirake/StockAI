@@ -12,13 +12,17 @@ router = APIRouter(prefix="/validator", tags=["System Validator & Cybersecurity 
 
 
 @router.get("/status")
-async def get_validator_status() -> Dict[str, Any]:
+async def get_validator_status(
+    current_user: User = Depends(require_admin),
+) -> Dict[str, Any]:
     """Get the most recent system validation & cybersecurity audit report."""
     return system_validator.get_latest_report()
 
 
 @router.get("/history")
-async def get_validator_history() -> List[Dict[str, Any]]:
+async def get_validator_history(
+    current_user: User = Depends(require_admin),
+) -> List[Dict[str, Any]]:
     """Get chronological history of the last 20 validation suite runs."""
     return system_validator.get_history()
 
@@ -49,7 +53,9 @@ async def trigger_single_test(
 
 
 @router.get("/paradigms")
-async def get_testing_paradigms_status() -> Dict[str, Any]:
+async def get_testing_paradigms_status(
+    current_user: User = Depends(require_admin),
+) -> Dict[str, Any]:
     """Get the complete Black Box, White Box, and Grey Box validation matrix."""
     from backend.services.request_validator import request_validator
     return await request_validator.run_all_paradigms()

@@ -5,6 +5,7 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from backend.main import app
 from backend.services.system_validator import system_validator
+from backend.models.user import User
 
 
 @pytest.mark.asyncio
@@ -33,20 +34,38 @@ async def test_system_validator_single_tests():
 
 @pytest.mark.asyncio
 async def test_validator_api_public_and_protected_routes():
-    """Verify public status endpoint and admin authentication guard."""
+    """Verify validator routes are guarded by admin authentication."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Public status
+        # Unauthenticated access must be rejected with 401 Unauthorized
         res_status = await client.get("/api/validator/status")
-        assert res_status.status_code == 200
-        data = res_status.json()
-        assert "overall_status" in data
+        assert res_status.status_code == 401
 
-        # Public history
         res_hist = await client.get("/api/validator/history")
-        assert res_hist.status_code == 200
-        assert isinstance(res_hist.json(), list)
+        assert res_hist.status_code == 401
 
-        # Protected run endpoint (without auth token should return 401/403)
         res_unauth = await client.post("/api/validator/run")
         assert res_unauth.status_code in (401, 403)
+
+        # Authenticated Admin access via dependency override
+        admin_mock = User(
+            email="admin_auditor@test.com",
+            name="Admin Auditor",
+            hashed_password="mock_hashed_pw",
+            is_admin=True,
+            subscription_tier="PRO",
+            is_active=True,
+        )
+        from backend.api.admin import require_admin
+        app.dependency_overrides[require_admin] = lambda: admin_mock
+        try:
+            res_admin_status = await client.get("/api/validator/status")
+            assert res_admin_status.status_code == 200
+            data = res_admin_status.json()
+            assert "overall_status" in data
+
+            res_admin_hist = await client.get("/api/validator/history")
+            assert res_admin_hist.status_code == 200
+            assert isinstance(res_admin_hist.json(), list)
+        finally:
+            app.dependency_overrides.pop(require_admin, None)

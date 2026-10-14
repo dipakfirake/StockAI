@@ -113,7 +113,7 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
                     key={q.symbol} 
                     className="watchlist-item"
                     onClick={() => {
-                      navigate(`/chart/${q.symbol}`);
+                      navigate('/chart', { state: { symbol: q.symbol } });
                       onClose();
                     }}
                   >

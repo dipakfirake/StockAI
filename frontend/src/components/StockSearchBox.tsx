@@ -130,7 +130,8 @@ export default function StockSearchBox({
     }
 
     if (autoNavigate) {
-      navigate(`/chart/${urlSymbol}`)
+      // Navigate WITHOUT symbol in the URL path to protect user privacy
+      navigate('/chart', { state: { symbol: urlSymbol } })
     }
   }
 

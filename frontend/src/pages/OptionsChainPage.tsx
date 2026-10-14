@@ -1,22 +1,49 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { marketApi } from '../services/api'
 import { Activity, Target, ShieldAlert, Zap } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
+import { deobfuscateTicker, sanitizeBrowserUrl } from '../utils/urlSecurity'
 
 export default function OptionsChainPage() {
-  const { symbol = 'NIFTY.NS' } = useParams<{ symbol?: string }>()
+  const location = useLocation()
+  // Symbol is passed via navigate state — never shown in the URL bar
+  const initialSymbol = (location.state as any)?.symbol || 'NIFTY.NS'
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [viewGreeks, setViewGreeks] = useState(false)
 
   // Use a simple local input to change symbol
-  const [inputSymbol, setInputSymbol] = useState(symbol)
+  const [inputSymbol, setInputSymbol] = useState(initialSymbol)
+  const [activeSymbol, setActiveSymbol] = useState(initialSymbol)
 
   useEffect(() => {
-    fetchOptions(symbol)
-  }, [symbol])
+    fetchOptions(activeSymbol)
+  }, [activeSymbol])
+
+  useEffect(() => {
+    const locSym = (location.state as any)?.symbol
+    if (locSym && locSym !== activeSymbol) {
+      setActiveSymbol(locSym)
+      setInputSymbol(locSym)
+    }
+  }, [location.state])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search)
+      const encToken = searchParams.get('token') || searchParams.get('s') || searchParams.get('q')
+      if (encToken) {
+        const dec = deobfuscateTicker(encToken)
+        if (dec && dec !== activeSymbol) {
+          setActiveSymbol(dec)
+          setInputSymbol(dec)
+        }
+      }
+      sanitizeBrowserUrl('/options')
+    }
+  }, [])
 
   async function fetchOptions(sym: string) {
     setLoading(true)
@@ -35,8 +62,8 @@ export default function OptionsChainPage() {
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
     if (inputSymbol.trim()) {
-      window.history.pushState(null, '', `/options/${inputSymbol.trim().toUpperCase()}`)
-      fetchOptions(inputSymbol.trim().toUpperCase())
+      // Update activeSymbol which triggers the useEffect — NO symbol written to URL
+      setActiveSymbol(inputSymbol.trim().toUpperCase())
     }
   }
 

@@ -7,6 +7,7 @@ from backend.core.logging_config import get_logger
 from backend.core.config import settings
 from backend.core.cache import cache_get, cache_set
 from backend.core.auth import get_current_user
+from backend.core.param_validator import sanitize_symbol, validate_timeframe
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service
 from backend.services.signals import signal_engine
@@ -231,7 +232,8 @@ async def get_fii_dii(current_user=Depends(get_current_user)):
 @router.get("/corporate-actions/{symbol}")
 async def get_corporate_actions(symbol: str, current_user=Depends(get_current_user)):
     """Get historical dividends and splits for a symbol."""
-    data = await nse_scraper.fetch_corporate_actions(symbol)
+    safe_symbol = sanitize_symbol(symbol)
+    data = await nse_scraper.fetch_corporate_actions(safe_symbol)
     return {"corporate_actions": data}
 
 
@@ -308,9 +310,11 @@ async def get_advanced_indicators(
     Get advanced indicators: SuperTrend, Ichimoku, OBV, CMF,
     Pivot Levels, Support/Resistance, Candlestick Patterns.
     """
-    candles = await market_data_service.fetch_candles(symbol.upper(), timeframe, limit=300)
+    safe_symbol = sanitize_symbol(symbol)
+    safe_tf = validate_timeframe(timeframe)
+    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=300)
     if len(candles) < 50:
-        return {"symbol": symbol, "error": "Insufficient data for advanced indicators"}
+        return {"symbol": safe_symbol, "error": "Insufficient data for advanced indicators"}
 
     df = candles_to_df(candles)
 
@@ -337,8 +341,8 @@ async def get_advanced_indicators(
             pass
 
     return {
-        "symbol": symbol.upper(),
-        "timeframe": timeframe,
+        "symbol": safe_symbol,
+        "timeframe": safe_tf,
         "supertrend": supertrend_latest,
         "ichimoku": ichimoku,
         "obv": round(obv, 0) if obv else None,
@@ -375,7 +379,8 @@ async def get_options_chain(
     from backend.services.options_engine import options_engine
     
     try:
-        sym_clean = symbol.upper().strip()
+        safe_symbol = sanitize_symbol(symbol)
+        sym_clean = safe_symbol
         # Normalise index queries
         if sym_clean in ["NIFTY", "NIFTY50", "NIFTY.NS", "^NSEI"]:
             sym_clean = "^NSEI"
@@ -386,7 +391,7 @@ async def get_options_chain(
 
         quote = await market_data_service.fetch_quote(sym_clean)
         if not quote or not quote.get("price"):
-            raise HTTPException(status_code=404, detail=f"Price data not found for {symbol}")
+            raise HTTPException(status_code=404, detail=f"Price data not found for {safe_symbol}")
             
         spot_price = float(quote["price"])
         
@@ -394,7 +399,7 @@ async def get_options_chain(
         vix_quote = await market_data_service.fetch_quote("^INDIAVIX")
         current_vix = float(vix_quote["price"]) if vix_quote and vix_quote.get("price") else 14.5
         
-        chain_data = options_engine.generate_chain(symbol.upper(), spot_price, current_vix)
+        chain_data = options_engine.generate_chain(safe_symbol, spot_price, current_vix)
         if not isinstance(chain_data, dict):
             chain_data = {
                 "symbol": symbol.upper(),

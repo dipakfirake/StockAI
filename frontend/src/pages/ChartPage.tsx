@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, HistogramData, LineData } from 'lightweight-charts'
 import { stocksApi, aiApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
@@ -12,6 +12,7 @@ import ChartReplayControls from '../components/ChartReplayControls'
 import { TrendlinePrimitive, Point } from '../components/DrawingEngine'
 import { formatINR, formatNumber2Dec } from '../utils/formatters'
 import { useLocalStorage } from '../hooks/useLocalStorage'
+import { deobfuscateTicker, sanitizeBrowserUrl } from '../utils/urlSecurity'
 
 const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '1d', '1w', '1mo']
 const TIMEFRAME_LABELS: Record<string, string> = {
@@ -65,13 +66,15 @@ function toHeikinAshi(candles: any[]) {
 }
 
 export default function ChartPage() {
-  const { symbol: paramSymbol } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, savePreferences } = useAuth()
   const { theme } = useTheme()
 
   // ─── Persisted chart state (localStorage → instant restore, no flicker) ─────
-  const [symbol, setSymbol] = useLocalStorage('chart_symbol', paramSymbol || '^NSEI')
+  // Symbol is passed via navigate state to keep it OUT of the URL bar
+  const locationSymbol = (location.state as any)?.symbol
+  const [symbol, setSymbol] = useLocalStorage('chart_symbol', locationSymbol || '^NSEI')
   const [timeframe, setTimeframe] = useLocalStorage<string>('chart_timeframe', '1d')
   const [isHeikinAshi, setIsHeikinAshi] = useLocalStorage('chart_is_heikin_ashi', false)
   const [showIndicators, setShowIndicators] = useLocalStorage('chart_show_indicators', true)
@@ -181,12 +184,30 @@ export default function ChartPage() {
     return () => clearTimeout(timer)
   }, [symbol, timeframe, isHeikinAshi, showIndicators, showPatterns, showEvents, showVolumeProfile])
 
-  // Sync route params
+  // Sync navigated symbol from router state (keeps URL completely clean and opaque)
   useEffect(() => {
-    if (paramSymbol && paramSymbol !== symbol) {
-      setSymbol(paramSymbol)
+    const stateSym = (location.state as any)?.symbol
+    if (stateSym && stateSym !== symbol) {
+      setSymbol(stateSym)
+      setSearchInput(stateSym)
     }
-  }, [paramSymbol])
+  }, [location.state])
+
+  // Privacy protection: parse encrypted token if provided, and ensure URL bar remains strictly /chart
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search)
+      const encToken = searchParams.get('token') || searchParams.get('s') || searchParams.get('q')
+      if (encToken) {
+        const dec = deobfuscateTicker(encToken)
+        if (dec && dec !== symbol) {
+          setSymbol(dec)
+          setSearchInput(dec)
+        }
+      }
+      sanitizeBrowserUrl('/chart')
+    }
+  }, [])
 
   // Bug Fix: Clear selectedPattern when symbol changes (old pattern of TCS shouldn't show on RELIANCE)
   useEffect(() => {
@@ -1067,7 +1088,8 @@ export default function ChartPage() {
     e.preventDefault()
     const cleaned = searchInput.toUpperCase().trim().replace('.NS', '')
     setSymbol(cleaned)
-    navigate(`/chart/${cleaned}`)
+    // Navigate WITHOUT symbol in the URL to keep user activity private
+    navigate('/chart', { state: { symbol: cleaned }, replace: true })
   }
 
   function handleCompareSearch(e: React.FormEvent) {

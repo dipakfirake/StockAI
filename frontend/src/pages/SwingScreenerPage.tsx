@@ -453,13 +453,13 @@ export default function SwingScreenerPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 8 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <Link 
-                        to={`/chart/${stock.symbol}`}
-                        style={{ fontSize: 17, fontWeight: 700, color: 'var(--color-text-primary)', textDecoration: 'none' }}
+                      <span 
+                        onClick={() => navigate('/chart', { state: { symbol: stock.symbol } })}
+                        style={{ fontSize: 17, fontWeight: 700, color: 'var(--color-text-primary)', cursor: 'pointer' }}
                         title="Open interactive chart"
                       >
                         {stock.symbol.replace('.NS', '')}
-                      </Link>
+                      </span>
                       <span className={`badge ${isBuy ? 'badge-buy' : isSell ? 'badge-sell' : 'badge-hold'}`}>
                         {stock.action}
                       </span>
@@ -549,7 +549,7 @@ export default function SwingScreenerPage() {
                 {/* Bottom Actions */}
                 <div style={{ marginTop: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button 
-                    onClick={() => navigate(`/chart/${stock.symbol}`)}
+                    onClick={() => navigate('/chart', { state: { symbol: stock.symbol } })}
                     className="btn btn-ghost" 
                     style={{ flex: '1 1 70px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px' }}
                   >
@@ -611,9 +611,13 @@ export default function SwingScreenerPage() {
                 return (
                   <tr key={stock.symbol} style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td style={{ padding: '12px 16px' }}>
-                      <Link to={`/chart/${stock.symbol}`} style={{ fontWeight: 600, color: 'var(--color-text-primary)', textDecoration: 'none' }}>
+                      <span 
+                        onClick={() => navigate('/chart', { state: { symbol: stock.symbol } })} 
+                        style={{ fontWeight: 600, color: 'var(--color-text-primary)', cursor: 'pointer' }}
+                        title="Open interactive chart"
+                      >
                         {stock.symbol.replace('.NS', '')}
-                      </Link>
+                      </span>
                       <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{stock.name}</div>
                     </td>
                     <td style={{ padding: '12px 16px' }}>
@@ -644,9 +648,14 @@ export default function SwingScreenerPage() {
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        <Link to={`/chart/${stock.symbol}`} className="btn btn-ghost" style={{ padding: '4px 8px', height: 28 }} title="Chart">
+                        <button 
+                          onClick={() => navigate('/chart', { state: { symbol: stock.symbol } })} 
+                          className="btn btn-ghost" 
+                          style={{ padding: '4px 8px', height: 28, cursor: 'pointer' }} 
+                          title="Chart"
+                        >
                           <ExternalLink size={13} />
-                        </Link>
+                        </button>
                         {plan && stock.action !== 'HOLD' && (
                           <button 
                             onClick={() => handleQuickTrade(stock)}

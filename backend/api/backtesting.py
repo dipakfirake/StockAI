@@ -34,29 +34,33 @@ async def run_backtest(
     if request.initial_capital <= 0:
         raise HTTPException(status_code=400, detail="initial_capital must be greater than 0")
 
+    from backend.core.param_validator import sanitize_symbol
+    safe_symbol = sanitize_symbol(request.symbol)
+
     import uuid as _uuid
     backtest_id = str(_uuid.uuid4())
+    owner_id = str(current_user.id)
     
     # Bounded cache eviction to prevent memory leak
     if len(_backtest_results) > 200:
         oldest_key = next(iter(_backtest_results))
         _backtest_results.pop(oldest_key, None)
 
-    _backtest_results[backtest_id] = {"status": "RUNNING"}
+    _backtest_results[backtest_id] = {"status": "RUNNING", "user_id": owner_id}
 
     async def _run():
         try:
             result = await backtest_engine.run(
-                symbol=request.symbol.upper(),
+                symbol=safe_symbol,
                 strategy=request.strategy,
                 params=request.params,
                 start_date=request.start_date,
                 end_date=request.end_date,
                 initial_capital=request.initial_capital,
             )
-            _backtest_results[backtest_id] = {"status": "COMPLETED", **result}
+            _backtest_results[backtest_id] = {"status": "COMPLETED", "user_id": owner_id, **result}
         except Exception as e:
-            _backtest_results[backtest_id] = {"status": "FAILED", "error": str(e)}
+            _backtest_results[backtest_id] = {"status": "FAILED", "user_id": owner_id, "error": str(e)}
 
     background_tasks.add_task(_run)
     return {"backtest_id": backtest_id, "status": "QUEUED"}
@@ -67,10 +71,16 @@ async def get_backtest_results(
     backtest_id: str,
     current_user=Depends(require_pro_tier),
 ):
-    """Poll for backtest results."""
+    """Poll for backtest results with user ownership enforcement."""
     result = _backtest_results.get(backtest_id)
     if not result:
         raise HTTPException(status_code=404, detail="Backtest not found")
+
+    # Prevent IDOR: ensure requesting user owns the backtest run (or is admin)
+    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
+    if result.get("user_id") and result["user_id"] != str(current_user.id) and not is_admin:
+        raise HTTPException(status_code=404, detail="Backtest not found")
+
     return {"backtest_id": backtest_id, **result}
 
 

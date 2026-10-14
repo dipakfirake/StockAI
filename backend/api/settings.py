@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Any, Dict
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,8 +7,13 @@ from backend.core.database import get_db
 from backend.models.settings import SystemSettings
 from backend.core.auth import get_current_user
 from backend.models.user import User
+from backend.api.admin import require_admin
+from backend.core.audit_logger import log_security_event
 
 router = APIRouter()
+
+# Sensitive settings that regular users must NEVER inspect in cleartext
+SENSITIVE_SETTING_KEYS = {"fyers_access_token", "fyers_client_id"}
 
 DEFAULT_SETTINGS = [
     {"key": "default_risk_pct", "value": "2.0", "value_type": "float", "description": "Default risk percentage per trade"},
@@ -24,7 +29,11 @@ async def get_all_settings(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get system settings. Admins or regular users."""
+    """
+    Get system settings.
+    Admins receive complete configuration; non-admin users receive sanitized values
+    with broker credentials masked.
+    """
     settings = (await db.execute(select(SystemSettings))).scalars().all()
     
     # Ensure all defaults are present
@@ -37,7 +46,16 @@ async def get_all_settings(
         await db.commit()
         settings = (await db.execute(select(SystemSettings))).scalars().all()
     
-    return {s.key: s.get_typed_value() for s in settings}
+    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
+
+    out: Dict[str, Any] = {}
+    for s in settings:
+        val = s.get_typed_value()
+        if not is_admin and s.key in SENSITIVE_SETTING_KEYS:
+            out[s.key] = "••••••••••••" if val else ""
+        else:
+            out[s.key] = val
+    return out
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -48,14 +66,17 @@ class UpdateSettingsRequest(BaseModel):
 async def update_settings(
     request: UpdateSettingsRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    admin: User = Depends(require_admin),
 ):
-    """Update persisted dynamic configuration with its declared type preserved."""
+    """
+    Update persisted dynamic configuration.
+    Strictly restricted to Platform Administrators.
+    """
     existing = {item.key: item for item in (await db.execute(select(SystemSettings))).scalars().all()}
     unknown = set(request.values) - set(existing)
     if unknown:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"Unknown settings: {', '.join(sorted(unknown))}")
+
     for key, value in request.values.items():
         item = existing[key]
         try:
@@ -74,11 +95,17 @@ async def update_settings(
             else:
                 item.value = str(value)
         except (TypeError, ValueError) as exc:
-            from fastapi import HTTPException
             raise HTTPException(status_code=422, detail=f"Invalid value for {key}: {exc}") from exc
             
     await db.flush()
     
+    log_security_event(
+        event_type="SYSTEM_SETTINGS_UPDATED",
+        severity="INFO",
+        user_id=str(admin.id),
+        details={"updated_keys": list(request.values.keys()), "admin_email": admin.email},
+    )
+
     # Invalidate cache if Fyers credentials were updated
     if "fyers_client_id" in request.values or "fyers_access_token" in request.values:
         try:

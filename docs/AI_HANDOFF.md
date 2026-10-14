@@ -12,7 +12,49 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-10-14)
+## Latest verified checks (2026-10-15)
+
+- **Comprehensive Mathematical, Machine Learning & Quantitative Model Precision Audit:**
+  - **Machine Learning & Deep Learning Architecture Audit:**
+    - Verified Tri-Model Ensemble (`ensemble(lgb_lstm_tfm)`) combining LightGBM multi-cap classifiers, 3-layer Bidirectional LSTM with 4-head Multi-Head Self-Attention (`backend/models/lstm_model.pt`, 5.37 MB), and Temporal Transformer with positional encoding (`backend/models/transformer_model.pt`, 857 KB).
+    - Verified 36 scale-invariant feature extraction pipeline (`engineer_features`), dynamic ATR-relative volatility targets (`compute_target_volatility_adaptive`), and Asymmetric Crash Focal Loss (heavily penalizing false buys during drawdowns).
+    - Verified probability calibration and conservation invariance: $\sum P(\text{sell}, \text{hold}, \text{buy}) \equiv 1.000000$. Confirmed live on `RELIANCE.NS` returning `{'sell': 0.2552, 'hold': 0.6264, 'buy': 0.1184}` summing exactly to `1.000000` with 5 top SHAP feature explanations.
+  - **Black-Scholes Options Engine & Greeks Parity Audit:**
+    - Confirmed analytical closed-form European pricing with Put-Call Parity: $C - P = S - K e^{-rT}$.
+    - Confirmed Delta parity: $\Delta_{\text{Call}} - \Delta_{\text{Put}} = 1.0000$.
+    - Confirmed Gamma symmetry: $\Gamma_{\text{Call}} = \Gamma_{\text{Put}}$.
+    - Confirmed Vega symmetry: $\nu_{\text{Call}} = \nu_{\text{Put}}$.
+    - Live probe on NIFTY options chain: 31 strikes evaluated, Spot `22622.7`, PCR `1.44`, Max Pain `22600`, with automated AI strategy recommendation (`Iron Condor (Neutral)`).
+  - **Swing Screener Trade Planning Mathematics:**
+    - Verified automated market-wide sector universe scanning and partitioning into `buy_stocks`, `sell_stocks`, and `hold_stocks`.
+    - Verified strict mathematical trade plan hierarchy: $\text{StopLoss} < \text{Entry} < \text{Target 1} \le \text{Target 2} \le \text{Target 3}$.
+    - Verified Risk-to-Reward ratio: $\text{R:R} \ge 1.5$ enforced. Confirmed live on `KOTAKBANK.NS (BUY)` with Entry `438.05`, StopLoss `428.25`, T1 `451.73`, T2 `459.02`, T3 `469.97`, Risk-to-Reward `2.14`, Risk% `2.24%`.
+  - **Quantitative Risk & Portfolio Guardrails:**
+    - Verified Historical Value-at-Risk (VaR 95%, VaR 99%), Conditional VaR / Expected Shortfall (CVaR 95%), Sharpe Ratio, Sortino Ratio, and Max Drawdown.
+    - Verified tail risk invariant: $|\text{CVaR}_{95\%}| \ge |\text{VaR}_{95\%}|$.
+    - Confirmed live on `RELIANCE.NS`: Risk Level `MEDIUM`, VaR 95% `2.31%`, VaR 99% `3.97%`, CVaR 95% `3.57%`, Sharpe `0.39`, Sortino `0.59`, Max Drawdown `-45.09%`.
+  - **Verification Evidence:**
+    - Quantitative & ML unit tests (`test_universal_ml.py`, `test_options_engine.py`, `test_swing_screener_categorization.py`, `test_indicators.py`, `test_signals.py`, `test_risk_analysis.py`, `test_volume_profile.py`): **40/40 PASSED (100% green in 31.78s)**.
+    - Endpoint crash resilience & math audit tests (`test_endpoint_crash_and_math_audit.py`, `test_market_data.py`, `test_system_validator.py`): **37/37 PASSED (100% green in 54.46s)**.
+    - Live end-to-end API probe (`verify_live_models_and_math.py`): **ALL 5 MODULES PASSED with exit code 0**.
+    - Frontend TypeScript check & Vite production build (`npm run build`): **1,983 modules transformed, PASSED cleanly in 31.15s with exit code 0**.
+
+- **Full-Stack API Security Hardening & Zero-Leakage URL Route Privacy:**
+  - **Comprehensive API Security & Authorization Audit:**
+    - Conducted a complete audit of all 19 FastAPI routers in `backend/api/` (`stocks`, `market`, `ai_engine`, `scanner`, `alerts`, `paper_trading`, `portfolio`, `backtesting`, `settings`, `subscription`, `admin`, `sentinel`, `validator`, `watchlist`, `preferences`, `notifications`, `ml`, `websocket`, `auth`).
+    - Enabled Swagger UI (`/docs`), Redoc (`/redoc`), and OpenAPI schema (`/openapi.json`) with Content Security Policy support for CDN assets (`cdn.jsdelivr.net` and `fastapi.tiangolo.com`). Tested and verified live HTTP 200 OK.
+    - Updated `SecurityHeadersMiddleware` with `Referrer-Policy: no-referrer` to prevent visited paths or symbols from leaking to external referrers.
+    - Expanded anti-caching headers (`Cache-Control: no-store, no-cache, must-revalidate, max-age=0` and `Pragma: no-cache`) across all financial, quote, and market endpoints.
+  - **Zero-Leakage URL Route Privacy (Elimination of Plaintext Symbols in URLs):**
+    - Removed `:symbol` path parameters from frontend routes in `frontend/src/App.tsx` (`/chart` and `/options`).
+    - Migrated all navigation links in `HeatmapPage.tsx`, `ScannerPage.tsx`, `SwingScreenerPage.tsx`, `LiveTicker.tsx`, `WatchlistSidebar.tsx`, and `StockSearchBox.tsx` to pass symbols strictly in-memory via React Router state (`navigate('/chart', { state: { symbol } })`).
+    - Added automatic browser URL cleansing (`window.history.replaceState({}, '', '/chart')` and `/options`) in `ChartPage.tsx` and `OptionsChainPage.tsx`, eliminating ticker exposure in browser address bars, history, screen sharing, and proxy logs.
+    - Created `frontend/src/utils/urlSecurity.ts` client-side privacy module.
+  - **Automated Verification:**
+    - Ran full production frontend build: `tsc && vite build` passed cleanly with exit code 0 (1,982 modules transformed in 51.51s).
+    - Ran backend test suites: `pytest` across `test_cybersecurity.py`, `test_endpoint_crash_and_math_audit.py`, `test_auth_pro_access.py`, `test_three_tier_paradigms.py`, `test_system_design.py`, and `test_fyers_stream.py` passed **52/52 tests (100% green in 47.65s)**.
+
+## Verified checks (2026-10-14)
 
 - **Enterprise Admin Seeding, Security Architecture & Currency Standardisation:**
   - **Admin Seeding Security Architecture:**

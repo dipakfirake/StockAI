@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
@@ -58,9 +60,11 @@ async def register(request: RegisterRequest, req: Request, db: AsyncSession = De
 
     is_admin = request.email.lower().strip() == "admin@stockai.com"
     user = User(
+        id=uuid.uuid4(),
         email=request.email.lower().strip(),
         name=request.name,
         hashed_password=hash_password(request.password),
+        is_active=True,
         is_admin=is_admin,
         subscription_tier="PRO" if is_admin else "FREE",
         pro_status="APPROVED" if is_admin else "NONE",

@@ -108,10 +108,12 @@ export default function LiveTicker() {
     }
   }, [])
 
-  const renderTicker = (data: IndexData | null, fallbackName: string, link: string) => {
+  // Symbol is passed via navigation STATE, not in the URL path
+  const renderTicker = (data: IndexData | null, fallbackName: string, symbol: string) => {
+    const linkProps = { to: '/chart', state: { symbol } }
     if (!data || data.price == null) {
       return (
-        <NavLink to={link} style={{ textDecoration: 'none', padding: '2px 8px', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center' }}>
+        <NavLink {...linkProps} style={{ textDecoration: 'none', padding: '2px 8px', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center' }}>
           {fallbackName}
         </NavLink>
       )
@@ -123,7 +125,7 @@ export default function LiveTicker() {
     const arrow = isPositive ? '▲' : '▼'
 
     return (
-      <NavLink to={link} style={{ 
+      <NavLink {...linkProps} style={{ 
         textDecoration: 'none', 
         display: 'flex', 
         flexDirection: 'column',
@@ -142,8 +144,8 @@ export default function LiveTicker() {
 
   return (
     <div style={{ display: 'flex', gap: 24, marginRight: 'auto', alignItems: 'center' }} className="hide-on-mobile">
-      {renderTicker(nifty, 'NIFTY 50', '/chart/^NSEI')}
-      {renderTicker(bankNifty, 'NIFTY BANK', '/chart/^NSEBANK')}
+      {renderTicker(nifty, 'NIFTY 50', '^NSEI')}
+      {renderTicker(bankNifty, 'NIFTY BANK', '^NSEBANK')}
     </div>
   )
 }

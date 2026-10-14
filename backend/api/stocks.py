@@ -1,10 +1,13 @@
 """Stocks API router."""
 
+import asyncio
+import math
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.core.auth import get_current_user
+from backend.core.param_validator import sanitize_symbol, validate_timeframe
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service
 from backend.services.signals import signal_engine
@@ -25,18 +28,18 @@ async def get_stock_insight(
     from backend.data.ingestion.news_scraper import fetch_stock_news
     from backend.services.screener import screener_service
 
+    safe_symbol = sanitize_symbol(symbol)
+    safe_tf = validate_timeframe(timeframe)
+
     # Fetch optimal 500 candles (~2 years of daily data), enough for SMA200 and all indicators in 1 fast call
     fetch_limit = 500
 
-    import asyncio
-    import math
-
     results = await asyncio.gather(
-        market_data_service.fetch_quote(symbol),
-        market_data_service.fetch_candles(symbol, timeframe, limit=fetch_limit),
-        fetch_stock_news(symbol),
-        screener_service._analyze_symbol(symbol),
-        market_data_service.fetch_corporate_events(symbol),
+        market_data_service.fetch_quote(safe_symbol),
+        market_data_service.fetch_candles(safe_symbol, safe_tf, limit=fetch_limit),
+        fetch_stock_news(safe_symbol),
+        screener_service._analyze_symbol(safe_symbol),
+        market_data_service.fetch_corporate_events(safe_symbol),
         return_exceptions=True
     )
     quote = results[0] if not isinstance(results[0], Exception) else None
@@ -46,7 +49,7 @@ async def get_stock_insight(
     events = results[4] if (not isinstance(results[4], Exception) and isinstance(results[4], dict)) else {}
 
     if not quote or not isinstance(quote, dict):
-        raise HTTPException(status_code=404, detail=f"No quote data found for {symbol}")
+        raise HTTPException(status_code=404, detail=f"No quote data found for {safe_symbol}")
 
     price = float(quote.get("price", 0.0))
 
@@ -74,7 +77,7 @@ async def get_stock_insight(
         quote["market_cap"] = swing_trade["market_cap"]
     elif not quote.get("market_cap"):
         try:
-            info = await market_data_service.get_stock_info(symbol)
+            info = await market_data_service.get_stock_info(safe_symbol)
             if info and info.get("market_cap"):
                 quote["market_cap"] = info["market_cap"]
         except Exception:
@@ -97,7 +100,7 @@ async def get_stock_insight(
                 else:
                     c["anchored_vwap"] = None
         except Exception as e:
-            logger.warning(f"Anchored VWAP calculation error for {symbol}: {e}")
+            pass
 
     patterns = []
     if len(series_candles) >= 10:
@@ -111,14 +114,14 @@ async def get_stock_insight(
             patterns = []
     return {
         "symbol": quote["symbol"],
-        "timeframe": timeframe,
+        "timeframe": safe_tf,
         "as_of": quote["timestamp"],
         "quote": quote,
         "swing_trade": swing_trade,
         "candles": series_candles,
         "risk": analyse_risk(series_candles),
         "indicators": indicators,
-        "signals": signal_engine.evaluate(indicators, quote["symbol"], timeframe) if indicators else [],
+        "signals": signal_engine.evaluate(indicators, quote["symbol"], safe_tf) if indicators else [],
         "ai_score": ai_engine_service.score(indicators, quote["symbol"]) if indicators else None,
         "patterns": patterns,
         "events": events,
@@ -129,23 +132,25 @@ async def get_stock_insight(
 
 @router.get("/search")
 async def search_stocks(
-    q: str = Query(..., min_length=1, description="Stock name or symbol"),
+    q: str = Query(..., min_length=1, max_length=100, description="Stock name or symbol"),
     current_user=Depends(get_current_user),
 ):
     """Search stocks by name or symbol."""
-    results = await market_data_service.search_stocks(q)
+    safe_q = q.strip()[:100]
+    results = await market_data_service.search_stocks(safe_q)
     return {"results": results}
 
 
 @router.get("/{symbol}/quote")
 async def get_quote(symbol: str, current_user=Depends(get_current_user)):
     """Get live quote for a stock."""
-    quote = await market_data_service.fetch_quote(symbol)
+    safe_symbol = sanitize_symbol(symbol)
+    quote = await market_data_service.fetch_quote(safe_symbol)
     if not quote:
-        raise HTTPException(status_code=404, detail=f"No quote data found for {symbol}")
+        raise HTTPException(status_code=404, detail=f"No quote data found for {safe_symbol}")
     if not quote.get("market_cap") or quote.get("market_cap") == 0:
         try:
-            info = await asyncio.wait_for(market_data_service.get_stock_info(symbol), timeout=15.0)
+            info = await asyncio.wait_for(market_data_service.get_stock_info(safe_symbol), timeout=15.0)
             if info and info.get("market_cap"):
                 quote["market_cap"] = info["market_cap"]
         except Exception:
@@ -164,7 +169,9 @@ async def get_candles(
     current_user=Depends(get_current_user),
 ):
     """Get OHLCV candlestick data with indicator series."""
-    candles = await market_data_service.fetch_candles(symbol, timeframe, limit, start_date, end_date)
+    safe_symbol = sanitize_symbol(symbol)
+    safe_tf = validate_timeframe(timeframe)
+    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit, start_date, end_date)
     series_candles = indicator_service.compute_for_candles_series(candles)
     
     if anchor_date and len(series_candles) > 0:
@@ -181,7 +188,7 @@ async def get_candles(
             else:
                 c["anchored_vwap"] = None
 
-    return {"symbol": symbol, "timeframe": timeframe, "candles": series_candles}
+    return {"symbol": safe_symbol, "timeframe": safe_tf, "candles": series_candles}
 
 
 @router.get("/{symbol}/indicators")
@@ -191,11 +198,13 @@ async def get_indicators(
     current_user=Depends(get_current_user),
 ):
     """Get computed technical indicators."""
-    candles = await market_data_service.fetch_candles(symbol, timeframe, limit=250)
+    safe_symbol = sanitize_symbol(symbol)
+    safe_tf = validate_timeframe(timeframe)
+    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=250)
     if len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data to compute indicators")
     indicators = indicator_service.compute_all(candles)
-    return {"symbol": symbol, "timeframe": timeframe, "indicators": indicators}
+    return {"symbol": safe_symbol, "timeframe": safe_tf, "indicators": indicators}
 
 
 @router.get("/{symbol}/signals")
@@ -205,12 +214,14 @@ async def get_signals(
     current_user=Depends(get_current_user),
 ):
     """Get rule-based trading signals with explanations."""
-    candles = await market_data_service.fetch_candles(symbol, timeframe, limit=250)
+    safe_symbol = sanitize_symbol(symbol)
+    safe_tf = validate_timeframe(timeframe)
+    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=250)
     if len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data to compute signals")
     indicators = indicator_service.compute_all(candles)
-    signals = signal_engine.evaluate(indicators, symbol, timeframe)
-    return {"symbol": symbol, "timeframe": timeframe, "signals": signals}
+    signals = signal_engine.evaluate(indicators, safe_symbol, safe_tf)
+    return {"symbol": safe_symbol, "timeframe": safe_tf, "signals": signals}
 
 
 @router.get("/{symbol}/ai-score")
@@ -220,20 +231,23 @@ async def get_ai_score(
     current_user=Depends(get_current_user),
 ):
     """Get AI buy/hold/sell score with SHAP-style explanation."""
-    candles = await market_data_service.fetch_candles(symbol, timeframe, limit=250)
+    safe_symbol = sanitize_symbol(symbol)
+    safe_tf = validate_timeframe(timeframe)
+    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=250)
     if len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data to compute AI score")
     indicators = indicator_service.compute_all(candles)
-    score = ai_engine_service.score(indicators, symbol)
+    score = ai_engine_service.score(indicators, safe_symbol)
     return score
 
 
 @router.get("/{symbol}/info")
 async def get_stock_info(symbol: str, current_user=Depends(get_current_user)):
     """Get company fundamentals and metadata."""
-    info = await market_data_service.get_stock_info(symbol)
+    safe_symbol = sanitize_symbol(symbol)
+    info = await market_data_service.get_stock_info(safe_symbol)
     if not info:
-        raise HTTPException(status_code=404, detail=f"No info found for {symbol}")
+        raise HTTPException(status_code=404, detail=f"No info found for {safe_symbol}")
     return info
 
 
@@ -248,9 +262,11 @@ async def get_patterns(
     from backend.services.indicators import detect_candlestick_patterns, candles_to_df
     import pandas as pd
     
-    candles = await market_data_service.fetch_candles(symbol, timeframe, limit=limit)
+    safe_symbol = sanitize_symbol(symbol)
+    safe_tf = validate_timeframe(timeframe)
+    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=limit)
     if len(candles) < 10:
-        return {"symbol": symbol, "patterns": []}
+        return {"symbol": safe_symbol, "patterns": []}
         
     df = candles_to_df(candles)
     patterns_series = detect_candlestick_patterns(df)
@@ -262,7 +278,7 @@ async def get_patterns(
             "pattern": pattern
         })
         
-    return {"symbol": symbol, "timeframe": timeframe, "patterns": result}
+    return {"symbol": safe_symbol, "timeframe": safe_tf, "patterns": result}
 
 
 @router.get("/{symbol}/volume-profile")
@@ -277,10 +293,12 @@ async def get_volume_profile(
     from backend.services.volume_profile import calculate_volume_profile
     from backend.services.indicators import candles_to_df
 
-    candles = await market_data_service.fetch_candles(symbol, timeframe, limit=limit)
+    safe_symbol = sanitize_symbol(symbol)
+    safe_tf = validate_timeframe(timeframe)
+    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=limit)
     if len(candles) < 10:
         raise HTTPException(status_code=422, detail="Insufficient data for volume profile")
 
     df = candles_to_df(candles)
     profile = calculate_volume_profile(df, num_bins=num_bins)
-    return {"symbol": symbol, "timeframe": timeframe, **profile}
+    return {"symbol": safe_symbol, "timeframe": safe_tf, **profile}

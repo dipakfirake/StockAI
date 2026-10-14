@@ -59,14 +59,44 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         headers["X-Content-Type-Options"] = "nosniff"
         headers["X-Frame-Options"] = "DENY"
         headers["X-XSS-Protection"] = "1; mode=block"
-        headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        headers["Referrer-Policy"] = "no-referrer"
         headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         headers["Permissions-Policy"] = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
         headers["X-Request-ID"] = trace_id
 
-        # Anti-caching for financial & auth routes to prevent browser caching of sensitive data
+        # Content-Security-Policy: defence against XSS and data injection attacks
+        # Allow inline styles/scripts and Swagger UI CDN dependencies, block all external frames
+        headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "img-src 'self' data: https: https://fastapi.tiangolo.com; "
+            "connect-src 'self' wss: ws: https:; "
+            "frame-ancestors 'none'; "
+            "object-src 'none'; "
+            "base-uri 'self';"
+        )
+
+        # Anti-caching for all financial and user API routes to prevent browser/disk caching of user activity
         p = request.url.path.lower()
-        if p.startswith("/api/auth") or p.startswith("/api/paper-trades") or p.startswith("/api/portfolio"):
+        sensitive_prefixes = (
+            "/api/auth",
+            "/api/stocks",
+            "/api/market",
+            "/api/alerts",
+            "/api/watchlist",
+            "/api/paper-trades",
+            "/api/portfolio",
+            "/api/backtest",
+            "/api/ai",
+            "/api/scanner",
+            "/api/settings",
+            "/api/admin",
+            "/api/subscription",
+            "/metrics",
+        )
+        if any(p.startswith(prefix) for prefix in sensitive_prefixes):
             headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             headers["Pragma"] = "no-cache"
 

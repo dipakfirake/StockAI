@@ -48,11 +48,11 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/chart/:symbol?" element={<ChartPage />} />
+              <Route path="/chart" element={<ChartPage />} />
               <Route path="/screener" element={<SwingScreenerPage />} />
               <Route path="/scanner" element={<ScannerPage />} />
               <Route path="/heatmap" element={<HeatmapPage />} />
-              <Route path="/options/:symbol?" element={<OptionsChainPage />} />
+              <Route path="/options" element={<OptionsChainPage />} />
               <Route path="/smc-watchlist" element={<SMCWatchlist />} />
               <Route path="/alerts" element={<AlertsPage />} />
               <Route path="/paper-trading" element={<PaperTradingPage />} />
