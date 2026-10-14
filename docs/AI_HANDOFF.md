@@ -26,7 +26,11 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
     4. Lowered `WatchlistSidebar.tsx` refresh from 30s to 2000ms when open.
   - **Docker Frontend Optimization:**
     - Diagnosed `stockfrontend` 7-minute startup freeze on Windows due to `npm install` running over NTFS volume mount `./frontend:/app`. Added anonymous volume `/app/node_modules` and condition `[ -d node_modules/vite ] || npm install` in `docker-compose.yml`.
-  - **Verification:** `npm run build` passed cleanly in 1m 35s. Pytest backend test suite passed 20/20 tests in 39.57s. Pushed to `origin/main` (commit `4e2c49d`).
+  - **Professional Instant Price Display (Removal of Counting/Rolling Animations):**
+    - Identified `<AnimatedNumber>` component in `Dashboard.tsx` causing rolling/interpolating decimal count-up and count-down animations whenever prices updated.
+    - Removed `AnimatedNumber` from `Dashboard.tsx` and refactored `frontend/src/components/AnimatedNumber.tsx` to directly render instantaneous numbers with Indian currency formatting (`en-IN`).
+    - Eliminates fake intermediate decimal spinning, matching institutional standards (Bloomberg, TradingView, Zerodha Kite).
+  - **Verification:** `npm run build` passed cleanly in 48s. Pushed to `origin/main` (commit `9c30a8a`).
 
 ## Verified checks (2026-10-13)
 
