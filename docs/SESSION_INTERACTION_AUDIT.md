@@ -1052,6 +1052,30 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - Pushed to `origin/main` (commit `9c30a8a`).
 **System Response**: Explained root cause of the rolling number effect (`AnimatedNumber`), confirmed complete removal of rolling/counting animations, and verified instant price replacement matching institutional standards (Bloomberg, TradingView, Zerodha Kite). Concluded with `<!-- GOAL_COMPLETE -->`.
 
+---
+
+### Session Entry 39: Implementation of Fyers Data Socket (V3) WebSocket Tick Streaming Pipeline
+**Timestamp**: 2026-10-14 13:58:00 IST (08:28:00 UTC)
+**User Prompt**:
+  `"ok so go for it /goal"` (referencing broker WebSocket implementation for sub-second event-driven price updates with zero rate limit risk).
+**Agent Technical Actions**:
+1. **Architecture & Implementation of `FyersStreamService`**:
+   - Created `backend/services/fyers_stream.py` singleton managing the persistent background connection to Fyers HSM WebSocket cluster (`wss://socket.fyers.in/hsm/v1-5/prod`).
+   - Implemented dynamic runtime shim for `pkg_resources` so `fyers_apiv3.FyersWebsocket.data_ws` imports cleanly on Python 3.11+ / 3.12+ environments.
+   - Configured high-throughput `litemode=True` for sub-millisecond tick streaming with automatic reconnection.
+   - Built automatic bidirectional symbol conversion (`NSE:RELIANCE-EQ` <-> `RELIANCE.NS`, `NSE:NIFTY50-INDEX` <-> `^NSEI`).
+   - High-throughput `_on_tick` callback updates Redis quote cache (`quote:{symbol}`) in memory and dispatches `broadcast_market_update` down to all connected frontend WebSockets via `asyncio.run_coroutine_threadsafe`.
+2. **Integration into WebSocket & Lifespan**:
+   - In `backend/api/websocket.py`: Hooked client market data subscription messages (`subscribe:market_data`) to automatically trigger `fyers_stream_service.subscribe_symbols([norm_symbol])`, streaming ticks for active charts dynamically.
+   - In `backend/main.py`: Registered `fyers_stream_service.start()` in the FastAPI lifespan startup routine and `fyers_stream_service.stop()` on graceful shutdown.
+3. **Resilience & Fallback**:
+   - Dual-tier failover: If Fyers credentials are not provided or expired, the system gracefully stays in autonomous 1-second polling mode without errors.
+4. **Verification Evidence**:
+   - Backend automated tests: Created `backend/tests/test_fyers_stream.py`. Combined suite (`pytest backend/tests/test_market_data.py backend/tests/test_fyers_stream.py`) passed 14/14 tests in 26.59s.
+   - Frontend production build (`npm run build`): Passed cleanly with 0 errors in 1m 24s.
+   - Committed and pushed to `origin/main` (commit `e27b659`).
+**System Response**: Delivered technical explanation of the Fyers Data Socket pipeline, dynamic subscription flow, zero-ban risk architecture, and automated verification evidence. Concluded with `<!-- GOAL_COMPLETE -->`.
+
 
 
 

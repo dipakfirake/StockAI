@@ -29,8 +29,15 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
   - **Professional Instant Price Display (Removal of Counting/Rolling Animations):**
     - Identified `<AnimatedNumber>` component in `Dashboard.tsx` causing rolling/interpolating decimal count-up and count-down animations whenever prices updated.
     - Removed `AnimatedNumber` from `Dashboard.tsx` and refactored `frontend/src/components/AnimatedNumber.tsx` to directly render instantaneous numbers with Indian currency formatting (`en-IN`).
-    - Eliminates fake intermediate decimal spinning, matching institutional standards (Bloomberg, TradingView, Zerodha Kite).
-  - **Verification:** `npm run build` passed cleanly in 48s. Pushed to `origin/main` (commit `9c30a8a`).
+  - **Fyers Data Socket (WebSocket V3) Real-Time Tick Stream Pipeline:**
+    - Architected and implemented `FyersStreamService` in `backend/services/fyers_stream.py`.
+    - Integrated with Fyers HSM WebSocket cluster (`wss://socket.fyers.in/hsm/v1-5/prod`) for zero-REST-quota, push-driven sub-second tick streaming.
+    - Dynamically bridges `pkg_resources` compatibility shim for modern Python 3.11+ / 3.12+ runtimes.
+    - Automatic symbol conversion and mapping (`NSE:RELIANCE-EQ` <-> `RELIANCE.NS`, `NSE:NIFTY50-INDEX` <-> `^NSEI`).
+    - Integrated dynamic client subscriptions in `backend/api/websocket.py` — when a user navigates to a chart, the backend dynamically subscribes to Fyers live ticks.
+    - Full dual-tier resilience: Ingests ticks, refreshes Redis quote cache in sub-millisecond RAM, broadcasts to FastAPI WebSockets, and gracefully falls back to the 1-second poller if Fyers is unconfigured or offline.
+    - Registered with enterprise `LifecycleManager` in `backend/main.py` for automated startup and graceful shutdown.
+  - **Verification:** Unit tests in `backend/tests/test_fyers_stream.py` and `backend/tests/test_market_data.py` (14/14 passed in 26.59s). Frontend production build passed cleanly in 1m 24s. Pushed to `origin/main` (commit `e27b659`).
 
 ## Verified checks (2026-10-13)
 
