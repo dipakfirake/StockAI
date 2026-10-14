@@ -38,15 +38,18 @@ async def lifespan(app: FastAPI):
     from backend.api.websocket import poll_market_data
     from backend.tasks.screener_poller import poll_screener_cache
     from backend.tasks.auto_trader import auto_trader_loop
+    from backend.services.fyers_stream import fyers_stream_service
     import asyncio
     
     task1 = asyncio.create_task(poll_market_data())
     task2 = asyncio.create_task(poll_screener_cache())
     task3 = asyncio.create_task(auto_trader_loop())
+    task4 = asyncio.create_task(fyers_stream_service.start())
     
     lifecycle.register_task(task1)
     lifecycle.register_task(task2)
     lifecycle.register_task(task3)
+    lifecycle.register_task(task4)
 
     # Launch 24/7 Autonomous Sentinel & Threat Surveillance Watchdog
     sentinel_service.start_background_surveillance()
@@ -54,6 +57,7 @@ async def lifespan(app: FastAPI):
     yield
     
     sentinel_service.stop_background_surveillance()
+    await fyers_stream_service.stop()
     await lifecycle.shutdown()
 
 

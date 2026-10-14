@@ -53,6 +53,13 @@ async def general_websocket(websocket: WebSocket, token: str = ""):
                             continue
                         subscriptions.add(norm_symbol)
                         logger.info(f"{conn_id} subscribed to {norm_symbol}")
+                        
+                        # Dynamically wire to Fyers Data Socket for sub-second event-driven stream
+                        try:
+                            from backend.services.fyers_stream import fyers_stream_service
+                            asyncio.create_task(fyers_stream_service.subscribe_symbols([norm_symbol]))
+                        except Exception:
+                            pass
             except:
                 if data == "ping":
                     await websocket.send_text("pong")
