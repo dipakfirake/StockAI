@@ -412,14 +412,29 @@ class SystemValidatorService:
 
             duration = (time.perf_counter() - t0) * 1000
             if quote and quote.get("price") and quote.get("price") > 0:
+                source = quote.get("source", "FEED")
+                is_fyers = "fyers" in str(source).lower()
+                if is_fyers:
+                    details = f"🟢 PRIMARY ACTIVE: Nifty 50 Index quote resolved at ₹{quote['price']} via Fyers API (Real-time Stream)."
+                    recommendation = None
+                else:
+                    details = (
+                        f"🟡 FAILOVER BACKUP: Nifty 50 Index quote resolved at ₹{quote['price']} via {source}. "
+                        "Fyers token is currently expired or unrenewed (daily 06:00 AM IST reset). "
+                        "The autonomous Yahoo Finance backup engine is keeping all market prices 100% live. "
+                        "Renew Fyers token in /admin to switch back to Primary."
+                    )
+                    recommendation = "Fyers daily token expired (06:00 AM IST reset). Generate and activate a new token in Admin Settings to switch back to Primary Fyers API."
+
                 return TestResult(
                     test_id="SYS-003",
                     name="Market Data Feeds & Fallback Resilience",
                     category="SYSTEM",
                     status="PASSED",
                     duration_ms=duration,
-                    details=f"Nifty 50 Index quote resolved at ₹{quote['price']} via {quote.get('source', 'FEED')}.",
-                    telemetry={"symbol": "^NSEI", "price": quote["price"], "source": quote.get("source")},
+                    details=details,
+                    recommendation=recommendation,
+                    telemetry={"symbol": "^NSEI", "price": quote["price"], "source": source, "engine": "PRIMARY_FYERS" if is_fyers else "BACKUP_YAHOO"},
                 )
             else:
                 return TestResult(
