@@ -14,6 +14,10 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-20)
 
+- **Repository Pushed to GitHub (`origin/main`)**:
+  - Committed commit `9bddb57` ("feat: mobile fyers token manager, autonomous dual-engine market data failover, live api trigger console, and validator fix") and successfully pushed to `https://github.com/dipakfirake/StockAI.git`.
+  - Ready to be pulled onto the Oracle Cloud VM (`92.4.71.210`) via `git pull origin main`.
+
 - **Fyers OAuth Exchange Error Diagnostics & Single-Use Auth Code Guidance:**
   - **Error Diagnosis**: The user experienced a 400 "Bad request" when attempting to activate a Fyers token. In Fyers V3 OAuth, authorization codes expire in 2-3 minutes and can only be used once. If the user pasted an already-used code or an old URL, `SessionModel.generate_token()` returned an error which was previously masked, falling back to treating the raw auth code as an access token, which Fyers Profile API rejected with "Bad request".
   - **Fix Applied**: Hardened `update_fyers_token` in `backend/api/settings.py` to capture Fyers OAuth exchange errors directly and return explicit guidance: *"Fyers rejected this authorization code. Authorization codes expire within 2-3 minutes and can only be used ONCE. Please tap '1. Open Fyers Login' to log in fresh and activate immediately."* Added UI tip banner in `AdminPage.tsx`.

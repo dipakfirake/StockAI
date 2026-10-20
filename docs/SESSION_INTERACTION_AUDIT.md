@@ -1368,6 +1368,25 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - Frontend production build (`npm run build`): **1,983 modules transformed, PASSED cleanly in 1m 4s with 0 errors**.
 **System Response**: Clarified that ERR_CONNECTION_RESET was transient during the backend container restart (now fully recovered with live prices ticking), and explained how to properly activate Fyers token by logging in fresh and redeeming the single-use auth code within 2 minutes.
 
+---
+
+### Session Entry 50: GitHub Repository Synchronization & Oracle Cloud Deployment Workflow
+**Timestamp**: 2026-10-20 16:10:00 IST (10:40:00 UTC)
+**User Prompt**:
+  `"is you updated pushed on github for me to pull on my oracle server and if not pushed give me github commands for pushing on github"`
+**Agent Technical Actions**:
+1. **Repository Staging & Local Commit**:
+   - Staged all 15 modified/new files across backend, frontend, documentation, and tests (`git add`).
+   - Verified that `.env` remained completely excluded via `.gitignore`.
+   - Committed changes as commit `9bddb57`:
+     `feat: mobile fyers token manager, autonomous dual-engine market data failover, live api trigger console, and validator fix`
+2. **Push to Remote Origin**:
+   - Executed `git push origin main`.
+   - Successfully pushed commit `def1fe8..9bddb57` to `https://github.com/dipakfirake/StockAI.git`.
+3. **Deployment Workflow Provided**:
+   - Documented exact commands to SSH into Oracle Cloud VM (`92.4.71.210`), run `git pull origin main`, and rebuild/restart the production stack with `sudo docker compose up --build -d`.
+**System Response**: Confirmed successful push to GitHub (`origin/main`) and provided clear, step-by-step instructions for pulling and updating the Oracle Cloud server.
+
 
 
 
