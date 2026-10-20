@@ -53,8 +53,11 @@ async def get_stock_insight(
 
     price = float(quote.get("price", 0.0))
 
-    # Compute dynamic 52W High & Low from historical candles
-    if candles and price > 0:
+    # Compute dynamic 52W High & Low from historical candles or preserved metadata
+    existing_52w_high = float(quote.get("52w_high") or 0.0)
+    existing_52w_low = float(quote.get("52w_low") or 0.0)
+
+    if candles and len(candles) >= 20 and price > 0:
         year_candles = candles[-252:]
         highs = []
         lows = []
@@ -66,11 +69,25 @@ async def get_stock_insight(
                 if math.isfinite(l) and l > 0: lows.append(l)
             except (ValueError, TypeError):
                 continue
-        quote["52w_high"] = round(max(highs), 2) if highs else price
-        quote["52w_low"] = round(min(lows), 2) if lows else price
+        calc_high = max(highs) if highs else price
+        calc_low = min(lows) if lows else price
+        quote["52w_high"] = round(max(calc_high, existing_52w_high) if existing_52w_high > 0 else calc_high, 2)
+        quote["52w_low"] = round(min(calc_low, existing_52w_low) if existing_52w_low > 0 else calc_low, 2)
+    elif existing_52w_high > 0 and existing_52w_low > 0:
+        quote["52w_high"] = round(existing_52w_high, 2)
+        quote["52w_low"] = round(existing_52w_low, 2)
     else:
-        quote["52w_high"] = price
-        quote["52w_low"] = price
+        try:
+            info = await market_data_service.get_stock_info(safe_symbol)
+            if info:
+                h = float(info.get("fiftyTwoWeekHigh") or info.get("52w_high") or 0.0)
+                l = float(info.get("fiftyTwoWeekLow") or info.get("52w_low") or 0.0)
+                if h > 0: existing_52w_high = h
+                if l > 0: existing_52w_low = l
+        except Exception:
+            pass
+        quote["52w_high"] = round(existing_52w_high if existing_52w_high > 0 else price, 2)
+        quote["52w_low"] = round(existing_52w_low if existing_52w_low > 0 else price, 2)
 
     # Populate Market Cap from swing_trade or stock info
     if swing_trade and swing_trade.get("market_cap"):

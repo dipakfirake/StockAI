@@ -174,4 +174,13 @@ export const validatorApi = {
     api.post('/validator/probe-custom', data),
 }
 
+// ===== System Settings & Fyers Mobile Token endpoints =====
+export const settingsApi = {
+  getAll: () => api.get('/settings/'),
+  update: (values: Record<string, any>) => api.put('/settings/', { values }),
+  getFyersStatus: () => api.get('/settings/fyers/status'),
+  getFyersAuthUrl: () => api.get('/settings/fyers/auth-url'),
+  updateFyersToken: (authInput: string) => api.post('/settings/fyers/update-token', { auth_input: authInput }),
+}
+
 export default api

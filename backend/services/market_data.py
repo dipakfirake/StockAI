@@ -114,6 +114,49 @@ class MarketDataService:
     _env_cache = None
     _env_mtime = 0
     _fyers_cooldown_until: float = 0.0
+    _fyers_token_valid: bool = True
+    _fyers_token_error_reason: str = ""
+    _active_engine: str = "PRIMARY_FYERS"  # "PRIMARY_FYERS" or "BACKUP_YAHOO"
+    _last_fyers_tick_time: float = 0.0
+    _last_yahoo_tick_time: float = 0.0
+
+    @classmethod
+    def get_feed_status(cls) -> dict:
+        """Returns the current state of the dual-connection market data engine."""
+        import time
+        now = time.time()
+        is_fyers_available = cls._fyers_token_valid and (now >= cls._fyers_cooldown_until)
+        current_engine = "PRIMARY_FYERS" if is_fyers_available else "BACKUP_YAHOO"
+        return {
+            "active_engine": current_engine,
+            "fyers_valid": cls._fyers_token_valid,
+            "fyers_cooldown_remaining": max(0, int(cls._fyers_cooldown_until - now)),
+            "fyers_token_error": cls._fyers_token_error_reason,
+            "fyers_expiry_schedule": "06:00 AM IST Daily",
+            "source_label": "Fyers API (Real-time Push)" if current_engine == "PRIMARY_FYERS" else "Yahoo Finance (Autonomous 3s Live Backup)",
+            "dual_connection_active": True,
+        }
+
+    @classmethod
+    def mark_fyers_token_expired(cls, reason: str = "Token expired or invalid", cooldown_seconds: float = 300.0) -> None:
+        """Flags Fyers as expired and engages the autonomous Yahoo backup engine."""
+        import time
+        cls._fyers_token_valid = False
+        cls._fyers_token_error_reason = reason
+        cls._active_engine = "BACKUP_YAHOO"
+        cls._fyers_cooldown_until = time.time() + cooldown_seconds
+        logger.warning(f"Dual-Engine Failover Engaged: Fyers marked expired ({reason}). Active feed switched to Yahoo Finance Backup.")
+
+    @classmethod
+    def reset_fyers_health(cls) -> None:
+        """Restores Fyers as the active primary engine upon token renewal."""
+        cls._fyers_token_valid = True
+        cls._fyers_token_error_reason = ""
+        cls._fyers_cooldown_until = 0.0
+        cls._env_mtime = 0.0
+        cls._active_engine = "PRIMARY_FYERS"
+        logger.info("Dual-Engine: Fyers token refreshed. Hot-swapping back to Primary Fyers Engine.")
+
 
     @staticmethod
     async def _get_fyers_client():
@@ -192,6 +235,74 @@ class MarketDataService:
         )
 
     @staticmethod
+    def _parse_yahoo_chart_meta(meta: dict, sym: str) -> dict | None:
+        """
+        Robustly parses metadata from Yahoo Chart API into an exact standardized quote dictionary.
+        Prioritizes real session change and change percent, correctly deriving previous close
+        instead of confusing multi-day range boundary close with yesterday's close.
+        """
+        last_price = meta.get("regularMarketPrice")
+        if last_price is None:
+            last_price = meta.get("fulldayPrice")
+        if last_price is None:
+            last_price = meta.get("chartPreviousClose")
+        if not last_price or float(last_price) <= 0:
+            return None
+
+        last_price = float(last_price)
+
+        # 1. Extract change and change percentage with exact priority
+        raw_change = meta.get("regularMarketChange")
+        if raw_change is None:
+            raw_change = meta.get("fulldayChange")
+
+        raw_change_pct = meta.get("regularMarketChangePercent")
+        if raw_change_pct is None:
+            raw_change_pct = meta.get("fulldayChangePercent")
+
+        # 2. Extract previous close
+        raw_prev_close = meta.get("regularMarketPreviousClose") or meta.get("previousClose")
+        if raw_prev_close is not None and float(raw_prev_close) > 0:
+            prev_close = float(raw_prev_close)
+        elif raw_change is not None:
+            prev_close = last_price - float(raw_change)
+        elif raw_change_pct is not None and float(raw_change_pct) != -100.0:
+            prev_close = last_price / (1.0 + (float(raw_change_pct) / 100.0))
+        else:
+            prev_close = float(meta.get("chartPreviousClose") or last_price)
+
+        # 3. Derive missing change / change_pct mathematically
+        if raw_change is not None:
+            calc_change = float(raw_change)
+        else:
+            calc_change = last_price - prev_close
+
+        if raw_change_pct is not None:
+            calc_change_pct = float(raw_change_pct)
+        else:
+            calc_change_pct = (calc_change / prev_close) * 100.0 if prev_close > 0 else 0.0
+
+        return {
+            "symbol": sym,
+            "price": round(last_price, 2),
+            "previous_close": round(prev_close, 2),
+            "change": round(calc_change, 2),
+            "change_pct": round(calc_change_pct, 2),
+            "volume": int(meta.get("regularMarketVolume") or 0),
+            "market_cap": 0,
+            "52w_high": round(float(meta.get("fiftyTwoWeekHigh") or 0.0), 2),
+            "52w_low": round(float(meta.get("fiftyTwoWeekLow") or 0.0), 2),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_status": "delayed",
+            "source": "Backup (Yahoo Chart API)",
+        }
+
+    @staticmethod
+    async def get_quote(symbol: str) -> Optional[dict]:
+        """Alias for fetch_quote for backward compatibility and test validation."""
+        return await MarketDataService.fetch_quote(symbol)
+
+    @staticmethod
     async def fetch_quote(symbol: str) -> Optional[dict]:
         """Fetch live quote with caching (TTL: 60s) via Fyers."""
         import time
@@ -205,7 +316,7 @@ class MarketDataService:
             logger.debug(f"Quote cache hit: {original_symbol}")
             return cached
 
-        if now >= MarketDataService._fyers_cooldown_until:
+        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbol}
@@ -214,17 +325,28 @@ class MarketDataService:
                 if response.get("s") == "ok" and response.get("d"):
                     quote_data = response["d"][0]["v"]
                     
-                    last_price = quote_data.get("lp", 0.0)
-                    prev_close = quote_data.get("prev_close_price", last_price)
-                    calc_change = quote_data.get("ch", 0.0)
-                    calc_change_pct = quote_data.get("chp", 0.0)
+                    last_price = float(quote_data.get("lp", 0.0) or 0.0)
+                    calc_change = float(quote_data.get("ch", 0.0) or 0.0)
+                    calc_change_pct = float(quote_data.get("chp", 0.0) or 0.0)
+                    prev_close = float(quote_data.get("prev_close_price", 0.0) or 0.0)
+                    
+                    # If prev_close is rolled over to last_price or 0 after hours, derive from last_price - calc_change
+                    if calc_change != 0.0 and (prev_close <= 0.0 or abs(prev_close - last_price) < 1e-4):
+                        prev_close = last_price - calc_change
+                    elif prev_close <= 0.0:
+                        prev_close = last_price
+
+                    if calc_change == 0.0 and calc_change_pct != 0.0 and prev_close > 0.0:
+                        calc_change = last_price - prev_close
+                    elif calc_change_pct == 0.0 and calc_change != 0.0 and prev_close > 0.0:
+                        calc_change_pct = (calc_change / prev_close) * 100.0
                     
                     quote = {
                         "symbol": original_symbol,
-                        "price": round(float(last_price), 2),
-                        "previous_close": round(float(prev_close), 2),
-                        "change": round(float(calc_change), 2),
-                        "change_pct": round(float(calc_change_pct), 2),
+                        "price": round(last_price, 2),
+                        "previous_close": round(prev_close, 2),
+                        "change": round(calc_change, 2),
+                        "change_pct": round(calc_change_pct, 2),
                         "volume": int(quote_data.get("volume", 0)),
                         "market_cap": 0,
                         "52w_high": 0.0,
@@ -235,6 +357,7 @@ class MarketDataService:
                     }
 
                     if float(last_price) > 0:
+                        MarketDataService._last_fyers_tick_time = now
                         await cache_set(cache_key, quote, ttl=settings.CACHE_TTL_QUOTE)
                         return quote
                     elif fyers_symbol.startswith("BSE:"):
@@ -248,14 +371,19 @@ class MarketDataService:
                     return await MarketDataService.fetch_quote(original_symbol.replace(".BO", ".NS"))
                 else:
                     err_msg = str(response)
-                    if "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg:
+                    resp_code = response.get("code")
+                    if resp_code in (-300, -360, -17, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
+                        MarketDataService.mark_fyers_token_expired(f"Token expired/rejected (code {resp_code})", cooldown_seconds=300.0)
+                    elif "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg:
                         MarketDataService._fyers_cooldown_until = now + 45.0
                         logger.warning("Fyers WAF rate limit hit in single quote. Entering 45s cooldown.")
                     logger.warning(f"Fyers quote returned non-ok for {fyers_symbol}: {response}")
 
             except Exception as e:
-                err_str = str(e)
-                if "429" in err_str or "rate limit" in err_str.lower() or "1015" in err_str:
+                err_str = str(e).lower()
+                if "-300" in err_str or "-360" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
+                    MarketDataService.mark_fyers_token_expired(f"Fyers auth exception: {e}", cooldown_seconds=300.0)
+                elif "429" in err_str or "rate limit" in err_str or "1015" in err_str:
                     MarketDataService._fyers_cooldown_until = now + 45.0
                     logger.warning("Fyers WAF rate limit exception. Entering 45s cooldown.")
                 logger.error(f"Failed to fetch Fyers quote for {original_symbol}: {e}")
@@ -322,25 +450,8 @@ class MarketDataService:
                     res_list = cdata.get("chart", {}).get("result", [])
                     if res_list:
                         meta = res_list[0].get("meta", {})
-                        last_price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
-                        if last_price:
-                            prev_close = meta.get("chartPreviousClose") or last_price
-                            calc_change = last_price - prev_close
-                            calc_change_pct = (calc_change / prev_close) * 100 if prev_close else 0.0
-                            fallback_quote = {
-                                "symbol": original_symbol,
-                                "price": round(float(last_price), 2),
-                                "previous_close": round(float(prev_close), 2),
-                                "change": round(float(calc_change), 2),
-                                "change_pct": round(float(calc_change_pct), 2),
-                                "volume": int(meta.get("regularMarketVolume") or 0),
-                                "market_cap": 0,
-                                "52w_high": round(float(meta.get("fiftyTwoWeekHigh") or 0.0), 2),
-                                "52w_low": round(float(meta.get("fiftyTwoWeekLow") or 0.0), 2),
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "data_status": "delayed",
-                                "source": "Backup (Yahoo Chart API)",
-                            }
+                        fallback_quote = MarketDataService._parse_yahoo_chart_meta(meta, original_symbol)
+                        if fallback_quote:
                             await cache_set(cache_key, fallback_quote, ttl=settings.CACHE_TTL_QUOTE)
                             return fallback_quote
         except Exception as e:
@@ -371,48 +482,69 @@ class MarketDataService:
         fyers_symbols_str = ",".join(fyers_to_orig.keys())
         
         quotes_dict = {}
-        if now >= MarketDataService._fyers_cooldown_until:
+        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbols_str}
                 response = await asyncio.to_thread(fyers.quotes, data)
                 
                 if response.get("s") == "ok" and "d" in response:
+                    MarketDataService._last_fyers_tick_time = now
                     for item in response["d"]:
                         fyers_sym = item.get("n", "")
                         quote_data = item.get("v", {})
                         orig_symbols = fyers_to_orig.get(fyers_sym, [fyers_sym])
                         
-                        last_price = quote_data.get("lp", 0.0)
-                        prev_close = quote_data.get("prev_close_price", last_price)
-                        calc_change = quote_data.get("ch", 0.0)
-                        calc_change_pct = quote_data.get("chp", 0.0)
+                        last_price = float(quote_data.get("lp", 0.0) or 0.0)
+                        calc_change = float(quote_data.get("ch", 0.0) or 0.0)
+                        calc_change_pct = float(quote_data.get("chp", 0.0) or 0.0)
+                        prev_close = float(quote_data.get("prev_close_price", 0.0) or 0.0)
                         
-                        if float(last_price) > 0:
+                        if calc_change != 0.0 and (prev_close <= 0.0 or abs(prev_close - last_price) < 1e-4):
+                            prev_close = last_price - calc_change
+                        elif prev_close <= 0.0:
+                            prev_close = last_price
+
+                        if calc_change == 0.0 and calc_change_pct != 0.0 and prev_close > 0.0:
+                            calc_change = last_price - prev_close
+                        elif calc_change_pct == 0.0 and calc_change != 0.0 and prev_close > 0.0:
+                            calc_change_pct = (calc_change / prev_close) * 100.0
+                        
+                        if last_price > 0:
                             for orig_sym in orig_symbols:
-                                quotes_dict[orig_sym] = {
+                                q_obj = {
                                     "symbol": orig_sym,
-                                    "price": round(float(last_price), 2),
-                                    "previous_close": round(float(prev_close), 2),
-                                    "change": round(float(calc_change), 2),
-                                    "change_pct": round(float(calc_change_pct), 2),
+                                    "price": round(last_price, 2),
+                                    "previous_close": round(prev_close, 2),
+                                    "change": round(calc_change, 2),
+                                    "change_pct": round(calc_change_pct, 2),
                                     "volume": int(quote_data.get("volume", 0)),
                                     "timestamp": datetime.now(timezone.utc).isoformat(),
                                     "data_status": "realtime",
                                     "source": "Fyers API",
                                 }
+                                quotes_dict[orig_sym] = q_obj
+                                try:
+                                    await cache_set(f"quote:{orig_sym}", q_obj, ttl=settings.CACHE_TTL_QUOTE)
+                                except Exception:
+                                    pass
                 elif response.get("code") == 429:
                     MarketDataService._fyers_cooldown_until = now + 45.0
                     logger.warning("Fyers rate limit (429) hit in bulk quotes. Entering 45s cooldown.")
                 else:
                     err_msg = str(response)
-                    if "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg:
+                    resp_code = response.get("code")
+                    if resp_code in (-300, -360, -17, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
+                        MarketDataService.mark_fyers_token_expired(f"Bulk quote token error (code {resp_code})", cooldown_seconds=300.0)
+                    elif "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg:
                         MarketDataService._fyers_cooldown_until = now + 45.0
                         logger.warning("Fyers WAF rate limit detected in bulk quotes. Entering 45s cooldown.")
                     logger.error(f"Fyers bulk quote returned non-ok: {response}")
             except Exception as e:
-                err_str = str(e)
-                if "429" in err_str or "rate limit" in err_str.lower() or "1015" in err_str:
+                err_str = str(e).lower()
+                if "-300" in err_str or "-360" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
+                    MarketDataService.mark_fyers_token_expired(f"Bulk quote auth exception: {e}", cooldown_seconds=300.0)
+                elif "429" in err_str or "rate limit" in err_str or "1015" in err_str:
                     MarketDataService._fyers_cooldown_until = now + 45.0
                     logger.warning("Fyers WAF rate limit exception in bulk quotes. Entering 45s cooldown.")
                 logger.error(f"Fyers bulk quote failed: {e}")
@@ -442,22 +574,9 @@ class MarketDataService:
                         res_list = cdata.get("chart", {}).get("result", [])
                         if res_list:
                             meta = res_list[0].get("meta", {})
-                            last_price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
-                            if last_price and float(last_price) > 0:
-                                prev_close = meta.get("chartPreviousClose") or last_price
-                                calc_change = float(last_price) - float(prev_close)
-                                calc_change_pct = (calc_change / float(prev_close)) * 100 if float(prev_close) else 0.0
-                                return sym, {
-                                    "symbol": sym,
-                                    "price": round(float(last_price), 2),
-                                    "previous_close": round(float(prev_close), 2),
-                                    "change": round(float(calc_change), 2),
-                                    "change_pct": round(float(calc_change_pct), 2),
-                                    "volume": int(meta.get("regularMarketVolume") or 0),
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                    "data_status": "delayed",
-                                    "source": "Backup (Yahoo Chart API)",
-                                }
+                            quote_dict = MarketDataService._parse_yahoo_chart_meta(meta, sym)
+                            if quote_dict:
+                                return sym, quote_dict
                 except Exception as ex:
                     logger.debug(f"Direct chart fetch failed for {sym}: {ex}")
                 return sym, None
@@ -472,6 +591,7 @@ class MarketDataService:
                         if isinstance(res, tuple) and res[1] is not None:
                             sym, quote_data = res
                             quotes_dict[sym] = quote_data
+                            MarketDataService._last_yahoo_tick_time = now
                             try:
                                 await cache_set(f"quote:{sym}", quote_data, ttl=settings.CACHE_TTL_QUOTE)
                             except Exception:
@@ -770,8 +890,72 @@ class MarketDataService:
                 if nse_candles:
                     await cache_set(cache_key, nse_candles, ttl=300)
                     return nse_candles
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"yfinance candle fetch failed for {original_symbol}: {e}")
+
+        # 3. Tertiary fallback via direct Yahoo Chart API (resilient against crumb/cookie errors)
+        try:
+            import httpx
+            clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
+            if original_symbol.startswith("^"):
+                yf_sym = original_symbol
+            elif original_symbol.endswith(".BO"):
+                yf_sym = f"{clean_sym}.BO"
+            else:
+                yf_sym = f"{clean_sym}.NS"
+
+            yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
+            interval = yf_timeframe_map.get(timeframe, "1d")
+            chart_range = "1y" if interval == "1d" else ("60d" if "m" in interval or "h" in interval else "5y")
+
+            direct_chart_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval={interval}&range={chart_range}"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            async with httpx.AsyncClient(headers=headers, timeout=6.0) as client:
+                resp = await client.get(direct_chart_url)
+                if resp.status_code == 200:
+                    cdata = resp.json()
+                    res_list = cdata.get("chart", {}).get("result", [])
+                    if res_list:
+                        result0 = res_list[0]
+                        timestamps = result0.get("timestamp", [])
+                        quotes_arr = result0.get("indicators", {}).get("quote", [{}])[0]
+                        opens = quotes_arr.get("open", [])
+                        highs = quotes_arr.get("high", [])
+                        lows = quotes_arr.get("low", [])
+                        closes = quotes_arr.get("close", [])
+                        volumes = quotes_arr.get("volume", [])
+
+                        direct_candles = []
+                        for i in range(len(timestamps)):
+                            try:
+                                c = closes[i] if i < len(closes) else None
+                                if c is None or not math.isfinite(c) or c <= 0:
+                                    continue
+                                o = opens[i] if i < len(opens) and opens[i] is not None and math.isfinite(opens[i]) else c
+                                h = highs[i] if i < len(highs) and highs[i] is not None and math.isfinite(highs[i]) else c
+                                l = lows[i] if i < len(lows) and lows[i] is not None and math.isfinite(lows[i]) else c
+                                v = volumes[i] if i < len(volumes) and volumes[i] is not None and math.isfinite(volumes[i]) else 0
+                                ts_iso = datetime.fromtimestamp(timestamps[i], tz=timezone.utc).isoformat()
+                                direct_candles.append({
+                                    "timestamp": ts_iso,
+                                    "open": round(float(o), 2),
+                                    "high": round(float(h), 2),
+                                    "low": round(float(l), 2),
+                                    "close": round(float(c), 2),
+                                    "volume": int(v),
+                                })
+                            except Exception:
+                                continue
+
+                        if direct_candles:
+                            direct_candles.sort(key=lambda x: x["timestamp"])
+                            if limit and len(direct_candles) > limit:
+                                direct_candles = direct_candles[-limit:]
+                            ttl = settings.CACHE_TTL_INTRADAY if timeframe in ("1m", "5m", "15m", "30m") else settings.CACHE_TTL_DAILY_CANDLES
+                            await cache_set(cache_key, direct_candles, ttl=ttl)
+                            return direct_candles
+        except Exception as e:
+            logger.debug(f"Direct Yahoo Chart candle fallback failed for {original_symbol}: {e}")
 
         return []
 

@@ -72,10 +72,14 @@ from backend.services.market_data import market_data_service
 
 async def poll_market_data():
     """
-    Sub-second / 1-second real-time market data streaming loop.
-    Fetches real-time quotes via Fyers bulk quotes in a single sub-100ms request
-    and broadcasts live ticks to all connected chart and dashboard WebSocket clients.
+    Autonomous Dual-Engine real-time market data streaming loop.
+    - If Fyers WebSocket push stream is active: operates as an auxiliary synchronizer (every 4s).
+    - If Fyers is expired / disconnected: operates as the primary live ticker using Yahoo Finance
+      Backup Engine (every 3s), broadcasting live ticking prices to charts and dashboards.
     """
+    from backend.services.fyers_stream import fyers_stream_service
+    from backend.services.market_data import MarketDataService
+
     while True:
         try:
             # Collect all active subscribed symbols across all connections
@@ -83,7 +87,15 @@ async def poll_market_data():
             for conn in _market_connections.values():
                 symbols.update(conn.get("symbols", set()))
             
+            # If clients are connected, ensure major indices are also kept fresh
+            if _market_connections and not symbols:
+                symbols.update(["^NSEI", "^NSEBANK"])
+
+            fyers_connected = fyers_stream_service.is_connected and MarketDataService._fyers_token_valid
+
             if symbols:
+                # If Fyers is connected, bulk quotes fetch via Fyers
+                # If Fyers is disconnected/expired, fetch_quotes_bulk automatically uses Yahoo backup
                 quotes_map = await market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=True)
                 for symbol, quote in quotes_map.items():
                     if quote and quote.get("price", 0) > 0:
@@ -96,13 +108,23 @@ async def poll_market_data():
                             timestamp=quote.get("timestamp"),
                             open_price=quote.get("open"),
                             high_price=quote.get("high"),
-                            low_price=quote.get("low")
+                            low_price=quote.get("low"),
+                            source=quote.get("source", "Backup (Yahoo Finance)" if not fyers_connected else "Fyers API"),
+                            data_status=quote.get("data_status", "live_backup" if not fyers_connected else "realtime")
                         )
         except Exception as e:
-            logger.error(f"Error in real-time market data streaming poller: {e}")
+            logger.error(f"Error in dual-engine market data streaming poller: {e}")
         
-        # Real-time tick broadcast frequency: 1.0 second for true per-second price updates
-        await asyncio.sleep(1.0)
+        # Dual-Engine smart polling intervals:
+        # In Fyers push mode: 4.0s keep-alive interval
+        # In Yahoo backup mode: 3.0s interval for smooth ticking without hitting 429 rate limits
+        try:
+            fyers_connected = fyers_stream_service.is_connected and MarketDataService._fyers_token_valid
+            poll_interval = 4.0 if fyers_connected else 3.0
+        except Exception:
+            poll_interval = 3.0
+
+        await asyncio.sleep(poll_interval)
 
 
 async def broadcast_alert(alert_payload: dict, user_id: str | None = None):
@@ -137,7 +159,9 @@ async def broadcast_market_update(
     timestamp: str | None = None,
     open_price: float | None = None,
     high_price: float | None = None,
-    low_price: float | None = None
+    low_price: float | None = None,
+    source: str | None = None,
+    data_status: str | None = None,
 ):
     """Broadcast market updates to subscribed clients."""
     clean_sym = symbol.replace(".NS", "").replace(".BO", "")
@@ -151,7 +175,9 @@ async def broadcast_market_update(
         "timestamp": timestamp,
         "open": open_price,
         "high": high_price,
-        "low": low_price
+        "low": low_price,
+        "source": source or "Live Market Feed",
+        "data_status": data_status or "realtime"
     }
     disconnected = []
     for conn_id, conn_data in list(_market_connections.items()):

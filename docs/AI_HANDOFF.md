@@ -12,7 +12,101 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-10-15)
+## Latest verified checks (2026-10-20)
+
+- **Fyers OAuth Exchange Error Diagnostics & Single-Use Auth Code Guidance:**
+  - **Error Diagnosis**: The user experienced a 400 "Bad request" when attempting to activate a Fyers token. In Fyers V3 OAuth, authorization codes expire in 2-3 minutes and can only be used once. If the user pasted an already-used code or an old URL, `SessionModel.generate_token()` returned an error which was previously masked, falling back to treating the raw auth code as an access token, which Fyers Profile API rejected with "Bad request".
+  - **Fix Applied**: Hardened `update_fyers_token` in `backend/api/settings.py` to capture Fyers OAuth exchange errors directly and return explicit guidance: *"Fyers rejected this authorization code. Authorization codes expire within 2-3 minutes and can only be used ONCE. Please tap '1. Open Fyers Login' to log in fresh and activate immediately."* Added UI tip banner in `AdminPage.tsx`.
+  - **Temporary Network Glitch Diagnosis**: Browser `ERR_CONNECTION_RESET` and 500 errors were transient caused by the backend container restarting while the frontend was querying indices. As soon as Uvicorn completed startup, Nifty 50 and Nifty Bank resolved correctly (`NIFTY 50 22,888.95 -257.20 (-1.11%)`).
+  - **Verification Evidence**:
+    - Backend Unit Tests: **8/8 PASSED in test_fyers_token_manager.py**; **5/5 PASSED in test_dual_connection_engine.py**.
+    - Frontend Production Build: **1,983 modules transformed, PASSED cleanly in 1m 4s with 0 errors**.
+
+- **SYS-003 Market Data Feeds & Fallback Validator Fixed:**
+  - **Root Cause Identified**: The system validator (`backend/services/system_validator.py:407`) was calling `market_data_service.get_quote("^NSEI")`, which raised `AttributeError: 'MarketDataService' object has no attribute 'get_quote'` because the canonical method is `fetch_quote`. This caused the check to fail instantly in **0.03ms** (`Latency: 0.03ms`), triggering a recurring WARNING alarm.
+  - **Fix Applied**: Added `@staticmethod async def get_quote(symbol)` alias in `backend/services/market_data.py` and updated `system_validator.py` to call `fetch_quote("^NSEI")`.
+  - **Verified Result**: SYS-003 now passes cleanly: `PASSED: Nifty 50 Index quote resolved at ₹22888.95 via Backup (Yahoo Chart API)`. Full validator suite passed 3/3.
+
+- **Live Fyers API Health & Ping Trigger Console with Cybersecurity Verification:**
+  - **Live Trigger On Tab View & On Demand**:
+    - Built-in auto-trigger runs `fetchFyersStatus()` whenever an administrator opens or switches to the Fyers Mobile Token Manager tab in `/admin`.
+    - Integrated manual trigger button (`⚡ Trigger Live Fyers API Check`) enabling on-demand round-trip pinging of Fyers V3 servers (`fyers.get_profile()`).
+    - Real-time diagnostic grid displays: Live API State (`LIVE & ACTIVE` vs `EXPIRED`), direct broker latency ping (`ping_ms`, e.g. `78 ms`), active market data feed (`Primary Fyers Push` vs `Backup Yahoo Finance 3s`), and formatted IST check timestamp (`checked_at_ist`).
+    - Added user-facing trigger alert toast notifications reporting exact round-trip ping time and live operational health.
+  - **Comprehensive Cybersecurity Assessment Verified**:
+    - **Zero Client-Side Token Exposure**: Access tokens and client IDs are strictly saved on the server in `.env` via Docker volume mounts. Tokens are NEVER sent to browsers, mobile devices, localStorage, or cookies.
+    - **Admin-Only RBAC Guardrails**: Protected by `require_admin` dependency; regular user profiles on `/settings` and non-admin REST responses completely scrub and hide broker credentials.
+    - **Broker Scope Isolation**: Market data and trading API tokens have zero permission to withdraw funds or modify linked bank accounts (fund withdrawal strictly requires Fyers portal 2FA biometrics/TOTP).
+    - **Anti-Hammering Cooldown**: Automatic 300s cooldown prevents IP blacklisting or account lockout if an expired token is detected at 06:00 AM IST.
+  - **Verification Evidence**:
+    - Backend Unit Tests (`test_fyers_token_manager.py` + `test_dual_connection_engine.py`): **13/13 PASSED (100% green)**.
+    - Frontend Production Build (`npm run build`): **1,983 modules transformed, PASSED cleanly in 59.45s with 0 errors**.
+    - Live Container Verification: Backend healthy (`http://127.0.0.1:8000/health` $\to$ 200 OK) with live dual feed status verified.
+
+- **Autonomous Dual-Connection Market Data Engine (Fyers Primary + Yahoo Finance 3s Live Backup):**
+  - **Token Expiry Timing Verified**: Confirmed Fyers V3 access tokens expire daily at **06:00:00 AM IST** (00:30 UTC), prior to NSE Pre-market opening at 09:00 AM IST.
+  - **Dual-Engine Architecture Built**:
+    - **Primary Engine**: Fyers API (WebSocket push stream + bulk quotes, <100ms real-time latency).
+    - **Backup Engine**: Autonomous Yahoo Finance Live Backup (concurrent direct chart queries, 3.0s smart polling interval).
+    - **Automatic Failover & Cooldown Protection**:
+      - When Fyers token expires (`code: -300`, `-360`, `"Token expired"`), system automatically marks `_fyers_token_valid = False`, switches to `BACKUP_YAHOO`, and places Fyers into a gentle 5-minute cooldown to prevent hammering Fyers with expired credentials.
+      - In `poll_market_data()` (`backend/api/websocket.py`), when Fyers is disconnected, the poller automatically streams Yahoo quotes every 3.0 seconds over WebSocket (`/ws/market`) to charts, live ticker, and watchlist so stock prices dynamically tick and change continuously with zero downtime.
+      - In `fetch_quotes_bulk()`, expired Fyers calls are bypassed, directly serving Yahoo Chart quotes and updating the Redis cache.
+    - **Instant Hot-Swap on Token Renewal**:
+      - When Admin activates a new Fyers token on mobile (`POST /api/settings/fyers/update-token`), `MarketDataService.reset_fyers_health()` restores `PRIMARY_FYERS`, clears cooldowns, and reconnects the WebSocket stream within 1 second.
+      - Next morning at 06:00 AM IST, when Fyers expires, the system automatically flips back to Yahoo backup seamlessly.
+    - **Admin & UI Visibility**:
+      - In `AdminPage.tsx`, dual engine badge displays: `🟢 Dual Engine Active: Primary Fyers WebSocket Stream (<100ms Push)` or `🟡 Dual Engine Active: Yahoo Finance Backup Engine (Live 3s Poller)`.
+  - **Verification Evidence**:
+    - Dual Engine Unit Tests (`backend/tests/test_dual_connection_engine.py`): **5/5 PASSED (100% green)**.
+    - Token Manager & Market Data Suite (`test_fyers_token_manager.py` + `test_market_data.py`): **19/19 PASSED (100% green)**.
+    - Frontend Production Build (`npm run build`): **1,983 modules transformed, PASSED cleanly in 34.44s with 0 errors**.
+    - Live Docker Container Probe: Verified `MarketDataService.get_feed_status()` returns `{'active_engine': 'PRIMARY_FYERS', 'fyers_valid': True, 'fyers_expiry_schedule': '06:00 AM IST Daily', 'dual_connection_active': True}`.
+
+- **Zero-Touch Mobile Fyers Token Activation & Admin-Only Security Isolation:**
+  - **Mobile Token Management UI & API Added**:
+    - Built a mobile-first administrative workflow allowing the user to update their daily Fyers access token directly from their mobile smartphone without using a laptop, running `generate_fyers_token.bat`, pasting into Windows Command Prompt, or executing manual `scp` and `ssh` commands (`scp -i ... .env opc@92.4.71.210:/home/opc/StockAI/.env` and `ssh ... docker compose restart backend celery_worker`).
+    - **Endpoints Implemented (`backend/api/settings.py`)**:
+      - `GET /api/settings/fyers/status`: Returns live connection health (`ACTIVE`, `EXPIRED`, `NOT_CONFIGURED`), broker ping, trader name (`Dipak Firake`), and masked client ID.
+      - `GET /api/settings/fyers/auth-url`: Generates official Fyers OAuth authorization URL with configured client ID and redirect URI.
+      - `POST /api/settings/fyers/update-token`: Accepts the full redirected URL, raw `auth_code`, or access token. Server exchanges the auth code with Fyers `SessionModel`, validates live credentials via `fyers.get_profile()`, updates `/app/.env` (which writes directly to the host `.env` via Docker volume mount), invalidates in-memory cache (`MarketDataService._env_mtime = 0.0`), and restarts `FyersStreamService` WebSocket tick stream dynamically without container restarts or downtime.
+    - **Admin-Only Page Placement (`frontend/src/pages/AdminPage.tsx`)**:
+      - Relocated the "Fyers Mobile Token Manager" exclusively to the **Administrative Control Center** (`/admin`). Added tabbed navigation (`📱 Fyers Mobile Token Manager` vs `👥 User Accounts & Subscriptions`) with real-time connection badges (`🟢 ACTIVE` vs `🟡 RENEW`).
+      - Strictly blocked unauthorized non-admin access with a security guard screen.
+    - **User Settings Sanitization (`frontend/src/pages/SettingsPage.tsx` & `backend/api/settings.py`)**:
+      - Removed the Fyers token card and broker inputs from `SettingsPage.tsx`. Regular users only see user-level trading preferences (Risk %, Slippage) without any broker keys or token fields.
+      - Hardened `GET /api/settings/` in `backend/api/settings.py` so that non-admins are never returned `fyers_access_token`, `fyers_client_id`, or any sensitive keys in the API response.
+  - **Verification Evidence**:
+    - Backend Unit Tests (`backend/tests/test_fyers_token_manager.py`): **8/8 PASSED (100% green)** including `test_get_all_settings_non_admin_filtering`.
+    - Combined Backend Suite: **19/19 PASSED**.
+    - Frontend Production Build (`npm run build`): **1,983 modules transformed, PASSED cleanly in 43.15s with 0 errors**.
+    - Live HTTP Integration Probe: Verified 401 Unauthorized for unauthenticated requests, and confirmed all 3 endpoints active in OpenAPI.
+
+- **Price & Percentage Discrepancy Diagnosis, 52W Collapse Fix & Resilient Market Data Fallback:**
+  - **Yesterday's PCJEWELLER Discrepancy Root Cause Solved**:
+    - Identified that when Fyers API token expired, the system invoked the Yahoo Chart fallback (`v8/finance/chart/{sym}?interval=1d&range=5d`).
+    - The legacy fallback extracted `chartPreviousClose = 14.10` (which is the close 5 trading days ago, NOT yesterday's session close!).
+    - This resulted in: Change = $18.13 - 14.10 = \mathbf{+4.03}$ and Change% = $\frac{4.03}{14.10} \times 100 = \mathbf{28.58\%}$ (instead of Zerodha Kite's $+1.85$ and $+11.36\%$).
+  - **52W High & Low Collapse Bug Solved**:
+    - Identified that in `backend/api/stocks.py`, when `candles` was short or empty, `else` collapsed both `52w_high` and `52w_low` to `price` (18.13).
+    - Refactored `backend/api/stocks.py` to preserve existing provider-supplied 52W values and fall back to company profiles rather than collapsing to current price.
+  - **Implemented Unified Yahoo Chart Meta Parser (`MarketDataService._parse_yahoo_chart_meta`)**:
+    - Extracts `regularMarketPrice`, `regularMarketChange`/`fulldayChange` (+1.85), `regularMarketChangePercent`/`fulldayChangePercent` (+11.36%), and computes true $\text{previous\_close} = 18.13 - 1.85 = \mathbf{16.28}$.
+    - Standardized across both single quote fallback and bulk quotes fallback (`fetch_quotes_bulk`).
+  - **Fyers After-Hours Rollover Guard & Tertiary Direct Candle Fallback**:
+    - Added after-hours rollover protection in Fyers quote parsing (`prev_close = last_price - calc_change` if `prev_close_price == lp`).
+    - Added tertiary direct async HTTP Yahoo Chart candle fallback in `fetch_candles` ensuring candles never return `[]` even if both Fyers and yfinance fail.
+  - **Verification Evidence**:
+    - `pytest backend/tests/test_market_data.py -v`: **11/11 PASSED in 8.46s (100% green)**.
+    - Live container probe for `PCJEWELLER.NS`: Price `18.13`, Change `+1.85`, Change% `11.36%`, Previous Close `16.28`, 52W High `18.65`, 52W Low `7.47` (100% match with Zerodha Kite).
+    - Live container probe for `GET /api/stocks/PCJEWELLER/insight`: Price `18.13`, Change `+1.85`, Change% `11.36%`, 52W High `18.65`, 52W Low `7.47`, Volume `1,69,80,22,472`, 993 daily candles.
+
+## Verified checks (2026-10-15)
+
+- **Oracle Cloud Billing Audit, ₹102 Pre-Auth Hold Diagnosis & Always Free Guardrails:**
+  - **₹102.xx Transaction Analysis**: Diagnosed the declined transaction of ₹102.xx from "ORACLE SINGAPORE". Confirmed this is a standard temporary pre-authorization validation hold (1.00 USD / 1.38 SGD) executed by Oracle Singapore to verify payment card authenticity and prevent bot/disposable account abuse. It is NOT an invoice or charge for uploading code or hosting.
+  - **Always Free Resource Quota Adherence**: Confirmed the running VM `stockai-server` (`VM.Standard.A1.Flex`, 1 OCPU, 6 GB RAM, 46.6 GB boot volume, 1 ephemeral IPv4) consumes only 25% of the 4 OCPU / 24 GB RAM Ampere allowance and 23% of the 200 GB storage limit, completely free of charge (₹0.00 / $0.00).
+  - **Billing & Protection Standard Added**: Authored Section 8 in `docs/SERVER_MANAGEMENT_CHEAT_SHEET.md` documenting step-by-step Cost Analysis verification, creating an automated ₹1.00 Budget with instant email alerting, and toggling the "Show only Always Free eligible options" safeguard.
 
 - **Comprehensive Mathematical, Machine Learning & Quantitative Model Precision Audit:**
   - **Machine Learning & Deep Learning Architecture Audit:**

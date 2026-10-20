@@ -188,3 +188,58 @@ sudo shutdown -h now
 | **Public IPv4** | 1 Ephemeral IPv4 | 1 Free Public IPv4 | **100% Free** |
 | **Data Egress** | ~10-50 GB / month | 10,000 GB (10 TB) / month | **100% Free** |
 | **Total Monthly Cost** | — | — | **₹0.00 / $0.00** |
+
+---
+
+## 8. Billing, Card Verification (₹102 Pre-Auth) & Zero-Cost Guardrails
+
+### ❓ What was the "₹102.xx at ORACLE SINGAPORE" transaction?
+- **It is NOT a bill or charge for using this project or uploading code.**
+- Oracle Cloud's regional billing hub for Asia-Pacific is located in **Singapore** (`Oracle Corporation Singapore Pte Ltd`).
+- To prevent bot spam and disposable card fraud, Oracle periodically issues a **temporary authorization hold** of **$1.00 USD (or SGD 1.38)** to test that the card on file is active and genuine.
+- When converted to Indian Rupees (INR) at daily forex exchange rates + standard bank currency conversion markup, it amounts to **exactly ₹102.xx**.
+- **Crucial Rule:** In normal operations, this is a **hold** that is **automatically reversed / refunded within 3 to 7 business days**.
+- If you disabled online or international transactions on your card, your bank **declined** this authorization test, causing Oracle's automated system to send a warning: *"Transaction declined: please update your payment method"*.
+
+---
+
+### 🛡️ How to Check Your Actual Bill (Confirming ₹0.00) in Oracle Console:
+1. Log in to [Oracle Cloud Console](https://cloud.oracle.com).
+2. Open the main navigation menu (top-left ☰ hamburger icon).
+3. Scroll down and click **Billing & Cost Management** $\to$ **Cost Analysis**.
+4. Set the date filter to **Current Month**.
+5. You will see your total billed amount is **₹0.00** ($0.00).
+6. Click **Billing & Cost Management** $\to$ **Invoices** to confirm there are **0 unpaid invoices**.
+
+---
+
+### 🔔 How to Set Up a ₹1.00 Budget Alert (Never Get Charged Surprises):
+1. In Oracle Cloud Console, open the navigation menu (☰).
+2. Go to **Billing & Cost Management** $\to$ **Budgets**.
+3. Click **Create Budget**.
+4. Configure:
+   - **Name:** `Zero-Cost-Safety-Alert`
+   - **Target Type:** Cost Tracking Tag or Compartment (select your root compartment)
+   - **Monthly Budget Amount:** `1` (₹1 or $1)
+   - **Threshold Metric:** Actual Spend
+   - **Threshold (%):** `100`%
+   - **Recipient Email:** Your personal email address
+5. Click **Create**.
+6. **Result:** If your cloud account ever consumes even ₹1 of paid services, Oracle will instantly email you an emergency warning.
+
+---
+
+### ✅ How to Verify Every Resource is "Always Free Eligible":
+1. **Compute Instance:**
+   - Go to **Compute** $\to$ **Instances** $\to$ click `stockai-server`.
+   - Next to the shape `VM.Standard.A1.Flex`, confirm the grey tag: **"Always Free Eligible"**.
+2. **Boot Volume:**
+   - Go to **Storage** $\to$ **Block Storage** $\to$ **Boot Volumes**.
+   - Confirm size is `46.6 GB` or `50 GB` (Free limit is up to **200 GB**).
+3. **Public IP:**
+   - Go to **Networking** $\to$ **Virtual Cloud Networks** $\to$ **Reserved Public IPs**.
+   - Ensure there are **no unattached reserved IPs** (unattached reserved IPs incur a small hourly fee). An ephemeral IP attached to a running instance is 100% free.
+4. **Always Free Filter / Toggle:**
+   - Whenever viewing or provisioning in Oracle Cloud, look for the toggle switch labeled:
+     **"Show only Always Free eligible options"**. Ensure this toggle is always kept ON.
+

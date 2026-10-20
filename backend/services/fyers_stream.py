@@ -186,10 +186,24 @@ class FyersStreamService:
         """Callback when Fyers WebSocket closes."""
         self._is_connected = False
         logger.warning(f"Fyers Data Socket closed: {message}")
+        try:
+            from backend.services.market_data import MarketDataService
+            msg_str = str(message).lower()
+            if "token" in msg_str or "auth" in msg_str or "expire" in msg_str or "invalid" in msg_str:
+                MarketDataService.mark_fyers_token_expired(f"WebSocket closed: {message}")
+        except Exception:
+            pass
 
     def _on_error(self, message: Any) -> None:
         """Callback when Fyers WebSocket encounters an error."""
         logger.warning(f"Fyers Data Socket error: {message}")
+        try:
+            from backend.services.market_data import MarketDataService
+            msg_str = str(message).lower()
+            if "token" in msg_str or "auth" in msg_str or "expire" in msg_str or "invalid" in msg_str:
+                MarketDataService.mark_fyers_token_expired(f"WebSocket error: {message}")
+        except Exception:
+            pass
 
     def _on_tick(self, message: dict) -> None:
         """
@@ -199,6 +213,11 @@ class FyersStreamService:
         try:
             if not isinstance(message, dict):
                 return
+
+            from backend.services.market_data import MarketDataService
+            MarketDataService._last_fyers_tick_time = datetime.now().timestamp()
+            MarketDataService._fyers_token_valid = True
+            MarketDataService._active_engine = "PRIMARY_FYERS"
 
             fyers_sym = message.get("symbol")
             if not fyers_sym:

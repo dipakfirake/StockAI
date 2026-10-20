@@ -161,3 +161,59 @@ async def test_fetch_quotes_bulk_fyers_and_fallback(mock_cache_set, mock_cache_g
         assert res["SBIN.NS"]["change"] == 5.5
         assert res["SBIN.NS"]["source"] == "Fyers API"
 
+
+def test_parse_yahoo_chart_meta_pcjeweller():
+    """Verify Yahoo Chart meta parsing avoids chartPreviousClose 5-day boundary trap."""
+    mock_meta = {
+        "regularMarketPrice": 18.13,
+        "chartPreviousClose": 14.10,  # 5-day boundary close, NOT yesterday's close!
+        "regularMarketChangePercent": 11.364,
+        "fulldayChange": 1.85,
+        "fulldayChangePercent": 11.364,
+        "fiftyTwoWeekHigh": 18.65,
+        "fiftyTwoWeekLow": 7.47,
+        "regularMarketVolume": 1697147831,
+    }
+    res = MarketDataService._parse_yahoo_chart_meta(mock_meta, "PCJEWELLER.NS")
+    assert res is not None
+    assert res["price"] == 18.13
+    assert res["change"] == 1.85
+    assert res["change_pct"] == 11.36
+    assert res["previous_close"] == 16.28
+    assert res["52w_high"] == 18.65
+    assert res["52w_low"] == 7.47
+
+
+@pytest.mark.asyncio
+@patch("backend.services.market_data.cache_get", return_value=None)
+@patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
+async def test_fyers_after_hours_prev_close_rollover(mock_cache_set, mock_cache_get):
+    """Verify Fyers quote parsing correctly derives prev_close when post-market rolls prev_close_price to lp."""
+    mock_fyers_resp = {
+        "s": "ok",
+        "d": [
+            {
+                "n": "NSE:PCJEWELLER-EQ",
+                "v": {
+                    "lp": 18.13,
+                    "prev_close_price": 18.13,  # Rolled over to lp after market close
+                    "ch": 1.85,
+                    "chp": 11.36,
+                    "volume": 16971478,
+                }
+            }
+        ]
+    }
+    with patch("backend.services.market_data.MarketDataService._get_fyers_client") as mock_fyers:
+        instance = MagicMock()
+        instance.quotes.return_value = mock_fyers_resp
+        mock_fyers.return_value = instance
+
+        res = await MarketDataService.fetch_quote("PCJEWELLER.NS")
+        assert res is not None
+        assert res["price"] == 18.13
+        assert res["change"] == 1.85
+        assert res["change_pct"] == 11.36
+        assert res["previous_close"] == 16.28
+
+

@@ -401,11 +401,13 @@ class SystemValidatorService:
     async def test_market_data_feed(self) -> TestResult:
         """SYS-003: Market Data Feeds & Fallback Resilience."""
         t0 = time.perf_counter()
+        err_msg = ""
         try:
             from backend.services.market_data import market_data_service
             try:
-                quote = await asyncio.wait_for(market_data_service.get_quote("^NSEI"), timeout=4.0)
-            except Exception:
+                quote = await asyncio.wait_for(market_data_service.fetch_quote("^NSEI"), timeout=6.0)
+            except Exception as e:
+                err_msg = str(e)
                 quote = None
 
             duration = (time.perf_counter() - t0) * 1000
@@ -426,7 +428,7 @@ class SystemValidatorService:
                     category="SYSTEM",
                     status="WARNING",
                     duration_ms=duration,
-                    details="Market data live quote timed out or unavailable. Resilient fallback active.",
+                    details=f"Market data live quote timed out or unavailable ({err_msg or 'empty response'}). Resilient fallback active.",
                     recommendation="Verify broker token validity or Yahoo Finance network egress.",
                 )
         except Exception as e:

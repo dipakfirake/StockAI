@@ -1,0 +1,138 @@
+"""
+Automated unit tests for the Autonomous Dual-Connection Market Data Engine.
+Verifies seamless failover to Yahoo Finance on Fyers token expiry,
+cooldown suppression, and instant hot-swap upon token renewal.
+"""
+
+import pytest
+import time
+from unittest.mock import patch, MagicMock, AsyncMock
+
+from backend.services.market_data import MarketDataService
+
+
+@pytest.fixture(autouse=True)
+def reset_dual_engine():
+    """Ensure clean engine state before each test."""
+    MarketDataService.reset_fyers_health()
+    yield
+    MarketDataService.reset_fyers_health()
+
+
+def test_dual_engine_default_state():
+    status = MarketDataService.get_feed_status()
+    assert status["active_engine"] == "PRIMARY_FYERS"
+    assert status["fyers_valid"] is True
+    assert status["fyers_expiry_schedule"] == "06:00 AM IST Daily"
+    assert "Fyers API" in status["source_label"]
+
+
+def test_mark_fyers_token_expired():
+    MarketDataService.mark_fyers_token_expired(reason="Token expired at 06:00 AM IST", cooldown_seconds=300.0)
+    status = MarketDataService.get_feed_status()
+    assert status["active_engine"] == "BACKUP_YAHOO"
+    assert status["fyers_valid"] is False
+    assert status["fyers_cooldown_remaining"] > 0
+    assert "Token expired at 06:00 AM IST" in status["fyers_token_error"]
+    assert "Yahoo Finance" in status["source_label"]
+
+
+def test_reset_fyers_health_restores_primary():
+    MarketDataService.mark_fyers_token_expired(reason="Daily reset")
+    assert MarketDataService._fyers_token_valid is False
+
+    MarketDataService.reset_fyers_health()
+    status = MarketDataService.get_feed_status()
+    assert status["active_engine"] == "PRIMARY_FYERS"
+    assert status["fyers_valid"] is True
+    assert status["fyers_cooldown_remaining"] == 0
+    assert status["fyers_token_error"] == ""
+
+
+@pytest.mark.asyncio
+async def test_fetch_quotes_bulk_detects_token_expiry_and_fails_over():
+    """When Fyers returns -300 Token Expired, system automatically switches to BACKUP_YAHOO."""
+    mock_fyers = MagicMock()
+    # Fyers returns official -300 token expired response
+    mock_fyers.quotes.return_value = {
+        "s": "error",
+        "code": -300,
+        "message": "Token has expired"
+    }
+
+    sample_meta = {
+        "regularMarketPrice": 2500.0,
+        "regularMarketChange": 25.0,
+        "regularMarketChangePercent": 1.01,
+        "chartPreviousClose": 2475.0,
+        "regularMarketVolume": 5000000,
+        "fiftyTwoWeekHigh": 2800.0,
+        "fiftyTwoWeekLow": 2100.0
+    }
+
+    with patch.object(MarketDataService, "_get_fyers_client", new_callable=AsyncMock) as mock_get_client, \
+         patch.object(MarketDataService, "_parse_yahoo_chart_meta") as mock_parse_meta, \
+         patch("httpx.AsyncClient.get") as mock_http_get:
+        
+        mock_get_client.return_value = mock_fyers
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"chart": {"result": [{"meta": sample_meta}]}}
+        mock_http_get.return_value = mock_resp
+        
+        mock_parse_meta.return_value = {
+            "symbol": "RELIANCE.NS",
+            "price": 2500.0,
+            "previous_close": 2475.0,
+            "change": 25.0,
+            "change_pct": 1.01,
+            "volume": 5000000,
+            "timestamp": "2026-10-20T09:15:00Z",
+            "data_status": "live_backup",
+            "source": "Backup (Yahoo Chart API)",
+        }
+
+        quotes = await MarketDataService.fetch_quotes_bulk(["RELIANCE.NS"], use_fallback=True)
+
+        # 1. Assert Fyers was detected as expired
+        assert MarketDataService._fyers_token_valid is False
+        assert MarketDataService._active_engine == "BACKUP_YAHOO"
+        
+        # 2. Assert quote was served via autonomous Yahoo backup without failing
+        assert "RELIANCE.NS" in quotes
+        assert quotes["RELIANCE.NS"]["price"] == 2500.0
+        assert quotes["RELIANCE.NS"]["source"] == "Backup (Yahoo Chart API)"
+
+
+@pytest.mark.asyncio
+async def test_fetch_quotes_bulk_bypasses_fyers_when_in_backup_mode():
+    """When already in backup mode, bulk quotes query Yahoo directly without calling Fyers."""
+    MarketDataService.mark_fyers_token_expired(reason="Expired at 06:00 AM")
+
+    with patch.object(MarketDataService, "_get_fyers_client", new_callable=AsyncMock) as mock_get_client, \
+         patch.object(MarketDataService, "_parse_yahoo_chart_meta") as mock_parse_meta, \
+         patch("httpx.AsyncClient.get") as mock_http_get:
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"chart": {"result": [{"meta": {}}]}}
+        mock_http_get.return_value = mock_resp
+
+        mock_parse_meta.return_value = {
+            "symbol": "TCS.NS",
+            "price": 3800.0,
+            "previous_close": 3780.0,
+            "change": 20.0,
+            "change_pct": 0.53,
+            "volume": 2000000,
+            "timestamp": "2026-10-20T09:15:00Z",
+            "data_status": "live_backup",
+            "source": "Backup (Yahoo Chart API)",
+        }
+
+        quotes = await MarketDataService.fetch_quotes_bulk(["TCS.NS"], use_fallback=True)
+
+        # Assert Fyers client was NOT called (zero latency wasted)
+        mock_get_client.assert_not_called()
+        assert "TCS.NS" in quotes
+        assert quotes["TCS.NS"]["price"] == 3800.0
