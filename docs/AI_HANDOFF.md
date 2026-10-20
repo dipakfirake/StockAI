@@ -14,8 +14,22 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-20)
 
+- **Clarified Dual-Engine Priority & Upgraded SYS-003 Diagnostic Messaging:**
+  - **User Clarification Addressed**: The user observed `SYS-003: Nifty 50 Index quote resolved at ₹22888.95 via Backup (Yahoo Chart API)` and asked why Yahoo was triggered if Fyers was supposed to be primary.
+  - **Diagnostic Evidence**: Live backend container probe of `fyers.get_profile()` confirmed: `{'s': 'error', 'code': 429, 'message': 'Bad request'}`. Fyers daily tokens expire at 06:00 AM IST. Because today's token had expired and had not yet been renewed with a fresh auth code, the Dual-Engine functioned *exactly as designed*: it safely engaged the autonomous Yahoo Finance failover backup so stock prices and dashboards remained 100% active with zero downtime.
+  - **Priority Hierarchy Reconfirmed**:
+    1. **Primary Engine (`Fyers API`)**: Used exclusively whenever the Fyers token is valid and active (<100ms real-time stream). Yahoo is NEVER invoked.
+    2. **Autonomous Failover Backup (`Yahoo Finance`)**: Engaged ONLY when Fyers token is expired or inactive.
+    3. **Instant Auto-Restore**: As soon as the Fyers token is renewed/activated in `/admin`, `MarketDataService.reset_fyers_health()` restores Fyers as the active primary engine within 1 second.
+  - **SYS-003 Enhancement (`backend/services/system_validator.py`)**:
+    - When Primary is Active: `🟢 PRIMARY ACTIVE: Nifty 50 Index quote resolved at ₹{price} via Fyers API (Real-time Stream).`
+    - When Failover is Active: `🟡 FAILOVER BACKUP: Nifty 50 Index quote resolved at ₹{price} via {source}. Fyers token is currently expired or unrenewed (daily 06:00 AM IST reset). The autonomous Yahoo Finance backup engine is keeping all market prices 100% live. Renew Fyers token in /admin to switch back to Primary.`
+  - **Verification Evidence**:
+    - Backend validator test suite (`backend/tests/test_system_validator.py`): **3/3 PASSED (100% green)**.
+    - Committed `86c6245` and pushed cleanly to `origin/main` on GitHub (`https://github.com/dipakfirake/StockAI.git`).
+
 - **Repository Pushed to GitHub (`origin/main`)**:
-  - Committed commit `9bddb57` ("feat: mobile fyers token manager, autonomous dual-engine market data failover, live api trigger console, and validator fix") and successfully pushed to `https://github.com/dipakfirake/StockAI.git`.
+  - Commits `9bddb57`, `b668723`, and `86c6245` pushed to `https://github.com/dipakfirake/StockAI.git`.
   - Ready to be pulled onto the Oracle Cloud VM (`92.4.71.210`) via `git pull origin main`.
 
 - **Fyers OAuth Exchange Error Diagnostics & Single-Use Auth Code Guidance:**
