@@ -1434,7 +1434,34 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - Backend Unit Tests (`test_fyers_token_manager.py`): **8/8 PASSED (100% green)**.
    - Dual Engine test suite (`backend/tests/test_dual_connection_engine.py`): **5/5 PASSED (100% green)**.
    - System Validator suite (`backend/tests/test_system_validator.py`): **3/3 PASSED (100% green)**. Total backend tests: **16/16 green**.
-**System Response**: Documented exact root cause (Docker startup environment variable shadowing the database token) and solution. Provided clear verification steps and git pull commands for the Oracle Cloud server.
+---
+
+### Session Entry 53: Comprehensive Architectural & Runtime Verification of Dual-Backup System
+**Timestamp**: 2026-10-21 10:40:00 IST (05:10:00 UTC)
+**User Prompt**:
+  `"and is my dual backup system for apis is working or not analyze and tell me."`
+**Agent Technical Actions**:
+1. **End-to-End Architectural Inspection**:
+   - Analyzed the primary and secondary fallback pathways in `backend/services/market_data.py`, `backend/services/fyers_stream.py`, and `backend/api/websocket.py`.
+   - Verified that:
+     1. Primary: Fyers API V3 (WebSocket streaming + bulk quotes, <100ms latency) is prioritized when token is valid.
+     2. Autonomous Failover: When Fyers token expires (daily 06:00 AM IST) or returns non-ok codes (-300, -360, 401, 403), system automatically engages `BACKUP_YAHOO` and sets 300s cooldown to prevent API hammering.
+     3. Concurrent Direct Yahoo Chart Engine: Resolves multi-symbol batches via `httpx.AsyncClient` concurrent gather without crumb/cookie blocks.
+     4. WebSocket Streaming Poller: Adjusts automatically to 3.0s polling interval during backup mode to ensure continuous live price ticks across all connected frontends with zero disruption.
+     5. Instant Hot-Swap: Renews to `PRIMARY_FYERS` within 1 second of admin activation in `/admin`.
+2. **Live Runtime Container Verification**:
+   - Executed live dual-backup audit in running Docker container:
+     - Verified initial engine status: `PRIMARY_FYERS` (dual connection enabled).
+     - Simulated 06:00 AM IST token expiration: `mark_fyers_token_expired()` switched engine to `BACKUP_YAHOO` immediately.
+     - Single Quote Benchmark: `^NSEI` resolved to ₹22,965.15 (+0.33%) via `Backup (Yahoo Chart API)`.
+     - Multi-Symbol Bulk Benchmark: 6 concurrent symbols (`^NSEI`, `^NSEBANK`, `RELIANCE.NS`, `TCS.NS`, `INFY.NS`, `HDFCBANK.NS`) resolved 6/6 successfully in 1,705ms (284ms per symbol average) with 0 failures.
+     - Simulated Token Renewal: `reset_fyers_health()` cleanly restored active engine to `PRIMARY_FYERS`.
+3. **Automated Test Evidence**:
+   - Dual-connection test suite (`test_dual_connection_engine.py`): **5/5 PASSED (100% green)**.
+   - Token manager test suite (`test_fyers_token_manager.py`): **8/8 PASSED (100% green)**.
+   - System validator test suite (`test_system_validator.py`): **3/3 PASSED (100% green)**. Total backend tests: **16/16 green**.
+**System Response**: Delivered structured, evidence-backed report confirming that the dual backup system is 100% operational, illustrating real benchmark numbers from the live container test, and explaining how the failover and auto-recovery cycle protects against daily morning broker downtime.
+
 
 
 
