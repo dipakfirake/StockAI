@@ -1410,7 +1410,32 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - Ran backend validator test suite (`backend/tests/test_system_validator.py`): **3/3 PASSED (100% green)**.
    - Staged and committed changes as `86c6245`: `fix(validator): distinguish primary Fyers stream from autonomous Yahoo backup engine in SYS-003`.
    - Pushed commit `86c6245` cleanly to `origin/main` on GitHub (`https://github.com/dipakfirake/StockAI.git`).
-**System Response**: Delivered a thorough, reassuring explanation confirming that Fyers is 100% the primary feed, explaining that Fyers is currently in failover backup mode because today's token has expired, demonstrating that renewing the token in `/admin` immediately flips the system back to Fyers, and provided git pull instructions for the Oracle Cloud VM.
+---
+
+### Session Entry 52: Fyers Live Check Resolution & Credential Precedence Hotfix
+**Timestamp**: 2026-10-21 10:35:00 IST (05:05:00 UTC)
+**User Prompt**:
+  `"⚠️ Live Check Notice: Fyers token is expired (Token is Invalid or Expired). Autonomous Yahoo Finance Backup Engine is actively feeding stock prices with zero disruption. what is happening when i updated token the above error comes every time now and following message also cames : Fyers access token renewed successfully! Welcome, DIPAK CHANDRAKANT FIRAKE. so how to verify that."`
+**Agent Technical Actions**:
+1. **Root Cause Analysis**:
+   - Traced why `GET /api/settings/fyers/status` was failing with `"Token is Invalid or Expired"` immediately after `POST /api/settings/fyers/update-token` succeeded and returned `"Welcome, DIPAK CHANDRAKANT FIRAKE"`.
+   - Identified that `get_fyers_status` checked `access_token = env_values.get("FYERS_ACCESS_TOKEN") or os.getenv("FYERS_ACCESS_TOKEN")`.
+   - Inside the container, `os.getenv("FYERS_ACCESS_TOKEN")` was non-empty because Docker populated it from `.env` when the container was booted yesterday.
+   - Consequently, `if not access_token:` evaluated to `False`, and `get_fyers_status` completely skipped reading the newly verified token from Database `SystemSettings`!
+   - `get_fyers_status` pinged Fyers with the stale `os.getenv` token, Fyers rejected it with `"Token is Invalid or Expired"`, and `get_fyers_status` marked Fyers expired, switching back to Yahoo backup.
+2. **Implementation of Fixes**:
+   - In `backend/api/settings.py` (`get_fyers_status`): Inverted lookup order to check Database `SystemSettings` (key `fyers_access_token`) and Redis cache (`fyers_creds`) FIRST before falling back to `os.getenv`.
+   - In `backend/api/settings.py` (`update_fyers_token`):
+     - Immediately synchronized in-memory `os.environ["FYERS_ACCESS_TOKEN"] = token` and `settings.FYERS_ACCESS_TOKEN = token`.
+     - Cached the verified credentials in Redis (`cache_set("fyers_creds")`).
+     - Hot-updated `MarketDataService._env_cache["FYERS_ACCESS_TOKEN"] = token`.
+   - In `backend/services/market_data.py` (`_get_fyers_client`) & `backend/services/fyers_stream.py`: Guarded token loading so unmounted/stale `.env` files cannot clobber active tokens obtained from DB or Redis cache.
+3. **Verification**:
+   - Backend Unit Tests (`test_fyers_token_manager.py`): **8/8 PASSED (100% green)**.
+   - Dual Engine test suite (`backend/tests/test_dual_connection_engine.py`): **5/5 PASSED (100% green)**.
+   - System Validator suite (`backend/tests/test_system_validator.py`): **3/3 PASSED (100% green)**. Total backend tests: **16/16 green**.
+**System Response**: Documented exact root cause (Docker startup environment variable shadowing the database token) and solution. Provided clear verification steps and git pull commands for the Oracle Cloud server.
+
 
 
 

@@ -107,6 +107,15 @@ class FyersStreamService:
         access_token = settings.FYERS_ACCESS_TOKEN
 
         try:
+            from backend.core.cache import cache_get
+            cached_creds = await cache_get("fyers_creds")
+            if cached_creds and cached_creds.get("access_token"):
+                client_id = cached_creds.get("client_id", client_id)
+                access_token = cached_creds.get("access_token", access_token)
+        except Exception:
+            pass
+
+        try:
             from backend.core.database import AsyncSessionLocal
             from backend.models.settings import SystemSettings
             from sqlalchemy import select
@@ -125,7 +134,7 @@ class FyersStreamService:
         if hasattr(MarketDataService, "_env_cache") and MarketDataService._env_cache:
             if MarketDataService._env_cache.get("FYERS_CLIENT_ID"):
                 client_id = MarketDataService._env_cache["FYERS_CLIENT_ID"]
-            if MarketDataService._env_cache.get("FYERS_ACCESS_TOKEN"):
+            if MarketDataService._env_cache.get("FYERS_ACCESS_TOKEN") and not access_token:
                 access_token = MarketDataService._env_cache["FYERS_ACCESS_TOKEN"]
 
         if not client_id or not access_token:

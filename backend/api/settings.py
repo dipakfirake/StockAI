@@ -19,6 +19,7 @@ from backend.models.user import User
 from backend.api.admin import require_admin
 from backend.core.audit_logger import log_security_event
 from backend.core.logging_config import get_logger
+from backend.core.config import settings
 
 logger = get_logger(__name__)
 
@@ -174,27 +175,50 @@ async def get_fyers_status(
     Check current Fyers connection status, trader name, and whether real-time data is active.
     Masks credentials completely.
     """
+    client_id = None
+    access_token = None
+
+    # Priority 1: Check Database SystemSettings (persisted active token from mobile/admin renewal)
+    try:
+        fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalars().first()
+        if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 20:
+            access_token = fyers_token_obj.value.strip()
+    except Exception:
+        pass
+
+    try:
+        fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalars().first()
+        if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
+            client_id = fyers_client_obj.value.strip()
+    except Exception:
+        pass
+
+    # Priority 2: Check Redis Cache ('fyers_creds')
+    if not access_token or not client_id:
+        try:
+            from backend.core.cache import cache_get
+            cached_creds = await cache_get("fyers_creds")
+            if cached_creds:
+                if not access_token and cached_creds.get("access_token"):
+                    access_token = cached_creds["access_token"]
+                if not client_id and cached_creds.get("client_id"):
+                    client_id = cached_creds["client_id"]
+        except Exception:
+            pass
+
+    # Priority 3: Check dynamic .env file
     env_path = _find_env_path()
     env_values = dotenv.dotenv_values(str(env_path)) if (env_path and env_path.exists()) else {}
-    
-    client_id = env_values.get("FYERS_CLIENT_ID") or os.getenv("FYERS_CLIENT_ID")
-    access_token = env_values.get("FYERS_ACCESS_TOKEN") or os.getenv("FYERS_ACCESS_TOKEN")
-
     if not client_id:
-        try:
-            fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalars().first()
-            if fyers_client_obj and fyers_client_obj.value:
-                client_id = fyers_client_obj.value
-        except Exception:
-            pass
-
+        client_id = env_values.get("FYERS_CLIENT_ID")
     if not access_token:
-        try:
-            fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalars().first()
-            if fyers_token_obj and fyers_token_obj.value:
-                access_token = fyers_token_obj.value
-        except Exception:
-            pass
+        access_token = env_values.get("FYERS_ACCESS_TOKEN")
+
+    # Priority 4: Process environment variables (container launch defaults)
+    if not client_id:
+        client_id = os.getenv("FYERS_CLIENT_ID") or settings.FYERS_CLIENT_ID
+    if not access_token:
+        access_token = os.getenv("FYERS_ACCESS_TOKEN") or settings.FYERS_ACCESS_TOKEN
 
     from backend.services.market_data import MarketDataService
 
@@ -430,14 +454,11 @@ async def update_fyers_token(
     user_name = prof.get("data", {}).get("name", "Trader")
     fy_id = prof.get("data", {}).get("fy_id", client_id)
 
-    # 4. Automatically persist into .env file
-    if env_path:
-        try:
-            dotenv.set_key(str(env_path), "FYERS_ACCESS_TOKEN", token)
-        except Exception as e:
-            logger.warning(f"Failed to update .env directly: {e}")
+    # 4. Immediately update in-memory process environment and Pydantic settings
+    os.environ["FYERS_ACCESS_TOKEN"] = token
+    settings.FYERS_ACCESS_TOKEN = token
 
-    # 5. Persist into DB SystemSettings
+    # 5. Persist into DB SystemSettings (source of truth across all workers)
     try:
         fyers_setting = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalars().first()
         if fyers_setting:
@@ -448,17 +469,30 @@ async def update_fyers_token(
     except Exception as e:
         logger.warning(f"Could not persist token in SystemSettings: {e}")
 
-    # 6. Hot-reload MarketDataService & reset Fyers health to primary engine
-    from backend.services.market_data import MarketDataService
-    MarketDataService.reset_fyers_health()
+    # 6. Cache the active verified credentials in Redis
     try:
-        from backend.core.cache import cache_delete
-        await cache_delete("fyers_creds")
+        from backend.core.cache import cache_set, cache_delete
+        await cache_set("fyers_creds", {"client_id": client_id, "access_token": token}, ttl=86400)
         await cache_delete("quote:PCJEWELLER.NS")
-    except Exception:
-        pass
+        await cache_delete("quote:^NSEI")
+    except Exception as e:
+        logger.warning(f"Could not cache fyers_creds: {e}")
 
-    # 7. Restart WebSocket Tick Stream with new token
+    # 7. Automatically persist into .env file if path exists
+    if env_path:
+        try:
+            dotenv.set_key(str(env_path), "FYERS_ACCESS_TOKEN", token)
+        except Exception as e:
+            logger.warning(f"Failed to update .env directly: {e}")
+
+    # 8. Hot-reload MarketDataService & reset Fyers health to primary engine
+    from backend.services.market_data import MarketDataService
+    if hasattr(MarketDataService, "_env_cache") and isinstance(MarketDataService._env_cache, dict):
+        MarketDataService._env_cache["FYERS_ACCESS_TOKEN"] = token
+    MarketDataService._env_mtime = 0.0
+    MarketDataService.reset_fyers_health()
+
+    # 9. Restart WebSocket Tick Stream with new token
     try:
         from backend.services.fyers_stream import fyers_stream_service
         await fyers_stream_service.stop()

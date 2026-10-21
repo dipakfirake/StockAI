@@ -12,6 +12,21 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-10-21)
+
+- **Fyers Live Check Resolution & Credential Precedence Hotfix:**
+  - **Symptom Diagnosed**: User renewed token in `/admin`, received success toast (`"Fyers access token renewed successfully! Welcome, DIPAK CHANDRAKANT FIRAKE"`), but the live check toast immediately triggered: `"⚠️ Live Check Notice: Fyers token is expired (Token is Invalid or Expired)"`.
+  - **Root Cause Identified**:
+    1. In `backend/api/settings.py` (`get_fyers_status`), `access_token` was populated via `env_values.get("FYERS_ACCESS_TOKEN") or os.getenv("FYERS_ACCESS_TOKEN")`. Because Docker injected the old expired token into container environment at boot time, `os.getenv` was always non-empty.
+    2. Consequently, `if not access_token:` evaluated to `False`, and `get_fyers_status` **never queried Database `SystemSettings`** where the newly validated token had just been stored!
+    3. `get_fyers_status` used the stale `os.getenv` token to ping Fyers, triggering `{"s": "error", "message": "Token is Invalid or Expired"}`, which in turn invoked `MarketDataService.mark_fyers_token_expired()` and flipped the system back to Yahoo backup.
+  - **Fix Applied**:
+    1. In `get_fyers_status` (`backend/api/settings.py`): Inverted priority to check Database `SystemSettings` and Redis cache (`fyers_creds`) FIRST. Stale startup `os.getenv` is now solely a lowest-priority fallback.
+    2. In `update_fyers_token` (`backend/api/settings.py`): Immediately synchronizes in-memory `os.environ["FYERS_ACCESS_TOKEN"] = token`, `settings.FYERS_ACCESS_TOKEN = token`, caches active credentials in Redis (`cache_set("fyers_creds")`), and hot-updates `MarketDataService._env_cache`.
+    3. In `_get_fyers_client` (`backend/services/market_data.py`) & `FyersStreamService.start` (`backend/services/fyers_stream.py`): Guarded access token loading so an unmounted or stale `.env` file never clobbers active tokens already retrieved from DB/Redis cache.
+  - **Verification Evidence**:
+    - Backend Unit Tests (`test_fyers_token_manager.py` + `test_dual_connection_engine.py` + `test_system_validator.py`): **16/16 PASSED (100% green)**.
+
 ## Latest verified checks (2026-10-20)
 
 - **Clarified Dual-Engine Priority & Upgraded SYS-003 Diagnostic Messaging:**

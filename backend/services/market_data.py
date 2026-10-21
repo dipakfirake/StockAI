@@ -214,7 +214,7 @@ class MarketDataService:
                 if MarketDataService._env_cache:
                     if MarketDataService._env_cache.get("FYERS_CLIENT_ID"):
                         client_id = MarketDataService._env_cache["FYERS_CLIENT_ID"]
-                    if MarketDataService._env_cache.get("FYERS_ACCESS_TOKEN"):
+                    if MarketDataService._env_cache.get("FYERS_ACCESS_TOKEN") and not access_token:
                         access_token = MarketDataService._env_cache["FYERS_ACCESS_TOKEN"]
             except Exception:
                 pass
