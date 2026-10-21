@@ -158,3 +158,51 @@ class TestSectorUniverses:
         for s in sectors:
             assert s in SECTOR_UNIVERSES
             assert len(SECTOR_UNIVERSES[s]) >= 5
+
+
+@pytest.mark.asyncio
+class TestOptimalEntryEngine:
+    """Verify AI Optimal Entry calculations and dual profit metrics."""
+
+    @patch("backend.services.screener.market_data_service.fetch_quote")
+    @patch("backend.services.screener.market_data_service.fetch_candles")
+    @patch("backend.services.screener.market_data_service.get_stock_info")
+    @patch("backend.services.screener.market_data_service.fetch_corporate_events")
+    @patch("backend.data.ingestion.news_scraper.fetch_stock_news")
+    @patch("backend.services.screener.indicator_service.compute_all")
+    @patch("backend.services.screener.signal_engine.evaluate")
+    async def test_pullback_dip_optimal_entry_calculation(
+        self, mock_sig, mock_ind, mock_news, mock_events, mock_info, mock_candles, mock_quote
+    ):
+        """When price is extended above 21-EMA, optimal entry suggests waiting for pullback dip."""
+        current_price = 438.0
+        atr = 10.0
+        ema_21 = 430.0  # extended by 8.0 > 0.45 * 10 = 4.5
+
+        mock_quote.return_value = {"price": current_price}
+        mock_candles.return_value = [
+            {"date": "2026-10-20", "open": 430, "high": 440, "low": 428, "close": 438, "volume": 1000000}
+        ] * 35
+        mock_info.return_value = {"roe": 0.18, "debt_to_equity": 0.5, "pe_ratio": 20.0}
+        mock_news.return_value = []
+        mock_events.return_value = {}
+        mock_ind.return_value = {
+            "atr_14": atr,
+            "ema_21": ema_21,
+            "ema_9": 435.0,
+            "bb": {"middle": 431.0}
+        }
+        mock_sig.return_value = [{"composite_rating": 85.0}]
+
+        res = await screener_service._analyze_symbol("KOTAKBANK.NS", force_refresh=True)
+        assert res is not None
+        assert res["action"] == "BUY"
+        plan = res["trade_plan"]
+        assert plan["entry_price"] == current_price
+        assert plan["entry_type"] == "PULLBACK_DIP"
+        assert plan["optimal_entry_price"] < current_price
+        assert plan["optimal_entry_price"] >= ema_21
+        assert "Dip to 21-EMA" in plan["entry_zone"]
+        assert plan["optimal_expected_gain_pct"] >= plan["expected_gain_pct"]
+        assert plan["optimal_reward_to_risk"] >= plan["reward_to_risk"]
+

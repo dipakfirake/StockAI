@@ -14,6 +14,29 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-21)
 
+- **AI Optimal Entry Price Engine & NIFTY 50 Screener Breadth Resolution:**
+  - **User Clarification Addressed**:
+    1. *"tell me that only kotak is showing here in nifty 50 screening is it by redis cache or antyhing ? or actually it is good stock tell me"*:
+       - **Empirical Diagnostics**: Ran live screener on all 25 Nifty 50 universe stocks in the backend container (`total_scanned: 25`, `valid_results: 24`).
+       - **Why Only Kotak Bank Showed**: Not a Redis cache defect. The Screener UI defaults to the `BUY` tab (`activeTab === 'BUY'`), which filters stocks with `total_score >= 60.0`. Under current market conditions, **22 out of 24 stocks were categorized as `HOLD` (consolidation/neutral)**, 1 as `SELL` (`POWERGRID.NS` at 39.5), and only **1 as `BUY` (`KOTAKBANK.NS` at 69.0 / Tech: 88.8)** due to strong relative strength. Clicking "HOLD (22)" or "ALL (24)" displays all remaining stocks.
+       - **Price Validity**: Kotak Mahindra Bank live price at ~₹435–₹437 was verified against real-time market quotes.
+    2. *"and entry price is shown for any stock is the current price. and target price why you cannot say best entry price less than current or more than current as it can give us actual profits."*:
+       - **Root Cause & Solution**: Previously, `trade_plan.entry_price` defaulted strictly to Current Market Price (CMP). Entering at market when a stock is extended above dynamic support carries downside risk of chasing intraday highs.
+       - **Optimal Entry Engine Implemented (`backend/services/screener.py`)**:
+         - Calculates structural levels: `ema_21`, `ema_9`, `bb_mid`, `swing_low`, `swing_high`.
+         - Detects setup patterns:
+           - **PULLBACK_DIP**: If `current_price > 21-EMA + 0.45*ATR`, sets optimal entry near the 21-EMA dip zone (e.g., ₹430.97 vs CMP ₹435.20).
+           - **BREAKOUT**: If within 0.25*ATR of swing high resistance, sets optimal entry above resistance confirmation (`swing_high + 0.15*ATR`).
+           - **MARKET_CMP**: If directly testing support with strong momentum, confirms entry at market level.
+         - Computes dual profit metrics: CMP Gain (+5.29%, R:R 2.2:1) vs Optimal Entry Gain (**+6.33%**, R:R **4.38:1**).
+       - **Frontend UI Upgraded (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+         - Card View: Added **AI Optimal Entry Strategy Banner** displaying Best Dip / Breakout Entry, Strategy Zone, Maximum Target Gain, and actionable trade advice.
+         - Table View: Added "Current (CMP)" and "Best Entry & Strategy" columns for side-by-side comparison.
+  - **Verification Evidence**:
+    - Backend Unit Tests: `backend/tests/test_swing_screener_categorization.py` **3/3 PASSED (100% green)**.
+    - Container Live Probe: `_analyze_symbol('KOTAKBANK.NS')` executed with live quotes, confirming `optimal_entry_price: 430.97`, `optimal_expected_gain_pct: 6.33%`, `optimal_reward_to_risk: 4.38:1`.
+    - Frontend Production Build: `tsc && vite build` **1,983 modules transformed, 0 errors, exit code 0**.
+
 - **Fyers Live Check Resolution & Credential Precedence Hotfix:**
   - **Symptom Diagnosed**: User renewed token in `/admin`, received success toast (`"Fyers access token renewed successfully! Welcome, DIPAK CHANDRAKANT FIRAKE"`), but the live check toast immediately triggered: `"⚠️ Live Check Notice: Fyers token is expired (Token is Invalid or Expired)"`.
   - **Root Cause Identified**:

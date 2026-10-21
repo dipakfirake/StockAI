@@ -4,7 +4,7 @@ import { marketApi, paperTradingApi, alertsApi } from '../services/api'
 import { 
   TrendingUp, TrendingDown, Minus, RefreshCw, Search, Filter, 
   ExternalLink, Briefcase, Bell, CheckCircle2, ShieldAlert, 
-  ArrowUpRight, ArrowDownRight, Layers, LayoutGrid, List, Sparkles, AlertCircle
+  ArrowUpRight, ArrowDownRight, Layers, LayoutGrid, List, Sparkles, AlertCircle, Target
 } from 'lucide-react'
 import { toast } from '../components/Toast'
 
@@ -17,6 +17,13 @@ interface TargetLevel {
 
 interface TradePlan {
   entry_price: number
+  current_price?: number
+  optimal_entry_price?: number
+  entry_type?: 'PULLBACK_DIP' | 'BREAKOUT' | 'MARKET_CMP' | 'RALLY_SELL' | 'BREAKDOWN' | 'CONSOLIDATION' | string
+  entry_zone?: string
+  entry_advice?: string
+  optimal_expected_gain_pct?: number
+  optimal_reward_to_risk?: number
   stop_loss: number
   target_price: number
   target_1?: number
@@ -496,10 +503,10 @@ export default function SwingScreenerPage() {
                 {/* Trade Setup Metrics */}
                 {plan ? (
                   <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 10 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 8 }}>
                       <div>
                         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                          {isHold ? 'Current' : 'Entry'}
+                          Current (CMP)
                         </div>
                         <div style={{ fontSize: 14, fontWeight: 600 }}>₹{plan.entry_price.toFixed(2)}</div>
                       </div>
@@ -522,6 +529,47 @@ export default function SwingScreenerPage() {
                         </div>
                       </div>
                     </div>
+
+                    {/* AI Optimal Entry Strategy Box */}
+                    {plan.optimal_entry_price && (
+                      <div style={{ 
+                        margin: '8px 0 10px 0', 
+                        padding: '8px 10px', 
+                        borderRadius: 6, 
+                        background: isBuy 
+                          ? 'rgba(16, 185, 129, 0.08)' 
+                          : isSell 
+                          ? 'rgba(239, 68, 68, 0.08)' 
+                          : 'rgba(255, 255, 255, 0.03)',
+                        border: `1px solid ${isBuy ? 'rgba(16, 185, 129, 0.25)' : isSell ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255, 255, 255, 0.06)'}`
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Target size={13} />
+                            {plan.entry_type === 'PULLBACK_DIP' ? 'Best Dip Entry: ' : 
+                             plan.entry_type === 'BREAKOUT' ? 'Breakout Entry: ' : 
+                             plan.entry_type === 'RALLY_SELL' ? 'Best Short Rally: ' : 
+                             plan.entry_type === 'BREAKDOWN' ? 'Breakdown Short: ' : 'Optimal Entry: '}
+                            ₹{plan.optimal_entry_price.toFixed(2)}
+                          </span>
+                          {plan.optimal_expected_gain_pct !== undefined && !isHold && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-bullish)', background: 'rgba(16, 185, 129, 0.15)', padding: '1px 6px', borderRadius: 4 }}>
+                              +{plan.optimal_expected_gain_pct.toFixed(1)}% Max Gain ({plan.optimal_reward_to_risk || plan.reward_to_risk}:1 R:R)
+                            </span>
+                          )}
+                        </div>
+                        {plan.entry_zone && (
+                          <div style={{ fontSize: 10, color: 'var(--color-text-secondary)', marginBottom: 2 }}>
+                            <strong style={{ color: 'var(--color-text-primary)' }}>Strategy Zone:</strong> {plan.entry_zone}
+                          </div>
+                        )}
+                        {plan.entry_advice && (
+                          <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.35 }}>
+                            💡 {plan.entry_advice}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, fontSize: 11, color: 'var(--color-text-secondary)', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: 8 }}>
                       <span>R:R: <strong style={{ color: plan.reward_to_risk >= 2 ? 'var(--color-bullish)' : 'inherit' }}>{plan.reward_to_risk}:1</strong></span>
@@ -593,7 +641,8 @@ export default function SwingScreenerPage() {
                 <th style={{ padding: '12px 16px' }}>Stock</th>
                 <th style={{ padding: '12px 16px' }}>Signal</th>
                 <th style={{ padding: '12px 16px' }}>Score</th>
-                <th style={{ padding: '12px 16px' }}>Entry Price</th>
+                <th style={{ padding: '12px 16px' }}>Current (CMP)</th>
+                <th style={{ padding: '12px 16px' }}>Best Entry & Strategy</th>
                 <th style={{ padding: '12px 16px' }}>Target (Gain)</th>
                 <th style={{ padding: '12px 16px' }}>Stop Loss (Risk)</th>
                 <th style={{ padding: '12px 16px' }}>R:R</th>
@@ -630,6 +679,23 @@ export default function SwingScreenerPage() {
                     </td>
                     <td style={{ padding: '12px 16px', fontWeight: 500 }}>
                       ₹{plan ? plan.entry_price.toFixed(2) : '—'}
+                    </td>
+                    <td style={{ padding: '12px 16px' }}>
+                      {plan?.optimal_entry_price ? (
+                        <div>
+                          <div style={{ fontWeight: 600, color: isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : 'inherit' }}>
+                            ₹{plan.optimal_entry_price.toFixed(2)}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                            {plan.entry_type === 'PULLBACK_DIP' ? 'Dip to 21-EMA' :
+                             plan.entry_type === 'BREAKOUT' ? 'Breakout' :
+                             plan.entry_type === 'RALLY_SELL' ? 'Rally Short' :
+                             plan.entry_type === 'BREAKDOWN' ? 'Breakdown' : 'At CMP'}
+                          </div>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td style={{ padding: '12px 16px', color: isSell ? 'var(--color-bearish)' : (isBuy ? 'var(--color-bullish)' : 'inherit'), fontWeight: 500 }}>
                       {plan ? `₹${plan.target_price.toFixed(2)} (${isSell ? '-' : '+'}${plan.expected_gain_pct.toFixed(1)}%)` : '—'}

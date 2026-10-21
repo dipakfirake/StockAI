@@ -1462,6 +1462,44 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - System validator test suite (`test_system_validator.py`): **3/3 PASSED (100% green)**. Total backend tests: **16/16 green**.
 **System Response**: Delivered structured, evidence-backed report confirming that the dual backup system is 100% operational, illustrating real benchmark numbers from the live container test, and explaining how the failover and auto-recovery cycle protects against daily morning broker downtime.
 
+---
+
+### Session Entry 54: NIFTY 50 Screener Breadth Analysis & AI Optimal Entry Price Engine
+**Timestamp**: 2026-10-21 13:25:00 IST (07:55:00 UTC)
+**User Prompt**:
+  `"KOTAKBANK BUY KOTAKBANK 69.0 / 100 Conviction Score Tech 88.8 Fund 60.0 Sentiment 50.0 Entry ₹437.95 Target ₹459.84 (+5.0%) Stop Loss ₹428.01 (-2.3%) tell me that only kotak is showing here in nifty 50 screening is it by redis cache or antyhing ? or actually it is good stock tell me and entry price is shown for any stock is the current price. and target price why you cannot say best entry price less than current or more than current as it can give us actual profits. /goal /plan"`
+**Agent Technical Actions**:
+1. **Empirical Screener Diagnostics & Market Breadth Analysis**:
+   - Executed live container screener scan on all 25 stocks in the NIFTY 50 sector universe (`SECTOR_UNIVERSES['NIFTY_50']`).
+   - Results: Scanned 25, Valid 24, BUY: 1 (`KOTAKBANK.NS` at 69.0), SELL: 1 (`POWERGRID.NS` at 39.5), HOLD: 22 (`ICICIBANK.NS` 59.2, `BHARTIARTL.NS` 53.5, `BAJFINANCE.NS` 53.0, `TCS.NS` 52.0, `AXISBANK.NS` 48.5, etc.).
+   - Established ground truth: The UI defaults to `activeTab = 'BUY'`, displaying stocks where `total_score >= 60.0`. 22 out of 24 Nifty 50 stocks are in consolidation/range-bound mode (`HOLD`). Kotak Bank was the sole stock exhibiting strong relative momentum (Technical: 88.8). Not a Redis cache bug. Clicking "HOLD (22)" or "ALL (24)" displays the other 23 stocks.
+   - Price verification: Kotak Mahindra Bank live price at ~₹435–₹437 was verified against real-time NSE market quotes.
+2. **AI Optimal Entry Price Engine Implementation**:
+   - Modified `backend/services/screener.py` (`_analyze_symbol`):
+     - Computed dynamic technical reference levels: `ema_21`, `ema_9`, `bb_mid`, `swing_low`, `swing_high`.
+     - Added entry classification logic:
+       - `PULLBACK_DIP`: When `current_price > 21-EMA + 0.45*ATR`, sets optimal entry near the 21-EMA dip zone to avoid buying the top of an intraday extension.
+       - `BREAKOUT`: When price is within 0.25*ATR of recent swing high resistance, calculates optimal entry above the breakout point (`swing_high + 0.15*ATR`).
+       - `MARKET_CMP`: When price is resting directly at support with active momentum, confirms direct market entry.
+     - Computed dual profit metrics: `expected_gain_pct` from CMP vs `optimal_expected_gain_pct` and `optimal_reward_to_risk` from best entry.
+     - Preserved `entry_price = current_price` for 100% backward compatibility.
+   - Updated `frontend/src/pages/SwingScreenerPage.tsx`:
+     - Extended `TradePlan` TypeScript interface with all new optimal entry attributes.
+     - Card View: Added **AI Optimal Entry Strategy Banner** displaying Best Dip / Breakout Entry, Strategy Zone, Maximum Target Gain, and actionable trade advice.
+     - Table View: Added "Current (CMP)" and "Best Entry & Strategy" columns for side-by-side comparison.
+3. **Verification & Regression Testing**:
+   - Backend unit tests (`backend/tests/test_swing_screener_categorization.py`): **3/3 PASSED (100% green)** including newly added `TestOptimalEntryEngine::test_pullback_dip_optimal_entry_calculation`.
+   - Dual connection engine test suite (`backend/tests/test_dual_connection_engine.py`): **5/5 PASSED (100% green)**.
+   - Live Container Runtime Probe: `screener_service._analyze_symbol('KOTAKBANK.NS')` executed with live market quotes:
+     - `current_price`: ₹435.20 (Gain +5.29%, R:R 2.2:1)
+     - `optimal_entry_price`: ₹430.97 (Dip to 21-EMA)
+     - `optimal_expected_gain_pct`: **+6.33%** (R:R **4.38:1**)
+     - `entry_zone`: `"₹429.56 – ₹432.38 (Dip to 21-EMA)"`
+     - `entry_advice`: `"Stock is extended above 21-EMA. Optimal entry on a minor pullback to ₹430.97 for max profit & lower risk."`
+   - Frontend Production Build: `tsc && vite build` **1,983 modules transformed, 0 errors, exit code 0**.
+**System Response**: Delivered comprehensive, empirical explanation addressing both why only Kotak Bank appeared in the BUY tab and presenting the newly implemented AI Optimal Entry Price Engine with dual profit metrics.
+
+
 
 
 

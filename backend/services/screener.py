@@ -278,6 +278,17 @@ class ScreenerService:
             # Enforce a minimum ATR (e.g. 1.5% of price) so target/SL are never exactly entry price
             atr = max(float(raw_atr) if raw_atr is not None else 0.0, current_price * 0.015)
             
+            # Structural reference levels for optimal entry analysis
+            ema_21 = float(indicators.get("ema_21") or 0.0) if indicators else 0.0
+            ema_9 = float(indicators.get("ema_9") or 0.0) if indicators else 0.0
+            bb = indicators.get("bb") or {}
+            bb_mid = float(bb.get("middle") or 0.0)
+            
+            recent_lows = [float(c["low"]) for c in candles[-10:] if isinstance(c, dict) and "low" in c] if candles else []
+            recent_highs = [float(c["high"]) for c in candles[-10:] if isinstance(c, dict) and "high" in c] if candles else []
+            swing_low = min(recent_lows) if recent_lows else current_price - (1.0 * atr)
+            swing_high = max(recent_highs) if recent_highs else current_price + (1.0 * atr)
+
             if total_score >= 60:
                 action = "BUY"
                 conviction_scale = (total_score - 60) / 40.0  # 0.0 to 1.0
@@ -288,6 +299,25 @@ class ScreenerService:
                 t2 = max(0.05, current_price + (target_mult * atr))
                 t3 = max(0.05, current_price + (3.5 * atr))
                 target = t2
+
+                ref_support = ema_21 if ema_21 > 0 else (bb_mid if bb_mid > 0 else current_price - (0.5 * atr))
+                if current_price > ref_support + (0.45 * atr):
+                    entry_type = "PULLBACK_DIP"
+                    optimal_entry_price = max(ref_support, current_price - (0.45 * atr))
+                    optimal_entry_price = round(optimal_entry_price, 2)
+                    entry_zone = f"₹{optimal_entry_price - 0.15*atr:.2f} – ₹{optimal_entry_price + 0.15*atr:.2f} (Dip to 21-EMA)"
+                    entry_advice = f"Stock is extended above 21-EMA. Optimal entry on a minor pullback to ₹{optimal_entry_price:.2f} for max profit & lower risk."
+                elif swing_high - current_price <= (0.25 * atr) and current_price >= swing_high * 0.99:
+                    entry_type = "BREAKOUT"
+                    optimal_entry_price = round(swing_high + (0.15 * atr), 2)
+                    entry_zone = f"Above ₹{optimal_entry_price:.2f} (Breakout Confirmation)"
+                    entry_advice = f"Testing resistance at ₹{swing_high:.2f}. Enter on confirmed volume breakout above ₹{optimal_entry_price:.2f}."
+                else:
+                    entry_type = "MARKET_CMP"
+                    optimal_entry_price = round(current_price, 2)
+                    entry_zone = f"₹{current_price - 0.15*atr:.2f} – ₹{current_price + 0.15*atr:.2f} (Current Market Level)"
+                    entry_advice = "Price is at the optimal accumulation zone near support. Suitable to enter at current market price."
+
             elif total_score <= 40:
                 action = "SELL"
                 conviction_scale = (40 - total_score) / 40.0  # 0.0 to 1.0
@@ -298,6 +328,25 @@ class ScreenerService:
                 t2 = max(0.05, current_price - (target_mult * atr))
                 t3 = max(0.05, current_price - (3.5 * atr))
                 target = t2
+
+                ref_resistance = ema_21 if ema_21 > 0 else (bb_mid if bb_mid > 0 else current_price + (0.5 * atr))
+                if current_price < ref_resistance - (0.45 * atr):
+                    entry_type = "RALLY_SELL"
+                    optimal_entry_price = min(ref_resistance, current_price + (0.45 * atr))
+                    optimal_entry_price = round(optimal_entry_price, 2)
+                    entry_zone = f"₹{optimal_entry_price - 0.15*atr:.2f} – ₹{optimal_entry_price + 0.15*atr:.2f} (Pullback to 21-EMA)"
+                    entry_advice = f"Oversold bounce expected. Optimal short entry on rally to ₹{optimal_entry_price:.2f}."
+                elif current_price - swing_low <= (0.25 * atr):
+                    entry_type = "BREAKDOWN"
+                    optimal_entry_price = round(swing_low - (0.15 * atr), 2)
+                    entry_zone = f"Below ₹{optimal_entry_price:.2f} (Breakdown Confirmation)"
+                    entry_advice = f"Testing floor at ₹{swing_low:.2f}. Enter short on breakdown below ₹{optimal_entry_price:.2f}."
+                else:
+                    entry_type = "MARKET_CMP"
+                    optimal_entry_price = round(current_price, 2)
+                    entry_zone = f"₹{current_price - 0.15*atr:.2f} – ₹{current_price + 0.15*atr:.2f} (Current Market Level)"
+                    entry_advice = "Breakdown momentum active. Sell/Short at current market price."
+
             else:
                 action = "HOLD"
                 stop_loss = max(0.05, current_price - (1.2 * atr))
@@ -305,10 +354,19 @@ class ScreenerService:
                 t2 = max(0.05, current_price + (1.2 * atr))
                 t3 = max(0.05, current_price + (1.8 * atr))
                 target = t2
+                entry_type = "CONSOLIDATION"
+                optimal_entry_price = round(current_price, 2)
+                entry_zone = f"Support: ₹{stop_loss:.2f} | Resistance: ₹{target:.2f}"
+                entry_advice = "Range-bound consolidation. Avoid fresh entries in channel midpoint; wait for breakout or boundary test."
 
             risk_amount = abs(current_price - stop_loss)
             gain_pct = abs((target - current_price) / current_price) * 100 if current_price > 0 else 0.0
             risk_pct = abs((current_price - stop_loss) / current_price) * 100 if current_price > 0 else 0.0
+
+            optimal_risk_amount = abs(optimal_entry_price - stop_loss)
+            optimal_gain_pct = abs((target - optimal_entry_price) / optimal_entry_price) * 100 if optimal_entry_price > 0 else gain_pct
+            optimal_risk_pct = abs((optimal_entry_price - stop_loss) / optimal_entry_price) * 100 if optimal_entry_price > 0 else risk_pct
+            optimal_rr = round(optimal_gain_pct / optimal_risk_pct, 2) if optimal_risk_pct > 0 else 0.0
             
             targets_breakdown = [
                 {
@@ -347,7 +405,12 @@ class ScreenerService:
                     "sentiment": round(sentiment_score, 1)
                 },
                 "trade_plan": {
+                    "current_price": round(current_price, 2),
                     "entry_price": round(current_price, 2),
+                    "optimal_entry_price": round(optimal_entry_price, 2),
+                    "entry_type": entry_type,
+                    "entry_zone": entry_zone,
+                    "entry_advice": entry_advice,
                     "stop_loss": round(stop_loss, 2),
                     "target_price": round(target, 2),
                     "target_1": round(t1, 2),
@@ -357,6 +420,8 @@ class ScreenerService:
                     "expected_gain_pct": round(gain_pct, 2),
                     "risk_pct": round(risk_pct, 2),
                     "reward_to_risk": round(gain_pct / risk_pct, 2) if risk_pct > 0 else 0.0,
+                    "optimal_expected_gain_pct": round(optimal_gain_pct, 2),
+                    "optimal_reward_to_risk": optimal_rr,
                     "estimated_hold_time": hold_time,
                     "targets": targets_breakdown,
                 },
