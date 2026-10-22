@@ -175,16 +175,19 @@ export default function AdminPage() {
     }
   }, []);
 
-  // Auto-poll active users list every 3.5 seconds while 'live' tab is active (0 DB load)
+  // Fetch active users list on-demand when 'live' tab is clicked; only poll if admin explicitly toggles auto-refresh
+  const [autoSyncLive, setAutoSyncLive] = useState(false);
+
   useEffect(() => {
     if (isAdmin && activeTab === 'live') {
       fetchLiveUsers();
+      if (!autoSyncLive) return;
       const interval = setInterval(() => {
         fetchLiveUsers();
-      }, 3500);
+      }, 5000);
       return () => clearInterval(interval);
     }
-  }, [isAdmin, activeTab, fetchLiveUsers]);
+  }, [isAdmin, activeTab, autoSyncLive, fetchLiveUsers]);
 
   // Automatically trigger live Fyers check whenever admin opens or switches to the Fyers tab
   useEffect(() => {
@@ -619,31 +622,27 @@ export default function AdminPage() {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div
+              <button
+                onClick={() => setAutoSyncLive((prev) => !prev)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
                   fontSize: '0.8rem',
-                  color: 'var(--text-secondary)',
+                  color: autoSyncLive ? '#4ade80' : 'var(--text-secondary)',
                   padding: '6px 12px',
                   borderRadius: 8,
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  background: autoSyncLive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                  border: autoSyncLive ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  transition: 'all 0.15s ease',
                 }}
+                title="Toggle continuous live surveillance polling (paused by default to save network bandwidth)"
               >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    backgroundColor: '#22c55e',
-                    display: 'inline-block',
-                    boxShadow: '0 0 8px #22c55e',
-                  }}
-                />
-                Auto-syncing every 3.5s
-              </div>
+                <Activity size={14} />
+                {autoSyncLive ? 'Auto-Sync: Live (5s)' : 'Auto-Sync: Paused (On-Demand)'}
+              </button>
               <button
                 onClick={() => fetchLiveUsers()}
                 disabled={loadingUsers}

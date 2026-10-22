@@ -8,11 +8,16 @@ interface LivePresenceBadgeProps {
 }
 
 export default function LivePresenceBadge({ compact = false, className = '', style }: LivePresenceBadgeProps) {
-  const { liveCount, setIsModalOpen } = usePresenceContext()
+  const { liveCount, setIsModalOpen, fetchLiveUsers } = usePresenceContext()
+
+  const handleClick = () => {
+    setIsModalOpen(true)
+    fetchLiveUsers()
+  }
 
   return (
     <div
-      onClick={() => setIsModalOpen(true)}
+      onClick={handleClick}
       role="button"
       tabIndex={0}
       className={`live-presence-badge ${className}`}

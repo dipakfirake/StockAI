@@ -52,8 +52,8 @@ async def test_presence_sliding_window_pruning():
     service = PresenceService()
 
     with patch("backend.services.presence.get_redis", new=AsyncMock(return_value=None)):
-        # Inject an old session
-        old_time = time.time() - 30  # 30s ago (> 25s TTL)
+        # Inject an old session older than TTL
+        old_time = time.time() - (PRESENCE_TTL_SECONDS + 10)
         service._local_sessions["stale_session"] = old_time
         service._local_sessions["fresh_session"] = time.time()
 

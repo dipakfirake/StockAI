@@ -146,12 +146,12 @@ export function usePresence(user: any) {
     window.addEventListener('pagehide', handlePageHide)
     window.addEventListener('beforeunload', handlePageHide)
 
-    // 4. Ultra-efficient 4-second heartbeat cadence while visible
+    // 4. Ultra-lightweight 25-second heartbeat cadence while visible (prevents app slowdown)
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         sendHeartbeat()
       }
-    }, 4000)
+    }, 25000)
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)

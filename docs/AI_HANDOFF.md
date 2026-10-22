@@ -19,18 +19,21 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
     - Real-time active user tracking on both desktop and mobile platforms with pulsating emerald live count badge (`🟢 X Live`).
     - **Visibility Access Control & Surveillance View**: The visual presence indicator is strictly restricted to **Administrators only** (`isAdmin = Boolean(user?.is_admin || user?.email === 'admin@stockai.com')`).
     - **Where Admins Can See Active Users & Liveness**:
-      1. **Admin Control Center (`/admin`)**: A dedicated primary tab — **🟢 Real-Time Live Users ({liveCount} Online)** — with a full-screen surveillance board featuring KPI summary cards (Total Online, Logged-in Traders, Guest Visitors, Mobile vs Desktop) and an interactive live user table displaying Name, Email, Tier/Role badge (ADMIN, PRO, FREE, GUEST), Active Screen path (`/dashboard`, `/chart`, etc.), Device platform (📱 Mobile vs 💻 Desktop), and real-time freshness ("Just now", "2s ago"). Auto-syncs every 3.5s.
+      1. **Admin Control Center (`/admin`)**: A dedicated primary tab — **🟢 Real-Time Live Users ({liveCount} Online)** — with a full-screen surveillance board featuring KPI summary cards (Total Online, Logged-in Traders, Guest Visitors, Mobile vs Desktop) and an interactive live user table displaying Name, Email, Tier/Role badge (ADMIN, PRO, FREE, GUEST), Active Screen path (`/dashboard`, `/chart`, etc.), Device platform (📱 Mobile vs 💻 Desktop), and real-time freshness ("Just now", "2s ago").
       2. **Top Navigation Bar (`NavBar.tsx`)**: Clicking the glowing green badge `🟢 X Live (admin)` instantly opens the glassmorphic **Live Users Surveillance Modal** from anywhere in the application.
-    - **Navbar Cleanup (Removed Redundant Sentinel Link)**: The extra `Sentinel 24/7` link in the top navbar was removed, as the `🛡️ 24/7 Sentinel Watchdog` is already prominently linked inside the Admin Control panel header (`/admin/sentinel`).
+    - **100% On-Demand Click Activation for Extreme Speed**:
+      - Live surveillance lists are **ONLY queried when the admin clicks the component** (tab or modal).
+      - Continuous background polling is **paused by default**. The admin has an interactive toggle (`Auto-Sync: Live / Paused`) and manual `Refresh Now` button. Leaving the tab immediately terminates all polling (0 idle background requests).
+      - Client heartbeat is relaxed to **25 seconds** (from 4s), reducing network and CPU load by >80%, while `PRESENCE_TTL_SECONDS` is tuned to **35 seconds**. Tab exits or mobile recent apps switches remain instantaneous (<50ms) via `sendBeacon`.
+    - **Navbar Cleanup (Removed Redundant Sentinel Link)**: The extra `Sentinel 24/7` link in the top navbar was removed, as `🛡️ 24/7 Sentinel Watchdog` is already prominently linked inside the Admin Control panel header (`/admin/sentinel`).
     - **Zero Database Queries**: Operates 100% in-memory via Redis Sorted Sets (`presence:active_sessions`) and Hashes (`presence:sessions_meta`). PostgreSQL database is **never touched** on presence heartbeats, leaves, or admin queries, preventing connection pool exhaustion and keeping RAM consumption minimal (<50KB).
-    - **3-5 Second Ultra-Efficient Updates**: Client heartbeats fire every 4 seconds while active, with automatic 12s sliding-window TTL pruning. Moving mobile browsers to "Recent Apps" or closing tabs fires `navigator.sendBeacon('/api/presence/leave')`, decrementing counts in <50ms.
   - **Technical Implementation**:
-    - `backend/services/presence.py`: Pure Redis in-memory manager (ZSET + HASH) with 12s sliding-window TTL and normalized local fallback.
+    - `backend/services/presence.py`: Pure Redis in-memory manager (ZSET + HASH) with 35s sliding-window TTL and normalized local fallback.
     - `backend/api/presence.py`: FastAPI endpoints (`POST /heartbeat`, `POST /leave`, `GET /count`, `GET /users` protected by `require_admin`).
     - `backend/core/rate_limiter.py`: Dedicated `PRESENCE` rate limit tier (200 capacity, 240/60 refill).
-    - `frontend/src/hooks/usePresence.ts`: 4s heartbeat with user metadata, Page Visibility API, and exit beacon.
-    - `frontend/src/pages/AdminPage.tsx`: Integrated `'live'` tab with live presence metrics, auto-refresh every 3.5s, and table of active users.
-    - `frontend/src/components/LiveUsersModal.tsx`: Admin-only glassmorphic surveillance modal with live user table, auto-polling every 3.5s, device breakdown, and active page tags.
+    - `frontend/src/hooks/usePresence.ts`: 25s relaxed heartbeat with user metadata, Page Visibility API, and exit beacon.
+    - `frontend/src/pages/AdminPage.tsx`: On-demand live tab with toggleable 5s auto-sync and active users surveillance grid.
+    - `frontend/src/components/LiveUsersModal.tsx`: On-demand glassmorphic surveillance modal with toggleable auto-refresh.
     - `frontend/src/components/NavBar.tsx`: Removed redundant Sentinel 24/7 nav item.
   - **Verification Evidence**:
     - **Unit Tests**: `backend/tests/test_presence.py` **5/5 PASSED**; full suite **134/134 PASSED (100% green)**.

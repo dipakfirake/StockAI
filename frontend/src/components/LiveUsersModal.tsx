@@ -4,9 +4,9 @@ import { X, RefreshCw, Smartphone, Monitor, Shield, Crown, User, Globe, Activity
 
 export default function LiveUsersModal() {
   const { isModalOpen, setIsModalOpen, liveUsers, fetchLiveUsers, loadingUsers, liveCount } = usePresenceContext()
-  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [autoRefresh, setAutoRefresh] = useState(false)
 
-  // Auto-poll active users list every 3.5 seconds while modal is open
+  // Fetch active users list on-demand when modal opens; only poll if admin explicitly toggles auto-refresh
   useEffect(() => {
     if (!isModalOpen) return
 
@@ -15,7 +15,7 @@ export default function LiveUsersModal() {
     if (!autoRefresh) return
     const interval = setInterval(() => {
       fetchLiveUsers()
-    }, 3500)
+    }, 5000)
 
     return () => clearInterval(interval)
   }, [isModalOpen, autoRefresh, fetchLiveUsers])

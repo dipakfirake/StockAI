@@ -20,8 +20,8 @@ from backend.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Sessions inactive for more than 12 seconds are pruned automatically
-PRESENCE_TTL_SECONDS = 12
+# Sessions inactive for more than 35 seconds are pruned automatically
+PRESENCE_TTL_SECONDS = 35
 PRESENCE_REDIS_KEY = "presence:active_sessions"
 PRESENCE_META_KEY = "presence:sessions_meta"
 
