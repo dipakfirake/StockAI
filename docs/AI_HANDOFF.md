@@ -14,6 +14,39 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-22)
 
+- **Stock Holding Analytics: Holding Duration (Days Held), Buying Return %, Day's P&L (Current Stock & All Stocks), and Inspection Modal (COMPLETE & VERIFIED):**
+  - **User Problem & Requirements**:
+    1. Display exact profit percentage gain or loss percentage of buying for each stock holding.
+    2. Display holding duration / from how many days it was bought (`days_held` and formatted purchase date `buy_date_formatted`).
+    3. An interactive inspection option/modal when clicking on any stock holding to view complete purchase and performance analytics.
+    4. Display Today's Profit and Loss for the current stock (`day_pnl`, `day_change_pct`).
+    5. Display Today's Day P&L across all stocks portfolio-wide (`total_day_pnl`, `total_day_pnl_pct`).
+  - **Backend Implementation**:
+    - `backend/api/portfolio.py`:
+      - Precise holding duration calculation: `delta_seconds = (now_utc - opened_at_utc).total_seconds(); days_held = int(delta_seconds // 86400)`. Formats `buy_date_formatted` ("22 Oct 2026, 02:45 PM").
+      - Profit percentage gain/loss on purchase price: `pnl_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2)`.
+      - Today's P&L for current stock: `day_pnl = round(day_change * t.quantity * multiplier, 2)` and `day_change_pct = round((day_change / prev_close) * 100.0, 2)`.
+      - Portfolio aggregates: `total_invested`, `total_day_pnl`, and `total_day_pnl_pct`.
+    - `backend/api/paper_trading.py`:
+      - Enriched `list_paper_trades` with `days_held`, `buy_date_formatted`, `pnl_pct`, `invested`, `value`, `previous_close`, `day_change`, `day_change_pct`, and `day_pnl`.
+    - `backend/tests/test_portfolio_holdings_analytics.py`:
+      - Focused unit tests covering both empty portfolios and populated multi-position portfolios with buy return %, days held, day's P&L, and portfolio aggregates.
+  - **Frontend Implementation**:
+    - `frontend/src/components/HoldingDetailModal.tsx`:
+      - Dedicated sleek holding inspection modal with holding duration badge ("14 Days Held" / "Bought Today"), purchase date, buy return % card, today's day P&L card, price & investment breakdown table, and quick actions ("Open Chart", "AI Forecast", "Square Off/Exit").
+    - `frontend/src/pages/PortfolioPage.tsx`:
+      - Top summary cards: Added "Today's Day P&L (All Stocks)" (`total_day_pnl` & `total_day_pnl_pct`), and "Total Invested (Holdings)".
+      - Position allocation table: Added "Holding Period" badge, "Today's P&L", and "Overall Return on Buy" with % on buy.
+      - Interactive row click: Clicking any holding opens `HoldingDetailModal`.
+    - `frontend/src/pages/PaperTradingPage.tsx`:
+      - Header stats: Added "Day's P&L (Today)" across all open positions.
+      - Positions table: Added "Holding Period", "Today's P&L", "Overall Return on Buy", and row click inspection opening `HoldingDetailModal`.
+  - **Verification Evidence**:
+    - Unit tests (`backend/tests/test_portfolio_holdings_analytics.py`): **2/2 passed locally in 12.54s** and **2/2 passed inside remote docker container on Oracle VM in 1.86s**.
+    - Frontend production build (`tsc && vite build`): **1,986 modules transformed, 0 errors, built in 36.45s**.
+    - Git commit & push: commit `1808c60` pushed to `origin main`.
+    - Oracle Cloud VM deployment: pulled into `/home/opc/StockAI`, restarted `stockbackend`, verified healthy startup and Vite HMR update.
+
 - **Real-Time Live Users Online Tracking & Surveillance System (COMPLETE & VERIFIED):**
   - **Feature Overview**:
     - Real-time active user tracking on both desktop and mobile platforms with pulsating emerald live count badge (`🟢 X Live`).

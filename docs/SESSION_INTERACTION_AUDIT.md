@@ -1803,6 +1803,44 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
   - Full build: 0 errors.
 - **System Response:** Confirmation to user explaining that the live presence system has been completely removed from the navbar and everywhere else, and is now strictly confined inside the Admin Control panel where it only boots up when the admin explicitly opens that component.
 
+---
+
+### Session Entry 45: Stock Holding Duration, Buying Return %, Day's P&L, and Inspection Modal
+- **Timestamp:** 2026-10-22 19:15:00 IST (13:45:00 UTC)
+- **User Prompt:**  
+  `"i want to see profit percentage gain or loss percentage of buying and 1 option also when click on stock holding stocks that from how many days iy buyed and whats todays Profit and loss for current stock also and also for all stocks also days P &L /goal"`
+- **Agent Technical Actions:**
+  1. **Stock Holding Duration & Days Bought Calculation**:
+     - Calculated exact holding duration comparing current UTC time against trade open timestamp (`opened_at_utc`): `delta_seconds = max(0.0, (now_utc - opened_at_utc).total_seconds())`, `days_held = int(delta_seconds // 86400)`.
+     - Added formatted purchase date string: `buy_date_formatted = opened_at_utc.strftime("%d %b %Y, %I:%M %p")`.
+     - In UI, displays formatted badge: `"Bought Today (Day 0)"` or `"${days_held} Days Held"`.
+  2. **Profit/Loss Percentage on Purchase Price**:
+     - Implemented transparent, exact mathematical gain/loss formula on purchase/entry price:
+       $\text{pnl\_pct} = \frac{\text{Current Price} - \text{Entry Price}}{\text{Entry Price}} \times 100 \times \text{multiplier}$.
+     - Displayed both in the holdings table alongside rupee P&L and prominently in the inspection modal.
+  3. **Today's Profit & Loss for Current Stock**:
+     - Extracted authoritative `previous_close` from market quotes or candle delta:
+       $\text{day\_change} = \text{Current Price} - \text{Previous Close}$,
+       $\text{day\_change\_pct} = \frac{\text{day\_change}}{\text{previous\_close}} \times 100$,
+       $\text{day\_pnl} = \text{day\_change} \times \text{quantity} \times \text{multiplier}$.
+     - Displayed for each holding row with color-coded rupee gain and % day change.
+  4. **Today's Day P&L Across All Stocks Portfolio-Wide**:
+     - Aggregate calculation: $\text{total\_day\_pnl} = \sum \text{day\_pnl}_i$, and $\text{total\_day\_pnl\_pct} = \frac{\text{total\_day\_pnl}}{\sum \text{previous\_close}_i \times \text{quantity}_i} \times 100$.
+     - Added prominent top-level summary card in `PortfolioPage.tsx`: **"Today's Day P&L (All Stocks)"** with amount & %, and added **"Total Invested (Holdings)"** card.
+     - Added **"Day's P&L (Today)"** in `PaperTradingPage.tsx` header alongside Realized, Unrealized, Invested, and Current Value.
+  5. **Interactive Stock Holding Inspection Modal (`HoldingDetailModal.tsx`)**:
+     - Clicking on any stock holding row in `PortfolioPage` or `PaperTradingPage` opens an interactive modal.
+     - Shows: Holding Duration badge & bought date, Return on Buying (₹ & %), Today's Day P&L (₹ & %), Price & Investment Breakdown (Buy Price, LTP, Invested, Current Value, Prev Close, Day Change/share), and quick actions ("Open Chart", "AI Forecast", "Square Off/Exit").
+  6. **Automated Testing & Production Deployment**:
+     - Created `backend/tests/test_portfolio_holdings_analytics.py`: 2/2 tests PASSED locally in 12.54s and on the Oracle VM container in 1.86s.
+     - Frontend production build (`tsc && vite build`): 1,986 modules transformed, 0 errors.
+     - Pushed to `origin main` (commit `1808c60`), pulled on Oracle VM `92.4.71.210`, restarted `stockbackend` container, verified healthy live execution and Vite HMR update.
+- **Verification Evidence:**
+  - Automated tests: `backend/tests/test_portfolio_holdings_analytics.py` (2/2 passed).
+  - Frontend production build: `npm --prefix frontend run build` (0 errors, 36.45s).
+  - Remote production probe: `http://92.4.71.210:8000/health` (200 OK) and docker pytest execution (2/2 passed in 1.86s).
+- **System Response:** Comprehensive completion report covering all mathematical formulas, UI enhancements, holding inspection modal details, and verified test results. Concluded with `<!-- GOAL_COMPLETE -->`.
+
 
 
 
