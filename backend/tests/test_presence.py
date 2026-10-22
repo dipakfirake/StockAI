@@ -70,20 +70,23 @@ async def test_presence_redis_pipeline_interaction():
     service = PresenceService()
 
     mock_redis = MagicMock()
+    mock_redis.zcard = AsyncMock(return_value=3)
     mock_pipe = MagicMock()
     mock_pipe.zadd = MagicMock()
+    mock_pipe.hset = MagicMock()
+    mock_pipe.zrangebyscore = MagicMock()
     mock_pipe.zremrangebyscore = MagicMock()
     mock_pipe.zcard = MagicMock()
     mock_pipe.zrem = MagicMock()
-    # execute returns list of results: [zadd_res, zremrange_res, zcard_res]
-    mock_pipe.execute = AsyncMock(return_value=[1, 0, 3])
+    # execute returns list of results: [zadd_res, hset_res, stale_ids]
+    mock_pipe.execute = AsyncMock(return_value=[1, 1, []])
     mock_redis.pipeline = MagicMock(return_value=mock_pipe)
 
     with patch("backend.services.presence.get_redis", new=AsyncMock(return_value=mock_redis)):
         count = await service.record_heartbeat("test_redis_session")
         assert count == 3
         mock_pipe.zadd.assert_called_once()
-        mock_pipe.zcard.assert_called_once()
+        mock_redis.zcard.assert_called_once()
 
 
 def test_presence_api_endpoints():
@@ -117,3 +120,37 @@ def test_presence_api_endpoints():
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "left"
+
+    # 5. Get Users requires authentication (401/403)
+    resp = client.get("/api/presence/users")
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_presence_get_live_users_in_memory():
+    """Test detailed user metadata retrieval without database queries."""
+    service = PresenceService()
+
+    with patch("backend.services.presence.get_redis", new=AsyncMock(return_value=None)):
+        await service.record_heartbeat("sess_admin", {
+            "user_id": "u1",
+            "user_name": "Dipak",
+            "user_email": "admin@stockai.com",
+            "role": "ADMIN",
+            "path": "/chart",
+            "device": "Desktop"
+        })
+        await service.record_heartbeat("sess_guest", {
+            "user_name": "Guest 1234",
+            "role": "GUEST",
+            "path": "/pricing",
+            "device": "Mobile"
+        })
+
+        res = await service.get_live_users()
+        assert res["count"] == 2
+        assert len(res["users"]) == 2
+        names = [u["user_name"] for u in res["users"]]
+        assert "Dipak" in names
+        assert "Guest 1234" in names
+

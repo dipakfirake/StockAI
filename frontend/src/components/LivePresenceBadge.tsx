@@ -8,27 +8,30 @@ interface LivePresenceBadgeProps {
 }
 
 export default function LivePresenceBadge({ compact = false, className = '', style }: LivePresenceBadgeProps) {
-  const { liveCount } = usePresenceContext()
+  const { liveCount, setIsModalOpen } = usePresenceContext()
 
   return (
     <div
+      onClick={() => setIsModalOpen(true)}
+      role="button"
+      tabIndex={0}
       className={`live-presence-badge ${className}`}
-      title={`${liveCount} active user${liveCount === 1 ? '' : 's'} live on StockAI`}
+      title={`${liveCount} active user${liveCount === 1 ? '' : 's'} live on StockAI — Click to view active users`}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: compact ? '4px' : '6px',
         padding: compact ? '2px 7px' : '3px 10px',
         borderRadius: '20px',
-        background: 'rgba(34, 197, 94, 0.1)',
-        border: '1px solid rgba(34, 197, 94, 0.25)',
+        background: 'rgba(34, 197, 94, 0.12)',
+        border: '1px solid rgba(34, 197, 94, 0.3)',
         color: '#22c55e',
         fontSize: compact ? '0.72rem' : '0.78rem',
         fontWeight: 650,
         userSelect: 'none',
         flexShrink: 0,
         transition: 'all 0.2s ease',
-        cursor: 'default',
+        cursor: 'pointer',
         ...style,
       }}
     >

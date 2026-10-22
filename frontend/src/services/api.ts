@@ -183,4 +183,12 @@ export const settingsApi = {
   updateFyersToken: (authInput: string) => api.post('/settings/fyers/update-token', { auth_input: authInput }),
 }
 
+// ===== Real-Time Presence & Live Users Online endpoints =====
+export const presenceApi = {
+  heartbeat: (data: any) => api.post('/presence/heartbeat', data),
+  leave: (data: any) => api.post('/presence/leave', data),
+  getCount: () => api.get('/presence/count'),
+  getUsers: () => api.get('/presence/users'),
+}
+
 export default api
