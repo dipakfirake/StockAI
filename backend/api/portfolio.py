@@ -1,6 +1,6 @@
 """Portfolio API router."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,27 +91,40 @@ async def get_portfolio(
         # Profit percentage gain or loss percentage of buying
         pnl_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2) if entry_p > 0 else 0.0
 
-        # Day's P&L calculation (Today's Gain / Loss)
-        prev_close = float(quote.get("previous_close", 0.0) or 0.0) if quote else 0.0
-        if prev_close <= 0.0 and quote:
-            change_val = float(quote.get("change", 0.0) or 0.0)
-            if change_val != 0.0:
-                prev_close = current_price - change_val
-        if prev_close <= 0.0:
-            prev_close = current_price
-
-        day_change = round(current_price - prev_close, 2)
-        day_change_pct = round((day_change / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
-        day_pnl = round(day_change * t.quantity * multiplier, 2)
-        total_day_pnl += day_pnl
-        total_prev_value += prev_close * t.quantity
-
-        # Days held calculation
+        # Days held calculation & Indian IST timezone resolution
         opened_at = t.opened_at if t.opened_at else now_utc
         opened_at_utc = opened_at if opened_at.tzinfo else opened_at.replace(tzinfo=timezone.utc)
         delta_seconds = max(0.0, (now_utc - opened_at_utc).total_seconds())
         days_held = int(delta_seconds // 86400)
         buy_date_formatted = opened_at_utc.strftime("%d %b %Y, %I:%M %p")
+
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        now_ist = now_utc.astimezone(ist_tz)
+        opened_at_ist = opened_at_utc.astimezone(ist_tz)
+        is_bought_today = (opened_at_ist.date() == now_ist.date()) or (days_held == 0)
+
+        # Day's P&L calculation:
+        # If the stock was bought TODAY: Day's P&L starts from the exact time and buy price it was bought, NOT today's starting price.
+        # If the stock was bought PREVIOUSLY: Day's P&L is today's session movement from previous close.
+        if is_bought_today:
+            day_baseline = entry_p
+            day_baseline_type = "BUY_PRICE"
+        else:
+            prev_close = float(quote.get("previous_close", 0.0) or 0.0) if quote else 0.0
+            if prev_close <= 0.0 and quote:
+                change_val = float(quote.get("change", 0.0) or 0.0)
+                if change_val != 0.0:
+                    prev_close = current_price - change_val
+            if prev_close <= 0.0:
+                prev_close = entry_p
+            day_baseline = prev_close
+            day_baseline_type = "PREV_CLOSE"
+
+        day_change = round(current_price - day_baseline, 2)
+        day_change_pct = round((day_change / day_baseline) * 100.0, 2) if day_baseline > 0 else 0.0
+        day_pnl = round(day_change * t.quantity * multiplier, 2)
+        total_day_pnl += day_pnl
+        total_prev_value += day_baseline * t.quantity
 
         allocation.append({
             "trade_id": str(t.id),
@@ -122,7 +135,10 @@ async def get_portfolio(
             "quantity": t.quantity,
             "entry_price": round(entry_p, 2),
             "current_price": round(current_price, 2),
-            "previous_close": round(prev_close, 2),
+            "previous_close": round(day_baseline, 2),
+            "day_baseline": round(day_baseline, 2),
+            "day_baseline_type": day_baseline_type,
+            "is_bought_today": is_bought_today,
             "invested": round(invested, 2),
             "value": round(value, 2),
             "unrealized_pnl": round(unrealized, 2),

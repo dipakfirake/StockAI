@@ -35,6 +35,9 @@ interface HoldingData {
   buy_date_formatted?: string
   days_held?: number
   weight_pct?: number
+  is_bought_today?: boolean
+  day_baseline?: number
+  day_baseline_type?: string
 }
 
 interface HoldingDetailModalProps {
@@ -243,7 +246,9 @@ export default function HoldingDetailModal({
                 {dayGainPct >= 0 ? '+' : ''}{dayGainPct.toFixed(2)}% Today
               </div>
               <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 6 }}>
-                Current stock day's performance
+                {holding.is_bought_today || daysHeld === 0
+                  ? 'Calculated from buy price at purchase time today'
+                  : 'Calculated from today session starting price (Prev Close)'}
               </div>
             </div>
           </div>
@@ -283,14 +288,12 @@ export default function HoldingDetailModal({
                   {formatINR(currentVal)}
                 </div>
               </div>
-              {holding.previous_close !== undefined && holding.previous_close > 0 && (
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Previous Day Close</div>
-                  <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2, color: 'var(--color-text-secondary)' }} className="mono">
-                    {formatINR(holding.previous_close)}
-                  </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Today's Baseline Reference</div>
+                <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2, color: 'var(--color-text-secondary)' }} className="mono">
+                  {holding.is_bought_today || daysHeld === 0 ? `${formatINR(holding.entry_price)} (Buy Price)` : `${formatINR(holding.previous_close)} (Prev Close)`}
                 </div>
-              )}
+              </div>
               {holding.day_change !== undefined && (
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Today's Price Change / Share</div>

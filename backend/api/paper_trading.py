@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -114,12 +114,16 @@ async def list_paper_trades(
     quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols) if open_symbols else {}
 
     now_utc = datetime.now(timezone.utc)
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now_ist = now_utc.astimezone(ist_tz)
     result = []
     for t in trades:
         opened_at_utc = t.opened_at if t.opened_at.tzinfo else t.opened_at.replace(tzinfo=timezone.utc)
         delta_sec = max(0.0, (now_utc - opened_at_utc).total_seconds())
         days_held = int(delta_sec // 86400)
         buy_date_formatted = opened_at_utc.strftime("%d %b %Y, %I:%M %p")
+        opened_at_ist = opened_at_utc.astimezone(ist_tz)
+        is_bought_today = (opened_at_ist.date() == now_ist.date()) or (days_held == 0)
 
         entry = {
             "trade_id": str(t.id),
@@ -141,6 +145,7 @@ async def list_paper_trades(
             "closed_at": t.closed_at.isoformat() if t.closed_at else None,
             "days_held": days_held,
             "buy_date_formatted": buy_date_formatted,
+            "is_bought_today": is_bought_today,
         }
         if t.status == "OPEN":
             quote = quotes_map.get(t.symbol)
@@ -154,16 +159,23 @@ async def list_paper_trades(
                 comm = float(t.commission) if t.commission is not None else 0.0
                 unrealized = multiplier * (current_price - entry_p) * t.quantity - comm
                 
-                prev_close = float(quote.get("previous_close", 0.0) or 0.0)
-                if prev_close <= 0.0:
-                    change_val = float(quote.get("change", 0.0) or 0.0)
-                    if change_val != 0.0:
-                        prev_close = current_price - change_val
-                if prev_close <= 0.0:
-                    prev_close = current_price
+                # If bought today: Day's P&L is calculated from purchase price, NOT today's starting price
+                if is_bought_today:
+                    day_baseline = entry_p
+                    day_baseline_type = "BUY_PRICE"
+                else:
+                    prev_close = float(quote.get("previous_close", 0.0) or 0.0)
+                    if prev_close <= 0.0:
+                        change_val = float(quote.get("change", 0.0) or 0.0)
+                        if change_val != 0.0:
+                            prev_close = current_price - change_val
+                    if prev_close <= 0.0:
+                        prev_close = entry_p
+                    day_baseline = prev_close
+                    day_baseline_type = "PREV_CLOSE"
 
-                day_change = round(current_price - prev_close, 2)
-                day_change_pct = round((day_change / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+                day_change = round(current_price - day_baseline, 2)
+                day_change_pct = round((day_change / day_baseline) * 100.0, 2) if day_baseline > 0 else 0.0
                 day_pnl = round(day_change * t.quantity * multiplier, 2)
                 pnl_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2) if entry_p > 0 else 0.0
 
@@ -172,7 +184,9 @@ async def list_paper_trades(
                 entry["pnl_pct"] = pnl_pct
                 entry["invested"] = round(entry_p * t.quantity, 2)
                 entry["value"] = round(current_price * t.quantity, 2)
-                entry["previous_close"] = round(prev_close, 2)
+                entry["previous_close"] = round(day_baseline, 2)
+                entry["day_baseline"] = round(day_baseline, 2)
+                entry["day_baseline_type"] = day_baseline_type
                 entry["day_change"] = day_change
                 entry["day_change_pct"] = day_change_pct
                 entry["day_pnl"] = day_pnl
