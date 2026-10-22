@@ -131,7 +131,7 @@ async def test_fetch_quote_uses_history_when_previous_close_missing(mock_cache_s
 
 
 @pytest.mark.asyncio
-@patch("backend.services.market_data.cache_get", return_value=None)
+@patch("backend.services.market_data.cache_get", new_callable=AsyncMock, return_value=None)
 @patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
 async def test_fetch_quotes_bulk_fyers_and_fallback(mock_cache_set, mock_cache_get):
     """Test fetch_quotes_bulk parses Fyers response and hydrates missing via fallback."""
@@ -150,7 +150,7 @@ async def test_fetch_quotes_bulk_fyers_and_fallback(mock_cache_set, mock_cache_g
             }
         ]
     }
-    with patch("backend.services.market_data.MarketDataService._get_fyers_client") as mock_fyers:
+    with patch.object(MarketDataService, "_get_fyers_client", new_callable=AsyncMock) as mock_fyers:
         instance = MagicMock()
         instance.quotes.return_value = mock_fyers_resp
         mock_fyers.return_value = instance
@@ -185,7 +185,7 @@ def test_parse_yahoo_chart_meta_pcjeweller():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.market_data.cache_get", return_value=None)
+@patch("backend.services.market_data.cache_get", new_callable=AsyncMock, return_value=None)
 @patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
 async def test_fyers_after_hours_prev_close_rollover(mock_cache_set, mock_cache_get):
     """Verify Fyers quote parsing correctly derives prev_close when post-market rolls prev_close_price to lp."""
@@ -204,7 +204,7 @@ async def test_fyers_after_hours_prev_close_rollover(mock_cache_set, mock_cache_
             }
         ]
     }
-    with patch("backend.services.market_data.MarketDataService._get_fyers_client") as mock_fyers:
+    with patch.object(MarketDataService, "_get_fyers_client", new_callable=AsyncMock) as mock_fyers:
         instance = MagicMock()
         instance.quotes.return_value = mock_fyers_resp
         mock_fyers.return_value = instance
