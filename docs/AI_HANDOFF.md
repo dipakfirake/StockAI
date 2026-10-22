@@ -14,6 +14,23 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-22)
 
+- **Real-Time Live Users Online Tracking System (COMPLETE & VERIFIED):**
+  - **Feature Overview**:
+    - Real-time active user tracking on both desktop and mobile platforms with pulsating emerald live count badge (`🟢 X Live`) in Navbar.
+    - Zero disruption to broker tick streams, WebSockets, or high-speed execution engines.
+    - Instant count increment on page/tab open or focus.
+    - Instant count decrement when moving mobile browser to "Recent Apps / App Switcher", switching tabs, or closing the browser.
+  - **Technical Implementation**:
+    - `backend/services/presence.py`: Redis Sorted Set (`presence:active_sessions`) with sliding-window TTL (25s auto-prune for stale/crashed sessions) and in-memory lock-guarded fallback.
+    - `backend/api/presence.py`: High-speed FastAPI endpoints (`POST /heartbeat`, `POST /leave`, `GET /count`).
+    - `backend/core/rate_limiter.py`: Dedicated `PRESENCE` rate limit tier (200 capacity, 240/60 refill) ensuring zero throttling during rapid tab switches.
+    - `frontend/src/hooks/usePresence.ts`: Page Visibility API (`visibilitychange`), `pagehide`, and `beforeunload` listeners firing `navigator.sendBeacon('/api/presence/leave')` and `fetch(..., { keepalive: true })`.
+    - `frontend/src/components/LivePresenceBadge.tsx` & `Navbar.tsx`: Responsive pulsating emerald badge on desktop and mobile header rows.
+  - **Verification Evidence**:
+    - **Unit Tests**: `backend/tests/test_presence.py` **4/4 PASSED**; full suite **134/134 PASSED (100% green)** in 128.98s.
+    - **Frontend Build**: `tsc && vite build` **1,985 modules transformed, 0 errors, built in 35.13s**.
+    - **Live Oracle Cloud Container Probe (`92.4.71.210:8000`)**: Verified `GET /count`, `POST /heartbeat` increment from 1 to 2, and `POST /leave` immediate decrement from 2 to 1 and down to 0.
+
 - **Fundamental Analysis (Balance Sheet & Valuations) Blank Grid Root Cause & Permanent Resolution:**
   - **User Problem Addressed**:
     - User reported that the "Fundamental Analysis (Balance Sheet & Valuations)" card was completely blank across every stock viewed in the application.

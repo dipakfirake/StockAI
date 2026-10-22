@@ -1621,6 +1621,48 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - **Frontend Production Build**: `tsc && vite build` passed (1,983 modules transformed, 0 errors, exit code 0).
 - **System Response**: Comprehensive technical explanation of why fundamental metrics were blank, root causes in Yahoo 429 throttling and incomplete Screener fallback, full solution implemented, and live container verification evidence.
 
+---
+
+### Session Entry 41
+- **Timestamp:** 2026-10-22 17:25:00 IST (11:55:00 UTC)
+- **User Prompt:**  
+  `"now i want to add a feature in website thhat how many users are live on the system whether if they close the browser or tab then count want to reduce and again if browser opened or tab opened then count want to be increased . is suppose for example the user suppose in mobile browser opened the system then he want to be counted but if he move the browser in recent tabs also then his count want to be reduce because the user is not live on system and working when in recents tab. like that . make a system like that without interrupting our working system. /plan /goal"`
+- **Agent Technical Actions:**
+  1. **Architecture & Implementation Plan Artifact**:
+     - Authored `live_presence_counter_plan.md` detailing the real-time presence architecture, Page Visibility API integration, `navigator.sendBeacon` exit protocol, Redis sliding-window TTL, and glassmorphic UI badge.
+  2. **Backend Engineering**:
+     - Implemented `PresenceService` (`backend/services/presence.py`) using Redis Sorted Set (`presence:active_sessions`) with 25s sliding-window TTL pruning (`ZREMRANGEBYSCORE -inf (now - 25)`) and an asynchronous lock-guarded in-memory fallback.
+     - Implemented `backend/api/presence.py` router:
+       - `POST /api/presence/heartbeat`: Registers/updates active session timestamp and returns current active count.
+       - `POST /api/presence/leave`: Instantly removes session ID and returns updated count. Supports JSON body and `sendBeacon` plain text.
+       - `GET /api/presence/count`: Returns live user count.
+     - Registered router in `backend/main.py`.
+     - Added dedicated `PRESENCE` tier in `backend/core/rate_limiter.py` (capacity=200, refill=240/60) to prevent rate limiting during rapid tab switching.
+  3. **Frontend Engineering**:
+     - Created `frontend/src/hooks/usePresence.ts`:
+       - Tab session isolation via `sessionStorage`.
+       - Listens to `visibilitychange` (`hidden` -> beacon leave, `visible` -> heartbeat).
+       - Listens to `pagehide` and `beforeunload` to dispatch `navigator.sendBeacon('/api/presence/leave')`.
+       - Sends periodic 10-second heartbeat while active and visible.
+     - Created `frontend/src/components/LivePresenceBadge.tsx` with pulsating emerald ring indicator.
+     - Integrated badge into `frontend/src/components/Navbar.tsx` on both Desktop and Mobile header bars.
+  4. **Proportionate Verification**:
+     - Automated Tests: Created `backend/tests/test_presence.py` (4/4 tests passed).
+     - Full Backend Pytest Suite: **134/134 PASSED (100% green)** in 128.98s.
+     - Frontend Production Build: `tsc && vite build` passed (1,985 modules transformed, 0 errors, built in 35.13s).
+     - Remote Cloud Production Verification: Deployed to Oracle Cloud VM (`92.4.71.210`), restarted backend container, and verified live HTTP endpoints:
+       - Initial `/count` -> 0
+       - Heartbeat Session Alpha -> 1 (incremented)
+       - Heartbeat Session Beta -> 2 (incremented)
+       - Leave Session Alpha -> 1 (immediately decremented)
+       - Leave Session Beta -> 0 (immediately decremented)
+- **Verification Evidence:**
+  - `backend/tests/test_presence.py`: 4/4 passing.
+  - Full backend pytest suite: 134/134 passing.
+  - Frontend production build: 0 errors.
+  - Production container API probe: Verified on `92.4.71.210:8000`.
+- **System Response:** Completed end-to-end implementation and production deployment of the real-time live presence counter system, complete with walkthrough artifact and verified test evidence.
+
 
 
 
