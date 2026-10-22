@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -112,8 +113,14 @@ async def list_paper_trades(
     open_symbols = list({t.symbol for t in trades if t.status == "OPEN"})
     quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols) if open_symbols else {}
 
+    now_utc = datetime.now(timezone.utc)
     result = []
     for t in trades:
+        opened_at_utc = t.opened_at if t.opened_at.tzinfo else t.opened_at.replace(tzinfo=timezone.utc)
+        delta_sec = max(0.0, (now_utc - opened_at_utc).total_seconds())
+        days_held = int(delta_sec // 86400)
+        buy_date_formatted = opened_at_utc.strftime("%d %b %Y, %I:%M %p")
+
         entry = {
             "trade_id": str(t.id),
             "symbol": t.symbol,
@@ -130,8 +137,10 @@ async def list_paper_trades(
             "stt_tax": float(t.stt_tax) if t.stt_tax is not None else 0.0,
             "status": t.status,
             "realized_pnl": float(t.realized_pnl) if t.realized_pnl is not None else None,
-            "opened_at": t.opened_at.isoformat(),
+            "opened_at": opened_at_utc.isoformat(),
             "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+            "days_held": days_held,
+            "buy_date_formatted": buy_date_formatted,
         }
         if t.status == "OPEN":
             quote = quotes_map.get(t.symbol)
@@ -144,8 +153,29 @@ async def list_paper_trades(
                 entry_p = float(t.entry_price) if t.entry_price is not None else current_price
                 comm = float(t.commission) if t.commission is not None else 0.0
                 unrealized = multiplier * (current_price - entry_p) * t.quantity - comm
-                entry["current_price"] = current_price
+                
+                prev_close = float(quote.get("previous_close", 0.0) or 0.0)
+                if prev_close <= 0.0:
+                    change_val = float(quote.get("change", 0.0) or 0.0)
+                    if change_val != 0.0:
+                        prev_close = current_price - change_val
+                if prev_close <= 0.0:
+                    prev_close = current_price
+
+                day_change = round(current_price - prev_close, 2)
+                day_change_pct = round((day_change / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+                day_pnl = round(day_change * t.quantity * multiplier, 2)
+                pnl_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2) if entry_p > 0 else 0.0
+
+                entry["current_price"] = round(current_price, 2)
                 entry["unrealized_pnl"] = round(unrealized, 2)
+                entry["pnl_pct"] = pnl_pct
+                entry["invested"] = round(entry_p * t.quantity, 2)
+                entry["value"] = round(current_price * t.quantity, 2)
+                entry["previous_close"] = round(prev_close, 2)
+                entry["day_change"] = day_change
+                entry["day_change_pct"] = day_change_pct
+                entry["day_pnl"] = day_pnl
         result.append(entry)
 
     return {"trades": result}

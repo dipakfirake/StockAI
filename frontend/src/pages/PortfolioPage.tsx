@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import { portfolioApi } from '../services/api'
-import { PieChart, TrendingUp, TrendingDown } from 'lucide-react'
+import { PieChart, TrendingUp, TrendingDown, Clock, Calendar, Eye, HelpCircle } from 'lucide-react'
+import HoldingDetailModal from '../components/HoldingDetailModal'
+import { formatINR, formatNumber2Dec } from '../utils/formatters'
 
 export default function PortfolioPage() {
   const [portfolio, setPortfolio] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [selectedHolding, setSelectedHolding] = useState<any | null>(null)
 
   useEffect(() => { loadPortfolio() }, [])
 
@@ -18,96 +21,273 @@ export default function PortfolioPage() {
   if (loading) return <div className="loading">Loading portfolio…</div>
 
   const totalPnlColor = portfolio?.total_pnl >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)'
+  const totalDayPnlColor = (portfolio?.total_day_pnl ?? 0) >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)'
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">Portfolio</h1>
-        <p className="page-subtitle">Paper portfolio summary — realized + unrealized PnL, win rate, allocation</p>
+      <div className="page-header" style={{ marginBottom: 20 }}>
+        <h1 className="page-title">Portfolio & Holdings</h1>
+        <p className="page-subtitle">Real-time paper portfolio analytics — holding duration, day's P&L, return on buying, and allocation</p>
       </div>
 
       {portfolio && (
         <>
-          {/* Summary Cards */}
-          <div className="grid-4" style={{ marginBottom: 24 }}>
+          {/* Summary Cards Grid */}
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', 
+            gap: 16, 
+            marginBottom: 24 
+          }}>
+            {/* 1. Current Value */}
             <div className="card">
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Current Value</div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>₹{portfolio.current_value?.toLocaleString('en-IN')}</div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>Started ₹{portfolio.initial_capital?.toLocaleString('en-IN')}</div>
-            </div>
-            <div className="card">
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Total PnL</div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: totalPnlColor }}>
-                {portfolio.total_pnl >= 0 ? '+' : ''}₹{portfolio.total_pnl?.toFixed(2)}
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>
+                Current Portfolio Value
               </div>
-              <div style={{ fontSize: 13, color: totalPnlColor }}>{portfolio.total_pnl_pct >= 0 ? '+' : ''}{portfolio.total_pnl_pct?.toFixed(2)}%</div>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                {formatINR(portfolio.current_value)}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                Started: {formatINR(portfolio.initial_capital)}
+              </div>
             </div>
+
+            {/* 2. Total Invested */}
             <div className="card">
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Win Rate</div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>{Math.round(portfolio.win_rate * 100)}%</div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{portfolio.closed_trades} closed trades</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>
+                Total Invested (Holdings)
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
+                {formatINR(portfolio.total_invested || 0)}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                Open positions capital deployed
+              </div>
             </div>
-            <div className="card">
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Total STT Tax Paid</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--color-text-muted)' }}>₹{portfolio.total_stt_paid?.toFixed(2) || '0.00'}</div>
+
+            {/* 3. Today's Day P&L (All Stocks) */}
+            <div className="card" style={{ border: `1px solid ${(portfolio.total_day_pnl ?? 0) >= 0 ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 12, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  Today's Day P&L (All Stocks)
+                </span>
+                <Clock size={14} style={{ color: totalDayPnlColor }} />
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: totalDayPnlColor }}>
+                {(portfolio.total_day_pnl ?? 0) >= 0 ? '+' : ''}{formatINR(portfolio.total_day_pnl ?? 0)}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: totalDayPnlColor, marginTop: 4 }}>
+                {(portfolio.total_day_pnl_pct ?? 0) >= 0 ? '+' : ''}{(portfolio.total_day_pnl_pct ?? 0).toFixed(2)}% Today
+              </div>
             </div>
+
+            {/* 4. Total Overall P&L */}
             <div className="card">
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Open / Pending</div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>{portfolio.open_trades} / {portfolio.pending_orders}</div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>Unrealized: ₹{portfolio.unrealized_pnl?.toFixed(2)}</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 12, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  Total P&L (All Time)
+                </span>
+                {portfolio.total_pnl >= 0 ? <TrendingUp size={14} className="positive" /> : <TrendingDown size={14} className="negative" />}
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: totalPnlColor }}>
+                {portfolio.total_pnl >= 0 ? '+' : ''}{formatINR(portfolio.total_pnl)}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: totalPnlColor, marginTop: 4 }}>
+                {portfolio.total_pnl_pct >= 0 ? '+' : ''}{portfolio.total_pnl_pct?.toFixed(2)}% Total Return
+              </div>
+            </div>
+
+            {/* 5. Win Rate */}
+            <div className="card">
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>
+                Win Rate
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>
+                {Math.round(portfolio.win_rate * 100)}%
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                {portfolio.closed_trades} closed trades
+              </div>
+            </div>
+
+            {/* 6. Open / Pending */}
+            <div className="card">
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>
+                Open Positions / Orders
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>
+                {portfolio.open_trades} <span style={{ fontSize: 16, color: 'var(--color-text-muted)', fontWeight: 400 }}>/ {portfolio.pending_orders} pending</span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                Unrealized: {formatINR(portfolio.unrealized_pnl)}
+              </div>
             </div>
           </div>
 
-          {/* Allocation Table */}
+          {/* Allocation & Stock Holdings Table */}
           <div className="card">
-            <div className="card-header">
-              <span className="card-title"><PieChart size={15} style={{ marginRight: 6 }} />Position Allocation</span>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="card-title" style={{ display: 'flex', alignItems: 'center' }}>
+                  <PieChart size={16} style={{ marginRight: 6 }} /> Stock Holdings & Position Allocation
+                </span>
+                <span className="badge badge-secondary">{portfolio.allocation?.length || 0} Open</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <HelpCircle size={14} /> Click any row to inspect days held & P&L breakdown
+              </div>
             </div>
-            {portfolio.allocation?.length === 0 && <div className="empty-state">No open positions. Place paper trades to see allocation.</div>}
+
+            {portfolio.allocation?.length === 0 && (
+              <div className="empty-state" style={{ padding: 40, textAlign: 'center' }}>
+                No open positions. Place paper trades to see live holding analytics and days held.
+              </div>
+            )}
+
             {portfolio.allocation?.length > 0 && (
-              <div className="table-container">
-                <table className="table" style={{ minWidth: '750px' }}>
+              <div className="table-container" style={{ overflowX: 'auto' }}>
+                <table className="table" style={{ minWidth: '950px', margin: 0 }}>
                   <thead>
                     <tr>
-                      <th>Symbol</th>
-                      <th>Direction</th>
-                      <th>Product</th>
+                      <th>Instrument</th>
+                      <th>Holding Period</th>
                       <th>Qty</th>
-                      <th>Entry</th>
-                      <th>Current</th>
-                      <th>Unrealized PnL</th>
-                      <th>Value</th>
+                      <th>Avg. Buy Price</th>
+                      <th>LTP (Current)</th>
+                      <th>Today's P&L</th>
+                      <th>Overall Return on Buy</th>
+                      <th>Current Value</th>
                       <th>Weight</th>
+                      <th style={{ textAlign: 'center' }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {portfolio.allocation.map((a: any, i: number) => (
-                      <tr key={i}>
-                        <td className="mono" style={{ fontWeight: 600 }}>{a.symbol}</td>
-                        <td><span className={`badge ${a.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{a.direction}</span></td>
-                        <td><span className="badge badge-secondary">{a.product_type}</span></td>
-                        <td>{a.quantity}</td>
-                        <td className="mono">₹{a.entry_price?.toFixed(2)}</td>
-                        <td className="mono">₹{a.current_price?.toFixed(2)}</td>
-                        <td className={a.unrealized_pnl >= 0 ? 'positive mono' : 'negative mono'}>
-                          {a.unrealized_pnl >= 0 ? '+' : ''}₹{a.unrealized_pnl?.toFixed(2)}
-                        </td>
-                        <td className="mono">₹{a.value?.toLocaleString('en-IN')}</td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{ width: 60, height: 6, background: 'var(--color-bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
-                              <div style={{ width: `${a.weight_pct}%`, height: '100%', background: a.unrealized_pnl >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)', borderRadius: 3 }} />
+                    {portfolio.allocation.map((a: any, i: number) => {
+                      const isOverallProfitable = (a.unrealized_pnl ?? 0) >= 0
+                      const isDayProfitable = (a.day_pnl ?? 0) >= 0
+                      const daysHeld = a.days_held ?? 0
+
+                      return (
+                        <tr 
+                          key={a.trade_id || i}
+                          onClick={() => setSelectedHolding(a)}
+                          style={{ cursor: 'pointer', transition: 'background 0.15s ease' }}
+                          title="Click to view detailed holding analytics"
+                        >
+                          {/* Instrument */}
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span className="mono" style={{ fontWeight: 600, fontSize: 14 }}>{a.symbol}</span>
+                              <span className={`badge ${a.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`} style={{ fontSize: 10 }}>
+                                {a.direction}
+                              </span>
+                              <span className="badge badge-secondary" style={{ fontSize: 10 }}>
+                                {a.product_type}
+                              </span>
                             </div>
-                            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{a.weight_pct}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+
+                          {/* Holding Period / Days Held */}
+                          <td>
+                            <span 
+                              className="badge" 
+                              style={{ 
+                                background: daysHeld === 0 ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                                color: daysHeld === 0 ? '#60a5fa' : 'var(--color-text-secondary)',
+                                border: `1px solid ${daysHeld === 0 ? 'rgba(59, 130, 246, 0.3)' : 'var(--color-border)'}`,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                padding: '3px 8px',
+                              }}
+                            >
+                              <Calendar size={12} />
+                              {daysHeld === 0 ? 'Bought Today' : `${daysHeld}d held`}
+                            </span>
+                          </td>
+
+                          {/* Qty */}
+                          <td style={{ fontWeight: 500 }}>{a.quantity}</td>
+
+                          {/* Avg. Buy Price */}
+                          <td className="mono">{formatINR(a.entry_price)}</td>
+
+                          {/* Current Price */}
+                          <td className="mono" style={{ fontWeight: 600 }}>{formatINR(a.current_price)}</td>
+
+                          {/* Today's Profit & Loss for Current Stock */}
+                          <td className={isDayProfitable ? 'positive mono' : 'negative mono'} style={{ whiteSpace: 'nowrap' }}>
+                            <div>
+                              {(a.day_pnl ?? 0) >= 0 ? '+' : ''}{formatINR(a.day_pnl ?? 0)}
+                            </div>
+                            <div style={{ fontSize: 11, opacity: 0.85 }}>
+                              {(a.day_change_pct ?? 0) >= 0 ? '+' : ''}{(a.day_change_pct ?? 0).toFixed(2)}%
+                            </div>
+                          </td>
+
+                          {/* Profit percentage gain or loss percentage of buying */}
+                          <td className={isOverallProfitable ? 'positive mono' : 'negative mono'} style={{ whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 600 }}>
+                              {a.unrealized_pnl >= 0 ? '+' : ''}{formatINR(a.unrealized_pnl)}
+                            </div>
+                            <div style={{ fontSize: 11, opacity: 0.9 }}>
+                              {(a.pnl_pct ?? 0) >= 0 ? '+' : ''}{(a.pnl_pct ?? 0).toFixed(2)}%
+                            </div>
+                          </td>
+
+                          {/* Value */}
+                          <td className="mono">{formatINR(a.value)}</td>
+
+                          {/* Weight */}
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ width: 50, height: 6, background: 'var(--color-bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{ 
+                                  width: `${Math.min(100, Math.max(0, a.weight_pct || 0))}%`, 
+                                  height: '100%', 
+                                  background: isOverallProfitable ? 'var(--color-bullish)' : 'var(--color-bearish)', 
+                                  borderRadius: 3 
+                                }} />
+                              </div>
+                              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{a.weight_pct}%</span>
+                            </div>
+                          </td>
+
+                          {/* Action Button */}
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedHolding(a)
+                              }}
+                              style={{ 
+                                padding: '4px 10px', 
+                                fontSize: 12, 
+                                display: 'inline-flex', 
+                                alignItems: 'center', 
+                                gap: 4 
+                              }}
+                              title="Inspect Holding Details"
+                            >
+                              <Eye size={13} /> Inspect
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
           </div>
+
+          {/* Holding Detail Modal */}
+          <HoldingDetailModal
+            isOpen={!!selectedHolding}
+            onClose={() => setSelectedHolding(null)}
+            holding={selectedHolding}
+          />
         </>
       )}
     </div>

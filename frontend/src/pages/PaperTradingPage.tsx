@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { paperTradingApi, stocksApi } from '../services/api'
-import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle } from 'lucide-react'
+import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle, Calendar, Eye } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
+import HoldingDetailModal from '../components/HoldingDetailModal'
 import { formatINR, formatNumber2Dec } from '../utils/formatters'
 
 export default function PaperTradingPage() {
@@ -11,6 +12,7 @@ export default function PaperTradingPage() {
   const [quote, setQuote] = useState<any>(null)
   const [activeTab, setActiveTab] = useState<'POSITIONS' | 'ORDERS' | 'HISTORY'>('POSITIONS')
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
+  const [selectedPosition, setSelectedPosition] = useState<any | null>(null)
   
   const [form, setForm] = useState({ 
     symbol: '', 
@@ -80,6 +82,7 @@ export default function PaperTradingPage() {
   const totalInvested = openTrades.reduce((sum, t) => sum + (parseFloat(t.entry_price) * t.quantity), 0)
   const currentOpenValue = openTrades.reduce((sum, t) => sum + ((t.current_price || parseFloat(t.entry_price)) * t.quantity), 0)
   const openPnL = openTrades.reduce((sum, t) => sum + (t.unrealized_pnl || 0), 0)
+  const totalDayPnL = openTrades.reduce((sum, t) => sum + (t.day_pnl || 0), 0)
 
   const quantity = Number(form.quantity) || 0
   const referencePrice = form.order_type === 'LIMIT' ? Number(form.limit_price) : form.order_type === 'SL' ? Number(form.stop_price) : quote?.price || 0
@@ -89,28 +92,34 @@ export default function PaperTradingPage() {
     <div style={{ maxWidth: 1200, margin: '0 auto' }}>
       {/* Dashboard Top Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, borderBottom: '1px solid var(--color-border)', paddingBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 40 }}>
+        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Total Realized P&L</div>
-            <div style={{ fontSize: 28, fontWeight: 500 }} className={totalPnL >= 0 ? 'positive' : 'negative'}>
+            <div style={{ fontSize: 24, fontWeight: 600 }} className={totalPnL >= 0 ? 'positive' : 'negative'}>
               {totalPnL >= 0 ? '+' : ''}{formatINR(totalPnL)}
             </div>
           </div>
           <div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Day's Open P&L</div>
-            <div style={{ fontSize: 28, fontWeight: 500 }} className={openPnL >= 0 ? 'positive' : 'negative'}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Day's P&L (Today)</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }} className={totalDayPnL >= 0 ? 'positive' : 'negative'}>
+              {totalDayPnL >= 0 ? '+' : ''}{formatINR(totalDayPnL)}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Open Unrealized P&L</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }} className={openPnL >= 0 ? 'positive' : 'negative'}>
               {openPnL >= 0 ? '+' : ''}{formatINR(openPnL)}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Invested</div>
-            <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--color-text-primary)', marginTop: 8 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-text-primary)', marginTop: 4 }}>
               {formatINR(totalInvested)}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Current Value</div>
-            <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--color-text-primary)', marginTop: 8 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-text-primary)', marginTop: 4 }}>
               {formatINR(currentOpenValue)}
             </div>
           </div>
@@ -149,33 +158,99 @@ export default function PaperTradingPage() {
       {/* Content based on Active Tab */}
       <div className="card table-container" style={{ padding: 0, overflowX: 'auto' }}>
         {activeTab === 'POSITIONS' && (
-          <table className="table" style={{ margin: 0, minWidth: '650px' }}>
+          <table className="table" style={{ margin: 0, minWidth: '850px' }}>
             <thead style={{ background: 'var(--color-bg-card-hover)' }}>
               <tr>
-                <th>Product</th><th>Instrument</th><th>Qty.</th><th>Avg. Cost</th><th>LTP</th><th>Current Value</th><th>P&L</th><th>Action</th>
+                <th>Product</th>
+                <th>Instrument</th>
+                <th>Holding Period</th>
+                <th>Qty.</th>
+                <th>Avg. Cost</th>
+                <th>LTP</th>
+                <th>Today's P&L</th>
+                <th>Overall Return on Buy</th>
+                <th>Current Value</th>
+                <th style={{ textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {openTrades.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>You don't have any open positions yet</td></tr>
-              ) : openTrades.map(t => (
-                <tr key={t.trade_id}>
-                  <td><span className="badge badge-secondary">{t.product_type}</span></td>
-                  <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
-                  <td className={t.direction === 'BUY' ? 'positive' : 'negative'}>{t.direction === 'BUY' ? t.quantity : `-${t.quantity}`}</td>
-                  <td className="mono">{formatNumber2Dec(t.entry_price)}</td>
-                  <td className="mono">{t.current_price ? formatNumber2Dec(t.current_price) : '—'}</td>
-                  <td className="mono">{t.current_price ? formatNumber2Dec(t.current_price * t.quantity) : '—'}</td>
-                  <td className={t.unrealized_pnl >= 0 ? 'positive mono' : 'negative mono'} style={{ fontWeight: 500 }}>
-                    {t.unrealized_pnl !== undefined ? `${t.unrealized_pnl >= 0 ? '+' : ''}${formatNumber2Dec(t.unrealized_pnl)}` : '—'}
-                  </td>
-                  <td>
-                    <button className="btn btn-secondary" style={{ padding: '4px 12px', fontSize: 12, border: '1px solid var(--color-border)' }} onClick={() => handleClose(t.trade_id)}>
-                      Exit
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                <tr><td colSpan={10} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>You don't have any open positions yet</td></tr>
+              ) : openTrades.map(t => {
+                const daysHeld = t.days_held ?? 0
+                const isDayProfitable = (t.day_pnl ?? 0) >= 0
+                const isOverallProfitable = (t.unrealized_pnl ?? 0) >= 0
+
+                return (
+                  <tr 
+                    key={t.trade_id}
+                    onClick={() => setSelectedPosition(t)}
+                    style={{ cursor: 'pointer', transition: 'background 0.15s ease' }}
+                    title="Click to view detailed holding duration & P&L"
+                  >
+                    <td><span className="badge badge-secondary">{t.product_type}</span></td>
+                    <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
+                    <td>
+                      <span 
+                        className="badge" 
+                        style={{ 
+                          background: daysHeld === 0 ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                          color: daysHeld === 0 ? '#60a5fa' : 'var(--color-text-secondary)',
+                          border: `1px solid ${daysHeld === 0 ? 'rgba(59, 130, 246, 0.3)' : 'var(--color-border)'}`,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '2px 7px',
+                          fontSize: 11
+                        }}
+                      >
+                        <Calendar size={11} />
+                        {daysHeld === 0 ? 'Today' : `${daysHeld}d held`}
+                      </span>
+                    </td>
+                    <td className={t.direction === 'BUY' ? 'positive' : 'negative'}>{t.direction === 'BUY' ? t.quantity : `-${t.quantity}`}</td>
+                    <td className="mono">{formatINR(t.entry_price)}</td>
+                    <td className="mono">{t.current_price ? formatINR(t.current_price) : '—'}</td>
+                    
+                    {/* Today's P&L for current stock */}
+                    <td className={isDayProfitable ? 'positive mono' : 'negative mono'}>
+                      <div>{t.day_pnl !== undefined ? `${t.day_pnl >= 0 ? '+' : ''}${formatINR(t.day_pnl)}` : '—'}</div>
+                      <div style={{ fontSize: 11, opacity: 0.85 }}>
+                        {t.day_change_pct !== undefined ? `${t.day_change_pct >= 0 ? '+' : ''}${t.day_change_pct.toFixed(2)}%` : ''}
+                      </div>
+                    </td>
+
+                    {/* Overall Profit/Loss % of buying */}
+                    <td className={isOverallProfitable ? 'positive mono' : 'negative mono'} style={{ fontWeight: 500 }}>
+                      <div>{t.unrealized_pnl !== undefined ? `${t.unrealized_pnl >= 0 ? '+' : ''}${formatINR(t.unrealized_pnl)}` : '—'}</div>
+                      <div style={{ fontSize: 11, opacity: 0.85 }}>
+                        {t.pnl_pct !== undefined ? `${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(2)}%` : ''}
+                      </div>
+                    </td>
+
+                    <td className="mono">{t.current_price ? formatINR(t.current_price * t.quantity) : '—'}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      <div style={{ display: 'inline-flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '4px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                          onClick={() => setSelectedPosition(t)}
+                          title="Inspect details"
+                        >
+                          <Eye size={12} /> View
+                        </button>
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '4px 10px', fontSize: 11, border: '1px solid var(--color-border)' }} 
+                          onClick={() => handleClose(t.trade_id)}
+                        >
+                          Exit
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -338,6 +413,14 @@ export default function PaperTradingPage() {
           </div>
         </div>
       )}
+
+      {/* Holding Detail Modal */}
+      <HoldingDetailModal
+        isOpen={!!selectedPosition}
+        onClose={() => setSelectedPosition(null)}
+        holding={selectedPosition}
+        onExit={handleClose}
+      />
 
       <style>{`
         .form-label { font-size: 11px; color: var(--color-text-muted); margin-bottom: 6px; display: block; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
