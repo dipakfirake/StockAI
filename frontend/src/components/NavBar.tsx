@@ -26,6 +26,7 @@ import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
 import StockSearchBox from './StockSearchBox'
 import LiveTicker from './LiveTicker'
+import LivePresenceBadge from './LivePresenceBadge'
 import WatchlistSidebar from './WatchlistSidebar'
 
 export default function NavBar() {
@@ -63,10 +64,12 @@ export default function NavBar() {
           DESKTOP VIEW (Screens > 768px): Dual-Row Header
          ========================================================================= */}
       <div className="navbar-desktop-row" style={{ display: 'flex', alignItems: 'center', height: '60px', padding: '0 20px', borderBottom: '1px solid var(--color-border)', width: '100%', boxSizing: 'border-box' }}>
-        <NavLink to="/dashboard" className="navbar-brand" style={{ flexShrink: 0, marginRight: 20, textDecoration: 'none', cursor: 'pointer' }}>
+        <NavLink to="/dashboard" className="navbar-brand" style={{ flexShrink: 0, marginRight: 16, textDecoration: 'none', cursor: 'pointer' }}>
           <TrendingUp size={22} />
           AI<span>Stock</span>
         </NavLink>
+
+        <LivePresenceBadge style={{ marginRight: 16 }} />
 
         {user && <LiveTicker />}
 
@@ -209,6 +212,8 @@ export default function NavBar() {
             <TrendingUp size={20} color="#3b82f6" />
             <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>AI<span style={{ color: '#3b82f6' }}>Stock</span></span>
           </NavLink>
+
+          <LivePresenceBadge compact style={{ marginLeft: '4px' }} />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

@@ -32,6 +32,7 @@ TIERS = {
     "AUTH": RateLimitTier(capacity=10, refill_rate_per_sec=10 / 60.0, name="AUTH"),         # 10 req/min (anti-bruteforce)
     "TRADING": RateLimitTier(capacity=20, refill_rate_per_sec=30 / 60.0, name="TRADING"),    # 30 req/min (anti-replay/spam)
     "AI": RateLimitTier(capacity=15, refill_rate_per_sec=30 / 60.0, name="AI"),              # 30 req/min (heavy compute)
+    "PRESENCE": RateLimitTier(capacity=200, refill_rate_per_sec=240 / 60.0, name="PRESENCE"), # 240 req/min (high-frequency heartbeats)
     "GENERAL": RateLimitTier(capacity=100, refill_rate_per_sec=120 / 60.0, name="GENERAL"), # 120 req/min (standard)
 }
 
@@ -96,6 +97,8 @@ class TokenBucketRateLimiter:
             return "TRADING"
         elif p.startswith("/api/ai") or p.startswith("/api/backtest") or p.startswith("/api/ml"):
             return "AI"
+        elif p.startswith("/api/presence"):
+            return "PRESENCE"
         return "GENERAL"
 
     async def check_rate_limit(self, request: Request) -> Optional[Tuple[bool, dict, float]]:
