@@ -35,6 +35,10 @@ class MarketDataService:
     def _normalise_symbol(symbol: str) -> str:
         """Ensure symbol has exchange suffix. Index symbols (^) are returned as-is."""
         symbol = symbol.upper().strip()
+
+        # Idempotent guard: if already a Fyers symbol (NSE:... or BSE:...), return immediately
+        if symbol.startswith("NSE:") or symbol.startswith("BSE:"):
+            return symbol
         
         # Comprehensive Index translation for Fyers
         index_map = {
