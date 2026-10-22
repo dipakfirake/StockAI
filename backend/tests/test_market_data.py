@@ -155,6 +155,7 @@ async def test_fetch_quotes_bulk_fyers_and_fallback(mock_cache_set, mock_cache_g
         instance.quotes.return_value = mock_fyers_resp
         mock_fyers.return_value = instance
 
+        MarketDataService.reset_fyers_health()
         res = await MarketDataService.fetch_quotes_bulk(["SBIN.NS"], use_fallback=False)
         assert "SBIN.NS" in res
         assert res["SBIN.NS"]["price"] == 965.5
@@ -209,6 +210,7 @@ async def test_fyers_after_hours_prev_close_rollover(mock_cache_set, mock_cache_
         instance.quotes.return_value = mock_fyers_resp
         mock_fyers.return_value = instance
 
+        MarketDataService.reset_fyers_health()
         res = await MarketDataService.fetch_quote("PCJEWELLER.NS")
         assert res is not None
         assert res["price"] == 18.13

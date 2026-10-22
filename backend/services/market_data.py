@@ -202,6 +202,7 @@ class MarketDataService:
         cls._fyers_token_valid = True
         cls._fyers_token_error_reason = ""
         cls._fyers_cooldown_until = 0.0
+        cls._fyers_request_timestamps.clear()
         cls._env_mtime = 0.0
         cls._active_engine = "PRIMARY_FYERS"
         logger.info("Dual-Engine: Fyers token refreshed. Hot-swapping back to Primary Fyers Engine.")

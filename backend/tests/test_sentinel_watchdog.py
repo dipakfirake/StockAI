@@ -35,6 +35,7 @@ async def test_sentinel_api_endpoints():
     from backend.core.auth import get_current_user
     from backend.api.admin import require_admin
     from backend.models.user import User
+    from unittest.mock import MagicMock
 
     mock_admin = MagicMock(spec=User, id="admin-uuid", email="admin@stockai.com", is_admin=True)
     app.dependency_overrides[get_current_user] = lambda: mock_admin
