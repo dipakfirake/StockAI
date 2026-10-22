@@ -50,6 +50,7 @@ async def test_subscribe_symbols_normalizes_and_maps(stream_service):
 async def test_on_tick_dispatches_broadcast_and_cache(stream_service):
     """When a tick arrives, it resolves the mapped symbol and dispatches broadcast."""
     mock_loop = MagicMock()
+    mock_loop.is_running.return_value = True
     stream_service._loop = mock_loop
     stream_service._symbol_map["NSE:RELIANCE-EQ"] = "RELIANCE.NS"
 

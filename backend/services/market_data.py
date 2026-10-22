@@ -795,126 +795,126 @@ class MarketDataService:
         import time
         now = time.time()
 
-        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
-            try:
+        try:
+            if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
                 fyers = await MarketDataService._get_fyers_client()
                 all_candles = []
-            
-            # 1. Determine the global start and end timestamps
-            if start_date and end_date:
-                dt_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                dt_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            else:
-                dt_end = datetime.now(timezone.utc)
-                if limit and limit < 300:
-                    # Proportional fast single-query range for real-time indicators & scanner
-                    if timeframe in ["1d", "1w", "1mo"]:
-                        mult = 7.0 if timeframe == "1w" else (30.0 if timeframe == "1mo" else 1.8)
-                        dt_start = dt_end - timedelta(days=int(limit * mult) + 30)
-                    elif timeframe in ["1h", "30m", "15m", "5m"]:
-                        dt_start = dt_end - timedelta(days=min(limit, 30))
-                    elif timeframe == "1m":
-                        dt_start = dt_end - timedelta(days=min(limit, 10))
+                
+                # 1. Determine the global start and end timestamps
+                if start_date and end_date:
+                    dt_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    dt_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 else:
-                    # Deep historical coverage for ML training and extensive backtesting
-                    if timeframe in ["1d", "1w", "1mo"]:
-                        dt_start = datetime(2015, 1, 1, tzinfo=timezone.utc)
-                    elif timeframe in ["1h", "30m", "15m", "5m"]:
-                        dt_start = dt_end - timedelta(days=100)
-                    elif timeframe == "1m":
-                        dt_start = dt_end - timedelta(days=60)
-                
-            # 2. Backward Pagination Loop (Fyers max range is 100 days for intraday, 365 days for daily)
-            # Paginating backwards ensures the most recent market candles (today/yesterday)
-            # are retrieved FIRST so any pagination cutoff never leaves candles stuck in old years.
-            max_days_per_request = 365 if timeframe in ["1d", "1w", "1mo"] else 100
-            
-            chunk_end = dt_end
-            while chunk_end > dt_start:
-                chunk_start = max(chunk_end - timedelta(days=max_days_per_request), dt_start)
-                
-                data = {
-                    "symbol": fyers_symbol,
-                    "resolution": fyers_interval,
-                    "date_format": "1",
-                    "range_from": chunk_start.strftime("%Y-%m-%d"),
-                    "range_to": chunk_end.strftime("%Y-%m-%d"),
-                    "cont_flag": "1" # Continuous data for futures/indices
-                }
-                
-                max_retries = 2
-                for attempt in range(max_retries):
-                    response = await asyncio.to_thread(fyers.history, data)
-                    if response.get("s") == "ok":
-                        break
+                    dt_end = datetime.now(timezone.utc)
+                    if limit and limit < 300:
+                        # Proportional fast single-query range for real-time indicators & scanner
+                        if timeframe in ["1d", "1w", "1mo"]:
+                            mult = 7.0 if timeframe == "1w" else (30.0 if timeframe == "1mo" else 1.8)
+                            dt_start = dt_end - timedelta(days=int(limit * mult) + 30)
+                        elif timeframe in ["1h", "30m", "15m", "5m"]:
+                            dt_start = dt_end - timedelta(days=min(limit, 30))
+                        elif timeframe == "1m":
+                            dt_start = dt_end - timedelta(days=min(limit, 10))
+                    else:
+                        # Deep historical coverage for ML training and extensive backtesting
+                        if timeframe in ["1d", "1w", "1mo"]:
+                            dt_start = datetime(2015, 1, 1, tzinfo=timezone.utc)
+                        elif timeframe in ["1h", "30m", "15m", "5m"]:
+                            dt_start = dt_end - timedelta(days=100)
+                        elif timeframe == "1m":
+                            dt_start = dt_end - timedelta(days=60)
                     
-                    # If authentication fails (-16), rate limited (429/-360), symbol is invalid (-300), or no data exists (pre-IPO), skip immediately without retry delay
-                    if response.get("code") in (-360, 429):
-                        MarketDataService.record_fyers_rate_limit("Fyers history rate limited", cooldown_seconds=30.0)
-                        break
-                    if response.get("code") in [-16, -300] or response.get("s") in ["no_data", "error"]:
+                # 2. Backward Pagination Loop (Fyers max range is 100 days for intraday, 365 days for daily)
+                # Paginating backwards ensures the most recent market candles (today/yesterday)
+                # are retrieved FIRST so any pagination cutoff never leaves candles stuck in old years.
+                max_days_per_request = 365 if timeframe in ["1d", "1w", "1mo"] else 100
+                
+                chunk_end = dt_end
+                while chunk_end > dt_start:
+                    chunk_start = max(chunk_end - timedelta(days=max_days_per_request), dt_start)
+                    
+                    data = {
+                        "symbol": fyers_symbol,
+                        "resolution": fyers_interval,
+                        "date_format": "1",
+                        "range_from": chunk_start.strftime("%Y-%m-%d"),
+                        "range_to": chunk_end.strftime("%Y-%m-%d"),
+                        "cont_flag": "1" # Continuous data for futures/indices
+                    }
+                    
+                    max_retries = 2
+                    for attempt in range(max_retries):
+                        response = await asyncio.to_thread(fyers.history, data)
+                        if response.get("s") == "ok":
+                            break
+                        
+                        # If authentication fails (-16), rate limited (429/-360), symbol is invalid (-300), or no data exists (pre-IPO), skip immediately without retry delay
+                        if response.get("code") in (-360, 429):
+                            MarketDataService.record_fyers_rate_limit("Fyers history rate limited", cooldown_seconds=30.0)
+                            break
+                        if response.get("code") in [-16, -300] or response.get("s") in ["no_data", "error"]:
+                            break
+                            
+                        logger.warning(f"Fyers history failed for {fyers_symbol} ({chunk_start.date()} to {chunk_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")
+                        await asyncio.sleep(1.0)
+                    else:
                         break
                         
-                    logger.warning(f"Fyers history failed for {fyers_symbol} ({chunk_start.date()} to {chunk_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")
-                    await asyncio.sleep(1.0)
+                    if "candles" in response and response["candles"]:
+                        all_candles.extend(response["candles"])
+                    elif not all_candles:
+                        # If the most recent chunk had no data or failed, stop
+                        break
+                        
+                    chunk_end = chunk_start - timedelta(days=1)
+                    
+                    # Sleep briefly only if paginating across multiple chunks
+                    if chunk_end > dt_start:
+                        await asyncio.sleep(0.35)
+                    
+                if all_candles:
+                    # Fyers candle format: [Epoch, Open, High, Low, Close, Volume]
+                    formatted_candles = []
+                    seen_ts = set()
+                    for c in all_candles:
+                        if c[0] in seen_ts:
+                            continue
+                        seen_ts.add(c[0])
+                        ts_dt = datetime.fromtimestamp(c[0], timezone.utc)
+                        formatted_candles.append({
+                            "timestamp": ts_dt.isoformat(),
+                            "open": float(c[1]),
+                            "high": float(c[2]),
+                            "low": float(c[3]),
+                            "close": float(c[4]),
+                            "volume": int(c[5])
+                        })
+                        
+                    # Sort chronologically and retain complete dataset
+                    formatted_candles.sort(key=lambda x: x["timestamp"])
+
+                    # Freshness Guard: If requesting live market data (no explicit historical date bounds),
+                    # guarantee the most recent candle is not severely stale (>45 days old)
+                    if not start_date and not end_date and formatted_candles:
+                        latest_dt = datetime.fromisoformat(formatted_candles[-1]["timestamp"].replace("Z", "+00:00"))
+                        if (dt_end - latest_dt).days > 45:
+                            logger.warning(f"Fyers returned stale historical candles for {fyers_symbol} ending {latest_dt.date()}. Invoking fallback.")
+                            raise ValueError(f"Fyers candles stale for {fyers_symbol}")
+
+                    ttl = settings.CACHE_TTL_INTRADAY if timeframe in ("1m", "5m", "15m", "30m") else settings.CACHE_TTL_DAILY_CANDLES
+                    await cache_set(cache_key, formatted_candles, ttl=ttl)
+                    return formatted_candles
                 else:
-                    break
-                    
-                if "candles" in response and response["candles"]:
-                    all_candles.extend(response["candles"])
-                elif not all_candles:
-                    # If the most recent chunk had no data or failed, stop
-                    break
-                    
-                chunk_end = chunk_start - timedelta(days=1)
-                
-                # Sleep briefly only if paginating across multiple chunks
-                if chunk_end > dt_start:
-                    await asyncio.sleep(0.35)
-                
-            if all_candles:
-                # Fyers candle format: [Epoch, Open, High, Low, Close, Volume]
-                formatted_candles = []
-                seen_ts = set()
-                for c in all_candles:
-                    if c[0] in seen_ts:
-                        continue
-                    seen_ts.add(c[0])
-                    ts_dt = datetime.fromtimestamp(c[0], timezone.utc)
-                    formatted_candles.append({
-                        "timestamp": ts_dt.isoformat(),
-                        "open": float(c[1]),
-                        "high": float(c[2]),
-                        "low": float(c[3]),
-                        "close": float(c[4]),
-                        "volume": int(c[5])
-                    })
-                    
-                # Sort chronologically and retain complete dataset
-                formatted_candles.sort(key=lambda x: x["timestamp"])
-
-                # Freshness Guard: If requesting live market data (no explicit historical date bounds),
-                # guarantee the most recent candle is not severely stale (>45 days old)
-                if not start_date and not end_date and formatted_candles:
-                    latest_dt = datetime.fromisoformat(formatted_candles[-1]["timestamp"].replace("Z", "+00:00"))
-                    if (dt_end - latest_dt).days > 45:
-                        logger.warning(f"Fyers returned stale historical candles for {fyers_symbol} ending {latest_dt.date()}. Invoking fallback.")
-                        raise ValueError(f"Fyers candles stale for {fyers_symbol}")
-
-                ttl = settings.CACHE_TTL_INTRADAY if timeframe in ("1m", "5m", "15m", "30m") else settings.CACHE_TTL_DAILY_CANDLES
-                await cache_set(cache_key, formatted_candles, ttl=ttl)
-                return formatted_candles
-            else:
-                logger.warning(f"Empty candle data returned by Fyers for {fyers_symbol}")
-                if fyers_symbol.startswith("BSE:"):
-                    # Dual-listed fallback in Fyers: try NSE
-                    return await MarketDataService.fetch_candles(
-                        symbol=original_symbol.replace(".BO", ".NS"),
-                        timeframe=timeframe,
-                        limit=limit,
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
+                    logger.warning(f"Empty candle data returned by Fyers for {fyers_symbol}")
+                    if fyers_symbol.startswith("BSE:"):
+                        # Dual-listed fallback in Fyers: try NSE
+                        return await MarketDataService.fetch_candles(
+                            symbol=original_symbol.replace(".BO", ".NS"),
+                            timeframe=timeframe,
+                            limit=limit,
+                            start_date=start_date,
+                            end_date=end_date,
+                        )
 
         except Exception as e:
             logger.error(f"Failed to fetch Fyers history for {original_symbol}: {e}")
