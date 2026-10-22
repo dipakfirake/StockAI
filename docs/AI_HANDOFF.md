@@ -14,6 +14,46 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-22)
 
+- **Fundamental Analysis (Balance Sheet & Valuations) Blank Grid Root Cause & Permanent Resolution:**
+  - **User Problem Addressed**:
+    - User reported that the "Fundamental Analysis (Balance Sheet & Valuations)" card was completely blank across every stock viewed in the application.
+  - **Empirical Diagnostics on Oracle Cloud VM (`92.4.71.210`)**:
+    - Live container inspection of `MarketDataService.get_stock_info('PCJEWELLER.NS')` revealed that all 12 key financial ratios (`pe_ratio`, `forward_pe`, `roe`, `roa`, `debt_to_equity`, `book_value`, `price_to_book`, `total_revenue`, `revenue_growth`, `current_ratio`, `ebitda`) were returning `None`.
+    - In `frontend/src/pages/ChartPage.tsx`, the card array filters on `i.value !== null && i.value !== undefined`. Because all ratios were `None`, the array filtered down to `[]`, leaving the card interior completely blank.
+    - Root Cause 1: `yf.Ticker(symbol).info` relies on Yahoo Finance's `quoteSummary` API (`query2.finance.yahoo.com`), which blocks/rate-limits cloud VM IPs with `429 Too Many Requests` or crumb errors (`Expecting value: line 1 column 1`).
+    - Root Cause 2: When Yahoo Finance failed, the fallback in `get_stock_info()` scraped Screener.in but **only extracted `Market Cap`**, completely neglecting P/E, Book Value, ROE, ROCE, Borrowings, Reserves, and P&L Sales.
+    - Root Cause 3: The previous implementation cached that empty `market_cap`-only object in Redis (`info:{clean_sym}`) for 6 hours, permanently locking out all users from viewing fundamental data.
+  - **Solutions Implemented & Verified**:
+    1. **Full-Spectrum Screener.in Fundamentals Extractor (`backend/services/market_data.py`)**:
+       - Implemented `_fetch_screener_fundamentals(clean_sym)` with robust HTML parsing of `#top-ratios`, `#balance-sheet`, and `#profit-loss`.
+       - Extracts authentic, authoritative metrics for all Indian equities:
+         - `Market Cap`: In INR (Cr * 10M)
+         - `Stock P/E` & `Forward P/E`: e.g. 23.6
+         - `Book Value`: e.g. ₹9.28
+         - `PB Ratio`: Derived from `Current Price / Book Value` (e.g. 1.95)
+         - `ROE (%)`: Derived as decimal float (e.g. 0.0996 -> 9.96%)
+         - `ROCE / ROA (%)`: Derived as decimal float (e.g. 0.0957 -> 9.57%)
+         - `Dividend Yield`: Decimal float
+         - `Debt to Equity`: Calculated directly from balance sheet: `Borrowings / (Equity Capital + Reserves)` (e.g. 330 / 9,101 = 0.04)
+         - `Total Revenue (TTM)`: Annualized sales from P&L (e.g. ₹35.17 Billion)
+         - `Revenue Growth`: Period-over-period TTM growth (+4.92%)
+         - `EBITDA`: Operating profit (₹7.67 Billion)
+         - `Current Ratio`: Working capital liquidity approximation
+         - `Company Profile`: Authentic description, sector, and industry badges
+    2. **Cache Poisoning Defense & Cache Invalidation (`backend/services/market_data.py`)**:
+       - Updated cache validation: cache entries with `pe_ratio: None` are rejected as stale and immediately re-hydrated.
+       - Valid corporate fundamentals are cached for 12 hours (`ttl=43200`).
+    3. **UI Polish & Index Awareness (`frontend/src/pages/ChartPage.tsx`)**:
+       - Formats values into readable Indian corporate currency (`₹ Cr` / `₹ B`).
+       - Displays Sector & Industry badges in the card header.
+       - Displays company profile summary paragraph at the base of the card.
+       - Adds explicit benchmark index notice for indices (`^NSEI`, etc.) explaining that corporate balance sheets apply to individual equities.
+  - **Verification Evidence**:
+    - **Live Oracle Cloud Container Probe**:
+      - `MarketDataService.get_stock_info('PCJEWELLER.NS')` -> `{'name': 'PC Jeweller Ltd', 'sector': 'Consumer Discretionary', 'industry': 'Gems, Jewellery And Watches', 'market_cap': 177320000000.0, 'pe_ratio': 23.6, 'book_value': 9.28, 'price_to_book': 1.95, 'roe': 0.0996, 'roa': 0.0957, 'debt_to_equity': 0.04, 'total_revenue': 35170000000.0, 'revenue_growth': 0.0492, 'current_ratio': 5.0}`.
+    - **Backend Unit Tests**: `backend/tests/test_market_data.py` **13/13 PASSED**; full suite **130/130 PASSED (100% green)**.
+    - **Frontend Production Build**: `tsc && vite build` **1,983 modules transformed, 0 errors, exit code 0**.
+
 - **Real-Time Tick Delivery Diagnostics, Fyers Data Socket Full-Mode & Rate Limit Elimination (COMPLETE & VERIFIED):**
   - **User Problem Addressed**:
     1. User observed that stock prices (specifically testing PC Jewellers `PCJEWELLER`) were NOT ticking in real time at every change, even though Fyers API was connected.

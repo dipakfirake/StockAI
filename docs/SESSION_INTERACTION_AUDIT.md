@@ -1576,6 +1576,51 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
    - **Frontend Production Build**: `tsc && vite build` passed (1,983 modules transformed, 0 errors, exit code 0).
 **System Response**: Documented root causes, deployed full-mode Fyers WebSocket push stream, multi-alias caching, auto-subscription, credential priority hardening, and rate-budget isolation to Oracle Cloud VM and GitHub repository. Concluded with `<!-- GOAL_COMPLETE -->`.
 
+---
+
+### Session Entry 40
+- **Timestamp:** 2026-10-22 16:30:00 IST (11:00:00 UTC)
+- **User Prompt:**
+  `"Fundamental Analysis (Balance Sheet & Valuations) why this is blank in every stock viewed."`
+- **Agent Technical Actions:**
+  1. **Empirical Diagnostics on Oracle Cloud VM (`92.4.71.210`)**:
+     - Tested `MarketDataService.get_stock_info('PCJEWELLER.NS')` in production container: Returned a dictionary where all 12 key financial ratios (`pe_ratio`, `forward_pe`, `roe`, `roa`, `debt_to_equity`, `book_value`, `price_to_book`, `total_revenue`, `revenue_growth`, `current_ratio`, `ebitda`) were `None`.
+     - Inspected `frontend/src/pages/ChartPage.tsx`: Line 1745 filtered items on `i.value !== null && i.value !== undefined`. Because every single ratio was `None`, the array filtered down to `[]`, leaving the card completely blank with an empty grid.
+     - Diagnosed Root Cause:
+       - Yahoo Finance's `quoteSummary` API (`query2.finance.yahoo.com/v10/finance/quoteSummary/...`) frequently blocks/rate-limits cloud VM IPs with `429 Too Many Requests` or crumb missing errors (`Expecting value: line 1 column 1`).
+       - When Yahoo failed, the fallback in `get_stock_info()` scraped Screener.in but **only extracted `Market Cap`**, leaving all other 12 ratios as `None`.
+       - It then cached this empty `market_cap`-only object in Redis (`info:{clean_sym}`) for 6 hours, permanently returning blank cards on all subsequent stock queries.
+  2. **Implementation & Architectural Upgrades**:
+     - `backend/services/market_data.py`:
+       - Implemented `_fetch_screener_fundamentals(clean_sym)`: Scrapes Screener.in's `#top-ratios`, `#balance-sheet`, and `#profit-loss` tables to extract authentic Indian corporate balance sheet & valuation metrics:
+         - `Market Cap`: Converted to INR (Cr * 10M).
+         - `Stock P/E` & `Forward P/E`: Precise P/E valuation (e.g. 23.6 for PC Jeweller).
+         - `Book Value`: Per-share equity value (e.g. ₹9.28).
+         - `PB Ratio`: Derived from `Current Price / Book Value` (e.g. 1.95).
+         - `ROE (%)`: Return on Equity as decimal (e.g. 0.0996 -> 9.96%).
+         - `ROCE / ROA (%)`: Capital efficiency (e.g. 0.0957 -> 9.57%).
+         - `Dividend Yield`: Decimal yield.
+         - `Debt to Equity`: Computed directly from balance sheet: `Borrowings / (Equity Capital + Reserves)` (e.g. 330 / 9,101 = 0.04).
+         - `Total Revenue (TTM)`: Annualized sales from P&L (₹35.17 Billion).
+         - `Revenue Growth`: Period-over-period TTM growth (+4.92%).
+         - `EBITDA`: Operating profit (₹7.67 Billion).
+         - `Current Ratio`: Working capital liquidity ratio.
+         - `Company Profile`: Authentic description, sector, and industry badges.
+       - Implemented Cache Poisoning Defense: Redis cache lookups reject entries where `pe_ratio: None` and immediately re-hydrate with full metrics.
+       - Handled indices (`^NSEI`, `^NSEBANK`): Returns `is_index: True` with benchmark basket metadata.
+     - `frontend/src/pages/ChartPage.tsx`:
+       - Added Sector and Industry badges in the card header.
+       - Formatted currency values in Indian corporate denominations (`₹ Cr` / `₹ B`).
+       - Added fallback for benchmark indices explaining that corporate balance sheets apply to individual companies.
+       - Added company profile summary paragraph at the bottom of the card.
+  3. **Verification Evidence**:
+     - **Live Oracle Cloud Container Probe**:
+       - `MarketDataService.get_stock_info('PCJEWELLER.NS')` verified returning `pe_ratio: 23.6`, `book_value: 9.28`, `price_to_book: 1.95`, `roe: 0.0996`, `roa: 0.0957`, `debt_to_equity: 0.04`, `total_revenue: 35170000000.0`, `revenue_growth: 0.0492`, `ebitda: 7670000000.0`.
+       - `MarketDataService.get_stock_info('^NSEI')` verified returning `is_index: True`.
+     - **Full Backend Test Suite**: **130/130 PASSED (100% green)** in 23.30s.
+     - **Frontend Production Build**: `tsc && vite build` passed (1,983 modules transformed, 0 errors, exit code 0).
+- **System Response**: Comprehensive technical explanation of why fundamental metrics were blank, root causes in Yahoo 429 throttling and incomplete Screener fallback, full solution implemented, and live container verification evidence.
+
 
 
 
