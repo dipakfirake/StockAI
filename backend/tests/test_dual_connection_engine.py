@@ -171,6 +171,7 @@ async def test_fetch_quotes_bulk_handles_rate_limit_code_360_without_expiring_to
 
     with patch.object(MarketDataService, "_get_fyers_client", new_callable=AsyncMock) as mock_get_client, \
          patch.object(MarketDataService, "_parse_yahoo_chart_meta") as mock_parse_meta, \
+         patch("backend.services.market_data.cache_get", new_callable=AsyncMock, return_value=None), \
          patch("httpx.AsyncClient.get") as mock_http_get:
 
         mock_get_client.return_value = mock_fyers
