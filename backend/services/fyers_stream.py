@@ -117,15 +117,6 @@ class FyersStreamService:
         access_token = settings.FYERS_ACCESS_TOKEN
 
         try:
-            from backend.core.cache import cache_get
-            cached_creds = await cache_get("fyers_creds")
-            if cached_creds and cached_creds.get("access_token"):
-                client_id = cached_creds.get("client_id", client_id)
-                access_token = cached_creds.get("access_token", access_token)
-        except Exception:
-            pass
-
-        try:
             from backend.core.database import AsyncSessionLocal
             from backend.models.settings import SystemSettings
             from sqlalchemy import select
@@ -133,12 +124,24 @@ class FyersStreamService:
             async with AsyncSessionLocal() as db:
                 fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
                 fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
-                if fyers_client_obj and fyers_client_obj.value:
-                    client_id = fyers_client_obj.value
-                if fyers_token_obj and fyers_token_obj.value:
-                    access_token = fyers_token_obj.value
+                if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
+                    client_id = fyers_client_obj.value.strip()
+                if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10:
+                    access_token = fyers_token_obj.value.strip()
         except Exception as e:
             logger.debug(f"Database settings query skipped: {e}")
+
+        if not access_token or not client_id:
+            try:
+                from backend.core.cache import cache_get
+                cached_creds = await cache_get("fyers_creds")
+                if cached_creds:
+                    if not client_id and cached_creds.get("client_id"):
+                        client_id = cached_creds["client_id"]
+                    if not access_token and cached_creds.get("access_token"):
+                        access_token = cached_creds["access_token"]
+            except Exception:
+                pass
 
         # Check environment dynamic cache
         if hasattr(MarketDataService, "_env_cache") and MarketDataService._env_cache:

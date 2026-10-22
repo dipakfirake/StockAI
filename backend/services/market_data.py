@@ -221,22 +221,26 @@ class MarketDataService:
         try:
             from backend.core.cache import cache_get, cache_set
             
-            cached_creds = await cache_get("fyers_creds")
-            if cached_creds:
-                client_id = cached_creds.get("client_id", client_id)
-                access_token = cached_creds.get("access_token", access_token)
-            else:
-                async with AsyncSessionLocal() as db:
-                    fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
-                    fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
+            # Priority 1: Check PostgreSQL SystemSettings (authoritative user configuration)
+            async with AsyncSessionLocal() as db:
+                fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
+                fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
+                
+                if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
+                    client_id = fyers_client_obj.value.strip()
+                if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10:
+                    access_token = fyers_token_obj.value.strip()
                     
-                    if fyers_client_obj and fyers_client_obj.value:
-                        client_id = fyers_client_obj.value
-                    if fyers_token_obj and fyers_token_obj.value:
-                        access_token = fyers_token_obj.value
-                        
-                if client_id and access_token:
-                    await cache_set("fyers_creds", {"client_id": client_id, "access_token": access_token}, ttl=300)
+            # Priority 2: Check Redis Cache ('fyers_creds') if DB did not provide credentials
+            if not access_token or not client_id:
+                cached_creds = await cache_get("fyers_creds")
+                if cached_creds:
+                    if not client_id and cached_creds.get("client_id"):
+                        client_id = cached_creds["client_id"]
+                    if not access_token and cached_creds.get("access_token"):
+                        access_token = cached_creds["access_token"]
+            elif client_id and access_token:
+                await cache_set("fyers_creds", {"client_id": client_id, "access_token": access_token}, ttl=300)
         except Exception:
             pass
         
