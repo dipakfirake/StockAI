@@ -94,24 +94,30 @@ async def poll_market_data():
             fyers_connected = fyers_stream_service.is_connected and MarketDataService._fyers_token_valid
 
             if symbols:
-                # If Fyers is connected, bulk quotes fetch via Fyers
-                # If Fyers is disconnected/expired, fetch_quotes_bulk automatically uses Yahoo backup
-                quotes_map = await market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=True)
-                for symbol, quote in quotes_map.items():
-                    if quote and quote.get("price", 0) > 0:
-                        await broadcast_market_update(
-                            symbol=symbol,
-                            price=quote["price"],
-                            change=quote.get("change", 0.0),
-                            change_pct=quote.get("change_pct", 0.0),
-                            volume=quote.get("volume", 0),
-                            timestamp=quote.get("timestamp"),
-                            open_price=quote.get("open"),
-                            high_price=quote.get("high"),
-                            low_price=quote.get("low"),
-                            source=quote.get("source", "Backup (Yahoo Finance)" if not fyers_connected else "Fyers API"),
-                            data_status=quote.get("data_status", "live_backup" if not fyers_connected else "realtime")
-                        )
+                if fyers_connected:
+                    # ZERO REST CALLS: Fyers Data Socket (WebSocket V3) is connected & streaming!
+                    # Dynamically register active symbols so Fyers pushes sub-100ms ticks on price changes.
+                    # _on_tick in fyers_stream.py automatically broadcasts ticks to all connected clients and updates Redis.
+                    await fyers_stream_service.subscribe_symbols(list(symbols))
+                else:
+                    # Autonomous Dual Failover Engine: Active ONLY when Fyers is expired / disconnected.
+                    # Smoothly polls Yahoo Finance Backup every 3s and broadcasts ticks to all clients with zero price freeze.
+                    quotes_map = await market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=True)
+                    for symbol, quote in quotes_map.items():
+                        if quote and quote.get("price", 0) > 0:
+                            await broadcast_market_update(
+                                symbol=symbol,
+                                price=quote["price"],
+                                change=quote.get("change", 0.0),
+                                change_pct=quote.get("change_pct", 0.0),
+                                volume=quote.get("volume", 0),
+                                timestamp=quote.get("timestamp"),
+                                open_price=quote.get("open"),
+                                high_price=quote.get("high"),
+                                low_price=quote.get("low"),
+                                source=quote.get("source", "Backup (Yahoo Finance)"),
+                                data_status=quote.get("data_status", "live_backup")
+                            )
         except Exception as e:
             logger.error(f"Error in dual-engine market data streaming poller: {e}")
         

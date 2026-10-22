@@ -514,8 +514,25 @@ class MarketDataService:
 
         import time
         now = time.time()
-        fyers_to_orig: dict[str, list[str]] = {}
+
+        quotes_dict = {}
+        missing_symbols = []
         for s in symbols:
+            try:
+                cached = await cache_get(f"quote:{s}")
+                if cached and cached.get("price", 0) > 0:
+                    quotes_dict[s] = cached
+                else:
+                    missing_symbols.append(s)
+            except Exception:
+                missing_symbols.append(s)
+
+        # If all symbols are already fresh in cache (from WebSocket push ticks or recent reads), return immediately!
+        if not missing_symbols:
+            return quotes_dict
+
+        fyers_to_orig: dict[str, list[str]] = {}
+        for s in missing_symbols:
             norm = MarketDataService._normalise_symbol(s)
             fyers_to_orig.setdefault(norm, []).append(s)
             # In Fyers, BSE cash equities (e.g. BSE:PCJEWELLER-EQ) error with -300 invalid symbol.
@@ -526,7 +543,6 @@ class MarketDataService:
 
         fyers_symbols_str = ",".join(fyers_to_orig.keys())
         
-        quotes_dict = {}
         if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()

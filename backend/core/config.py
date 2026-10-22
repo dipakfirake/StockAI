@@ -22,10 +22,10 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
-    CACHE_TTL_QUOTE: int = 1           # 1 second for ultra-responsive live price updates
+    CACHE_TTL_QUOTE: int = 3           # 3 seconds cache (WebSocket streams sub-second ticks in real-time)
     CACHE_TTL_DAILY_CANDLES: int = 3600 # 1 hour
     CACHE_TTL_INTRADAY: int = 5        # 5 seconds
-    CACHE_TTL_INDEX_QUOTE: int = 1     # 1 second for live index quotes
+    CACHE_TTL_INDEX_QUOTE: int = 3     # 3 seconds for index quotes
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
