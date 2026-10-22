@@ -1722,7 +1722,37 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
   - Automated tests: 5/5 passing.
   - Frontend production build: 0 errors.
   - Remote production container API probe verified.
-- **System Response:** Documented the zero-database Redis in-memory surveillance architecture, 3-5s update cadence, and walkthrough of how admins can click the badge to inspect active users.
+---
+
+### Session Entry 42
+- **Timestamp:** 2026-10-22 18:20:00 IST (12:50:00 UTC)
+- **User Prompt:**  
+  `"why you created another sentinel 27/7 in  nav bar as it is in admin control tab also remove extra of  it from nav bar and i said that i want to see which user is active with live ness check so whwre is it how to see it ."`
+- **Agent Technical Actions:**
+  1. **Removed Redundant Sentinel Link from Top Navbar**:
+     - Verified that `Sentinel 24/7 Watchdog` was already natively linked inside `AdminPage.tsx` header (`/admin/sentinel`).
+     - Removed `links.push({ to: '/admin/sentinel', label: 'Sentinel 24/7', icon: ShieldAlert })` from `frontend/src/components/NavBar.tsx`.
+     - Preserved clean desktop and mobile navbar structure with only `Admin Control` for administrators.
+  2. **Integrated Real-Time Live Users Tab Directly into Admin Control Panel**:
+     - Modified `frontend/src/pages/AdminPage.tsx`:
+       - Added `'live'` tab to navigation state: `const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users'>('live')`.
+       - Rendered `🟢 Real-Time Live Users ({liveCount} Online)` as the primary tab button alongside `Fyers Mobile Token Manager` and `User Accounts & Subscriptions`.
+       - Added dedicated full-screen surveillance board under `{activeTab === 'live'}`:
+         - Real-time KPI summary grid: Total Active Sessions, Registered Traders, Guest Visitors, and Device Distribution (Mobile vs Desktop).
+         - Interactive surveillance table: User Avatar, Name, Email, Role badge (ADMIN, PRO, FREE, GUEST), Active Screen URL path (`/dashboard`, `/chart`, etc.), Device platform (📱 Mobile vs 💻 Desktop), and Liveness status (🟢 Active, "Just now", "2s ago").
+         - Auto-syncing every 3.5s while the tab is active with manual refresh capability.
+         - Embedded zero-database architectural guarantee (100% in-memory Redis primitives, 0 SQL queries).
+       - Added `?tab=live` URL parameter support so direct deep-linking to the live user surveillance dashboard works seamlessly.
+  3. **Verification**:
+     - Frontend compilation: `npm --prefix frontend run build` (`tsc && vite build`) passed with 0 errors (1,987 modules transformed, built in 31.73s).
+     - Backend unit tests: `venv\Scripts\python.exe -m pytest backend/tests/test_presence.py -v` passed (5/5 tests green).
+- **Verification Evidence:**
+  - `frontend/src/components/NavBar.tsx`: 0 redundant Sentinel links.
+  - `frontend/src/pages/AdminPage.tsx`: Integrated `'live'` tab with live presence metrics and auto-refresh.
+  - Tests: 5/5 passed.
+  - Build: 0 errors.
+- **System Response:** Clear explanation to user clarifying why Sentinel was in navbar (now removed since it is inside Admin Control), followed by an exact, step-by-step guide with screenshots/descriptions of the two ways to view active users with real-time liveness checks (via Admin Control -> Real-Time Live Users tab, or clicking the glowing green badge in the navbar).
+
 
 
 

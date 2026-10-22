@@ -17,25 +17,25 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - **Real-Time Live Users Online Tracking & Surveillance System (COMPLETE & VERIFIED):**
   - **Feature Overview**:
     - Real-time active user tracking on both desktop and mobile platforms with pulsating emerald live count badge (`🟢 X Live`).
-    - **Visibility Access Control & Surveillance Modal**: The visual badge is strictly restricted to **Administrators only** (`isAdmin = Boolean(user?.is_admin || user?.email === 'admin@stockai.com')`). Clicking the badge opens the **Live Users Surveillance Modal**, showing the exact list of who is live (User, Role/Tier, Mobile/Desktop device, Active Page, and real-time freshness).
+    - **Visibility Access Control & Surveillance View**: The visual presence indicator is strictly restricted to **Administrators only** (`isAdmin = Boolean(user?.is_admin || user?.email === 'admin@stockai.com')`).
+    - **Where Admins Can See Active Users & Liveness**:
+      1. **Admin Control Center (`/admin`)**: A dedicated primary tab — **🟢 Real-Time Live Users ({liveCount} Online)** — with a full-screen surveillance board featuring KPI summary cards (Total Online, Logged-in Traders, Guest Visitors, Mobile vs Desktop) and an interactive live user table displaying Name, Email, Tier/Role badge (ADMIN, PRO, FREE, GUEST), Active Screen path (`/dashboard`, `/chart`, etc.), Device platform (📱 Mobile vs 💻 Desktop), and real-time freshness ("Just now", "2s ago"). Auto-syncs every 3.5s.
+      2. **Top Navigation Bar (`NavBar.tsx`)**: Clicking the glowing green badge `🟢 X Live (admin)` instantly opens the glassmorphic **Live Users Surveillance Modal** from anywhere in the application.
+    - **Navbar Cleanup (Removed Redundant Sentinel Link)**: The extra `Sentinel 24/7` link in the top navbar was removed, as the `🛡️ 24/7 Sentinel Watchdog` is already prominently linked inside the Admin Control panel header (`/admin/sentinel`).
     - **Zero Database Queries**: Operates 100% in-memory via Redis Sorted Sets (`presence:active_sessions`) and Hashes (`presence:sessions_meta`). PostgreSQL database is **never touched** on presence heartbeats, leaves, or admin queries, preventing connection pool exhaustion and keeping RAM consumption minimal (<50KB).
     - **3-5 Second Ultra-Efficient Updates**: Client heartbeats fire every 4 seconds while active, with automatic 12s sliding-window TTL pruning. Moving mobile browsers to "Recent Apps" or closing tabs fires `navigator.sendBeacon('/api/presence/leave')`, decrementing counts in <50ms.
-    - Displayed exclusively to Admins on:
-      1. Desktop and Mobile Navbar (`NavBar.tsx`)
-      2. Administrative Control Center header (`AdminPage.tsx`)
-      3. 24/7 Sentinel Threat Surveillance Watchdog header (`SentinelMonitorPage.tsx`)
   - **Technical Implementation**:
     - `backend/services/presence.py`: Pure Redis in-memory manager (ZSET + HASH) with 12s sliding-window TTL and normalized local fallback.
     - `backend/api/presence.py`: FastAPI endpoints (`POST /heartbeat`, `POST /leave`, `GET /count`, `GET /users` protected by `require_admin`).
     - `backend/core/rate_limiter.py`: Dedicated `PRESENCE` rate limit tier (200 capacity, 240/60 refill).
     - `frontend/src/hooks/usePresence.ts`: 4s heartbeat with user metadata, Page Visibility API, and exit beacon.
+    - `frontend/src/pages/AdminPage.tsx`: Integrated `'live'` tab with live presence metrics, auto-refresh every 3.5s, and table of active users.
     - `frontend/src/components/LiveUsersModal.tsx`: Admin-only glassmorphic surveillance modal with live user table, auto-polling every 3.5s, device breakdown, and active page tags.
+    - `frontend/src/components/NavBar.tsx`: Removed redundant Sentinel 24/7 nav item.
   - **Verification Evidence**:
-    - **Unit Tests**: `backend/tests/test_presence.py` **5/5 PASSED**; full suite **134/134 PASSED (100% green)** in 128.98s.
-    - **Frontend Build**: `tsc && vite build` **1,987 modules transformed, 0 errors, built in 35.47s**.
+    - **Unit Tests**: `backend/tests/test_presence.py` **5/5 PASSED**; full suite **134/134 PASSED (100% green)**.
+    - **Frontend Build**: `tsc && vite build` **1,987 modules transformed, 0 errors, built in 31.73s**.
     - **Live Oracle Cloud Container Probe (`92.4.71.210:8000`)**: Verified `GET /count`, `POST /heartbeat` with metadata, and `POST /leave` immediate decrement.
-    - **Frontend Build**: `tsc && vite build` **1,985 modules transformed, 0 errors, built in 35.13s**.
-    - **Live Oracle Cloud Container Probe (`92.4.71.210:8000`)**: Verified `GET /count`, `POST /heartbeat` increment from 1 to 2, and `POST /leave` immediate decrement from 2 to 1 and down to 0.
 
 - **Fundamental Analysis (Balance Sheet & Valuations) Blank Grid Root Cause & Permanent Resolution:**
   - **User Problem Addressed**:

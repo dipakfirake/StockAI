@@ -53,7 +53,6 @@ export default function NavBar() {
 
   if (isAdmin) {
     links.push({ to: '/admin', label: 'Admin Control', icon: Shield })
-    links.push({ to: '/admin/sentinel', label: 'Sentinel 24/7', icon: ShieldAlert })
   }
 
   const isPro = user?.subscription_tier === 'PRO'

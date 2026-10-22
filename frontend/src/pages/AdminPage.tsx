@@ -3,6 +3,7 @@ import { useAuth } from '../AuthContext';
 import { adminApi, settingsApi } from '../services/api';
 import { Link } from 'react-router-dom';
 import LivePresenceBadge from '../components/LivePresenceBadge';
+import { usePresenceContext } from '../PresenceContext';
 import {
   Smartphone,
   ExternalLink,
@@ -16,6 +17,12 @@ import {
   Users,
   ShieldAlert,
   ClipboardPaste,
+  Radio,
+  Globe,
+  Monitor,
+  Activity,
+  Crown,
+  User,
 } from 'lucide-react';
 
 interface AdminUser {
@@ -58,8 +65,16 @@ export default function AdminPage() {
   const { user } = useAuth();
   const isAdmin = Boolean(user?.is_admin || user?.email?.toLowerCase() === 'admin@stockai.com');
 
-  // Navigation tab: 'fyers' | 'users'
-  const [activeTab, setActiveTab] = useState<'fyers' | 'users'>('fyers');
+  // Navigation tab: 'live' | 'fyers' | 'users'
+  const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users'>('live');
+
+  // Real-Time Live Presence Surveillance (100% in-memory Redis, 0 DB queries)
+  const { liveCount, liveUsers, fetchLiveUsers, loadingUsers } = usePresenceContext();
+
+  const loggedInCount = liveUsers.filter((u) => u.role !== 'GUEST').length;
+  const guestCount = liveUsers.filter((u) => u.role === 'GUEST').length;
+  const mobileCount = liveUsers.filter((u) => u.device.toLowerCase().includes('mobile')).length;
+  const desktopCount = liveUsers.length - mobileCount;
 
   // User management state
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -141,6 +156,11 @@ export default function AdminPage() {
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
+      const tabParam = urlParams.get('tab');
+      if (tabParam === 'live' || tabParam === 'fyers' || tabParam === 'users') {
+        setActiveTab(tabParam);
+      }
+
       let code = urlParams.get('auth_code');
       if (!code && window.location.hash) {
         const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
@@ -154,6 +174,17 @@ export default function AdminPage() {
       // Ignore URL parsing errors
     }
   }, []);
+
+  // Auto-poll active users list every 3.5 seconds while 'live' tab is active (0 DB load)
+  useEffect(() => {
+    if (isAdmin && activeTab === 'live') {
+      fetchLiveUsers();
+      const interval = setInterval(() => {
+        fetchLiveUsers();
+      }, 3500);
+      return () => clearInterval(interval);
+    }
+  }, [isAdmin, activeTab, fetchLiveUsers]);
 
   // Automatically trigger live Fyers check whenever admin opens or switches to the Fyers tab
   useEffect(() => {
@@ -388,8 +419,58 @@ export default function AdminPage() {
           marginBottom: 24,
           borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
           paddingBottom: 12,
+          flexWrap: 'wrap',
         }}
       >
+        <button
+          onClick={() => {
+            setActiveTab('live');
+            fetchLiveUsers();
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 18px',
+            borderRadius: '8px',
+            border: activeTab === 'live' ? '1px solid #22c55e' : '1px solid transparent',
+            background: activeTab === 'live' ? 'rgba(34, 197, 94, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+            color: activeTab === 'live' ? '#4ade80' : 'var(--text-secondary)',
+            fontWeight: 700,
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <Radio size={18} />
+          Real-Time Live Users
+          <span
+            style={{
+              fontSize: 11,
+              padding: '2px 8px',
+              borderRadius: 12,
+              fontWeight: 700,
+              backgroundColor: 'rgba(34, 197, 94, 0.2)',
+              color: '#4ade80',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                backgroundColor: '#22c55e',
+                display: 'inline-block',
+                boxShadow: '0 0 6px #22c55e',
+              }}
+            />
+            {liveCount} Online
+          </span>
+        </button>
+
         <button
           onClick={() => {
             setActiveTab('fyers');
@@ -467,6 +548,365 @@ export default function AdminPage() {
           )}
         </button>
       </div>
+
+      {/* =========================================================================
+          TAB 0: 🟢 REAL-TIME LIVE USERS SURVEILLANCE & LIVENESS (ADMIN ONLY)
+         ========================================================================= */}
+      {activeTab === 'live' && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 32,
+            border: '1px solid rgba(34, 197, 94, 0.35)',
+            background: 'linear-gradient(180deg, rgba(17, 24, 39, 0.75) 0%, rgba(15, 23, 42, 0.9) 100%)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+            padding: 24,
+            borderRadius: 12,
+          }}
+        >
+          {/* Header */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 12,
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              paddingBottom: 16,
+              marginBottom: 20,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 10,
+                  background: 'rgba(34, 197, 94, 0.15)',
+                  border: '1px solid rgba(34, 197, 94, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#4ade80',
+                }}
+              >
+                <Radio size={24} />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0 }}>
+                    Live User Presence & Activity Surveillance
+                  </h2>
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 12,
+                      background: 'rgba(34, 197, 94, 0.2)',
+                      color: '#4ade80',
+                      border: '1px solid rgba(34, 197, 94, 0.3)',
+                    }}
+                  >
+                    100% IN-MEMORY REDIS (0 DB QUERIES)
+                  </span>
+                </div>
+                <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  Real-time sliding window (12s TTL) heartbeat tracking. When users close the tab or background the browser on mobile, sessions instantly drop.
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: '0.8rem',
+                  color: 'var(--text-secondary)',
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                }}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    backgroundColor: '#22c55e',
+                    display: 'inline-block',
+                    boxShadow: '0 0 8px #22c55e',
+                  }}
+                />
+                Auto-syncing every 3.5s
+              </div>
+              <button
+                onClick={() => fetchLiveUsers()}
+                disabled={loadingUsers}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  background: 'rgba(34, 197, 94, 0.15)',
+                  border: '1px solid rgba(34, 197, 94, 0.3)',
+                  color: '#4ade80',
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <RefreshCw size={14} className={loadingUsers ? 'spin' : ''} />
+                Refresh Now
+              </button>
+            </div>
+          </div>
+
+          {/* Metrics Grid */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: 16,
+              marginBottom: 24,
+            }}
+          >
+            <div
+              style={{
+                background: 'rgba(34, 197, 94, 0.06)',
+                border: '1px solid rgba(34, 197, 94, 0.2)',
+                borderRadius: 10,
+                padding: '16px 20px',
+              }}
+            >
+              <div style={{ fontSize: '0.8rem', color: '#86efac', fontWeight: 600 }}>Total Active Sessions</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, color: '#4ade80', marginTop: 4 }}>
+                {liveCount}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                Live right now on StockAI
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: 'rgba(59, 130, 246, 0.06)',
+                border: '1px solid rgba(59, 130, 246, 0.2)',
+                borderRadius: 10,
+                padding: '16px 20px',
+              }}
+            >
+              <div style={{ fontSize: '0.8rem', color: '#93c5fd', fontWeight: 600 }}>Logged-in Traders</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, color: '#60a5fa', marginTop: 4 }}>
+                {loggedInCount}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                Verified account holders
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: 'rgba(168, 85, 247, 0.06)',
+                border: '1px solid rgba(168, 85, 247, 0.2)',
+                borderRadius: 10,
+                padding: '16px 20px',
+              }}
+            >
+              <div style={{ fontSize: '0.8rem', color: '#d8b4fe', fontWeight: 600 }}>Guest Visitors</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, color: '#c084fc', marginTop: 4 }}>
+                {guestCount}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                Anonymous landing visitors
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: 'rgba(234, 179, 8, 0.06)',
+                border: '1px solid rgba(234, 179, 8, 0.2)',
+                borderRadius: 10,
+                padding: '16px 20px',
+              }}
+            >
+              <div style={{ fontSize: '0.8rem', color: '#fde047', fontWeight: 600 }}>Device Distribution</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fde047', marginTop: 10, display: 'flex', gap: 16 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>💻 {desktopCount}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>📱 {mobileCount}</span>
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 6 }}>
+                Desktop vs Mobile Browser
+              </div>
+            </div>
+          </div>
+
+          {/* Active Sessions Live Table */}
+          <div
+            style={{
+              background: 'rgba(0, 0, 0, 0.2)',
+              borderRadius: 10,
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                padding: '12px 18px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                color: 'var(--text-secondary)',
+                display: 'grid',
+                gridTemplateColumns: 'minmax(220px, 2fr) minmax(110px, 1fr) minmax(150px, 1.5fr) minmax(130px, 1fr) minmax(120px, 1fr)',
+                gap: 12,
+              }}
+            >
+              <div>USER IDENTITY</div>
+              <div>TIER / ROLE</div>
+              <div>ACTIVE SCREEN</div>
+              <div>DEVICE & CLIENT</div>
+              <div>LIVENESS STATUS</div>
+            </div>
+
+            {liveUsers.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                No active users detected in current 12s window.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {liveUsers.map((u, idx) => {
+                  const isMobile = u.device.toLowerCase().includes('mobile');
+                  return (
+                    <div
+                      key={u.session_id || idx}
+                      style={{
+                        padding: '14px 18px',
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(220px, 2fr) minmax(110px, 1fr) minmax(150px, 1.5fr) minmax(130px, 1fr) minmax(120px, 1fr)',
+                        gap: 12,
+                        alignItems: 'center',
+                        background: idx % 2 === 0 ? 'rgba(255, 255, 255, 0.01)' : 'transparent',
+                      }}
+                    >
+                      {/* User Info */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: '50%',
+                            background: u.role === 'ADMIN'
+                              ? 'linear-gradient(135deg, #ef4444, #b91c1c)'
+                              : u.role === 'PRO'
+                              ? 'linear-gradient(135deg, #10b981, #059669)'
+                              : u.role === 'FREE'
+                              ? 'linear-gradient(135deg, #3b82f6, #1d4ed8)'
+                              : 'linear-gradient(135deg, #64748b, #475569)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            color: '#fff',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {u.user_name ? u.user_name.charAt(0).toUpperCase() : 'G'}
+                        </div>
+                        <div style={{ overflow: 'hidden' }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {u.user_name}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {u.user_email || 'Unregistered Guest'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Tier / Role */}
+                      <div>
+                        {u.role === 'ADMIN' && (
+                          <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <ShieldAlert size={12} /> ADMIN
+                          </span>
+                        )}
+                        {u.role === 'PRO' && (
+                          <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <Crown size={12} /> PRO
+                          </span>
+                        )}
+                        {u.role === 'FREE' && (
+                          <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <User size={12} /> FREE
+                          </span>
+                        )}
+                        {u.role === 'GUEST' && (
+                          <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(148, 163, 184, 0.2)', color: '#cbd5e1', border: '1px solid rgba(148, 163, 184, 0.3)', fontWeight: 600 }}>
+                            GUEST
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Active Screen */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Globe size={13} color="#60a5fa" />
+                        <span
+                          style={{
+                            fontSize: '0.78rem',
+                            fontFamily: 'monospace',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            border: '1px solid rgba(59, 130, 246, 0.2)',
+                            padding: '2px 7px',
+                            borderRadius: 4,
+                            color: '#93c5fd',
+                            maxWidth: 160,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={u.path}
+                        >
+                          {u.path || '/dashboard'}
+                        </span>
+                      </div>
+
+                      {/* Device */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        {isMobile ? <Smartphone size={14} color="#eab308" /> : <Monitor size={14} color="#38bdf8" />}
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.device}</span>
+                      </div>
+
+                      {/* Liveness Status */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: '50%',
+                            backgroundColor: u.last_seen_seconds_ago <= 4 ? '#22c55e' : '#eab308',
+                            boxShadow: u.last_seen_seconds_ago <= 4 ? '0 0 6px #22c55e' : 'none',
+                          }}
+                        />
+                        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: u.last_seen_seconds_ago <= 4 ? '#4ade80' : '#fde047' }}>
+                          {u.last_seen_seconds_ago <= 1 ? 'Just now' : `${u.last_seen_seconds_ago}s ago`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* =========================================================================
           TAB 1: 📱 FYERS MOBILE TOKEN MANAGER (ADMIN ONLY)
