@@ -22,7 +22,6 @@ import { PresenceProvider } from './PresenceContext'
 
 import AIAssistantWidget from './components/AIAssistantWidget'
 import { ToastContainer, toast } from './components/Toast'
-import LiveUsersModal from './components/LiveUsersModal'
 import { alertWebSocket } from './services/websocket'
 import { useEffect } from 'react'
 
@@ -70,7 +69,6 @@ export default function App() {
           </main>
           <AIAssistantWidget />
           <ToastContainer />
-          <LiveUsersModal />
         </div>
       </Router>
       </PresenceProvider>

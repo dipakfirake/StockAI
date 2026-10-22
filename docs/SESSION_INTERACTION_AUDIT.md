@@ -1777,7 +1777,32 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
 - **Verification Evidence:**
   - Automated tests: 5/5 passed.
   - Frontend production build: 0 errors.
-- **System Response:** Documented the on-demand performance architecture where live surveillance only activates when the component is clicked, with relaxed 25s heartbeats and zero idle background polling.
+---
+
+### Session Entry 44
+- **Timestamp:** 2026-10-22 18:43:00 IST (13:13:00 UTC)
+- **User Prompt:**  
+  `"i want that live only in admins control not every where and when i open component at that time only it want to start for saving memorys"`
+- **Agent Technical Actions:**
+  1. **Strictly Isolated Live Presence to Admin Control (`/admin`) Only**:
+     - **Removed from Navigation Bar (`frontend/src/components/NavBar.tsx`)**: Removed `LivePresenceBadge` from both desktop and mobile header views. The navbar is completely clean with zero presence badges or popups.
+     - **Removed from Sentinel Threat Watchdog (`frontend/src/pages/SentinelMonitorPage.tsx`)**: Removed `LivePresenceBadge` from the page header.
+     - **Removed from Global App (`frontend/src/App.tsx`)**: Removed `LiveUsersModal` from root `App.tsx` layout. No global overlays exist.
+     - **Removed from Admin Page Header (`frontend/src/pages/AdminPage.tsx`)**: Removed the badge from the top right actions.
+  2. **100% Lazy Component-Level Lifecycle (Zero Memory & Polling Until Clicked)**:
+     - In `AdminPage.tsx`, `activeTab` defaults to `'fyers'` (`const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users'>('fyers')`).
+     - Live presence surveillance dashboard **ONLY renders and connects when the admin explicitly clicks the "Real-Time Live Users" tab**.
+     - When on any other tab (`fyers`, `users`) or when leaving Admin Control, the live component is completely unmounted, clearing all timers, intervals, and state from browser memory.
+     - Tab online count badge (`{liveCount} Online`) is strictly conditioned on `activeTab === 'live'`.
+  3. **Verification**:
+     - Frontend Production Build: `tsc && vite build` passed (**1,985 modules transformed, 0 errors, bundle size dropped from 701kB to 690kB**).
+     - Backend presence unit tests: `venv\Scripts\python.exe -m pytest backend/tests/test_presence.py -v` (5/5 PASSED).
+- **Verification Evidence:**
+  - `LivePresenceBadge` removed from `NavBar.tsx`, `SentinelMonitorPage.tsx`, `AdminPage.tsx` header, and `LiveUsersModal` removed from `App.tsx`.
+  - Live system strictly confined to `/admin` -> Real-Time Live Users tab on-demand.
+  - Full build: 0 errors.
+- **System Response:** Confirmation to user explaining that the live presence system has been completely removed from the navbar and everywhere else, and is now strictly confined inside the Admin Control panel where it only boots up when the admin explicitly opens that component.
+
 
 
 

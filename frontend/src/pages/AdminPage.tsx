@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { adminApi, settingsApi } from '../services/api';
 import { Link } from 'react-router-dom';
-import LivePresenceBadge from '../components/LivePresenceBadge';
 import { usePresenceContext } from '../PresenceContext';
 import {
   Smartphone,
@@ -65,8 +64,8 @@ export default function AdminPage() {
   const { user } = useAuth();
   const isAdmin = Boolean(user?.is_admin || user?.email?.toLowerCase() === 'admin@stockai.com');
 
-  // Navigation tab: 'live' | 'fyers' | 'users'
-  const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users'>('live');
+  // Navigation tab: 'live' | 'fyers' | 'users' (defaults to 'fyers' so live surveillance only starts when clicked)
+  const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users'>('fyers');
 
   // Real-Time Live Presence Surveillance (100% in-memory Redis, 0 DB queries)
   const { liveCount, liveUsers, fetchLiveUsers, loadingUsers } = usePresenceContext();
@@ -373,7 +372,6 @@ export default function AdminPage() {
         </div>
 
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <LivePresenceBadge style={{ padding: '8px 14px', fontSize: '0.85rem' }} />
           <Link
             to="/admin/sentinel"
             style={{
@@ -447,31 +445,33 @@ export default function AdminPage() {
         >
           <Radio size={18} />
           Real-Time Live Users
-          <span
-            style={{
-              fontSize: 11,
-              padding: '2px 8px',
-              borderRadius: 12,
-              fontWeight: 700,
-              backgroundColor: 'rgba(34, 197, 94, 0.2)',
-              color: '#4ade80',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
+          {activeTab === 'live' && (
             <span
               style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                backgroundColor: '#22c55e',
-                display: 'inline-block',
-                boxShadow: '0 0 6px #22c55e',
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 12,
+                fontWeight: 700,
+                backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                color: '#4ade80',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
               }}
-            />
-            {liveCount} Online
-          </span>
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: '#22c55e',
+                  display: 'inline-block',
+                  boxShadow: '0 0 6px #22c55e',
+                }}
+              />
+              {liveCount} Online
+            </span>
+          )}
         </button>
 
         <button

@@ -17,15 +17,15 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - **Real-Time Live Users Online Tracking & Surveillance System (COMPLETE & VERIFIED):**
   - **Feature Overview**:
     - Real-time active user tracking on both desktop and mobile platforms with pulsating emerald live count badge (`🟢 X Live`).
-    - **Visibility Access Control & Surveillance View**: The visual presence indicator is strictly restricted to **Administrators only** (`isAdmin = Boolean(user?.is_admin || user?.email === 'admin@stockai.com')`).
+    - **Visibility Access Control & Surveillance View**: Strictly restricted to **Admin Control (`/admin`) ONLY**. Completely removed from the global navigation bar, mobile navbar, Sentinel monitor, and root modals.
     - **Where Admins Can See Active Users & Liveness**:
-      1. **Admin Control Center (`/admin`)**: A dedicated primary tab — **🟢 Real-Time Live Users ({liveCount} Online)** — with a full-screen surveillance board featuring KPI summary cards (Total Online, Logged-in Traders, Guest Visitors, Mobile vs Desktop) and an interactive live user table displaying Name, Email, Tier/Role badge (ADMIN, PRO, FREE, GUEST), Active Screen path (`/dashboard`, `/chart`, etc.), Device platform (📱 Mobile vs 💻 Desktop), and real-time freshness ("Just now", "2s ago").
-      2. **Top Navigation Bar (`NavBar.tsx`)**: Clicking the glowing green badge `🟢 X Live (admin)` instantly opens the glassmorphic **Live Users Surveillance Modal** from anywhere in the application.
-    - **100% On-Demand Click Activation for Extreme Speed**:
-      - Live surveillance lists are **ONLY queried when the admin clicks the component** (tab or modal).
-      - Continuous background polling is **paused by default**. The admin has an interactive toggle (`Auto-Sync: Live / Paused`) and manual `Refresh Now` button. Leaving the tab immediately terminates all polling (0 idle background requests).
-      - Client heartbeat is relaxed to **25 seconds** (from 4s), reducing network and CPU load by >80%, while `PRESENCE_TTL_SECONDS` is tuned to **35 seconds**. Tab exits or mobile recent apps switches remain instantaneous (<50ms) via `sendBeacon`.
-    - **Navbar Cleanup (Removed Redundant Sentinel Link)**: The extra `Sentinel 24/7` link in the top navbar was removed, as `🛡️ 24/7 Sentinel Watchdog` is already prominently linked inside the Admin Control panel header (`/admin/sentinel`).
+      - **Admin Control Center (`/admin`) ONLY**: Located exclusively under the **🟢 Real-Time Live Users** tab. When opened, it renders KPI summary cards (Total Online, Logged-in Traders, Guest Visitors, Mobile vs Desktop) and an interactive live user table displaying Name, Email, Tier/Role badge (ADMIN, PRO, FREE, GUEST), Active Screen path (`/dashboard`, `/chart`, etc.), Device platform (📱 Mobile vs 💻 Desktop), and real-time freshness ("Just now", "2s ago").
+    - **100% Lazy Component-Level Lifecycle (Zero Memory & Polling Until Clicked)**:
+      - Live surveillance lists are **ONLY initialized when the admin navigates to `/admin` and explicitly clicks the "Real-Time Live Users" tab**.
+      - `activeTab` defaults to `'fyers'`, so simply opening the Admin Control page uses zero surveillance memory.
+      - Continuous background polling is **paused by default**. Leaving the tab immediately unmounts the surveillance dashboard, terminating all timers and freeing all browser memory.
+      - Client presence heartbeat is relaxed to **25 seconds** (from 4s), reducing network and CPU load by >80%, while `PRESENCE_TTL_SECONDS` is tuned to **35 seconds**. Tab exits or mobile recent apps switches remain instantaneous (<50ms) via `sendBeacon`.
+    - **Clean Navbar & Zero Overlays**: Clean navigation bar with only standard links + Admin Control; zero global presence badges or floating modals.
     - **Zero Database Queries**: Operates 100% in-memory via Redis Sorted Sets (`presence:active_sessions`) and Hashes (`presence:sessions_meta`). PostgreSQL database is **never touched** on presence heartbeats, leaves, or admin queries, preventing connection pool exhaustion and keeping RAM consumption minimal (<50KB).
   - **Technical Implementation**:
     - `backend/services/presence.py`: Pure Redis in-memory manager (ZSET + HASH) with 35s sliding-window TTL and normalized local fallback.

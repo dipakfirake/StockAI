@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { sentinelApi, validatorApi } from '../services/api';
 import { Link } from 'react-router-dom';
-import LivePresenceBadge from '../components/LivePresenceBadge';
 
 interface SubsystemInfo {
   status: 'HEALTHY' | 'WARNING' | 'DEGRADED' | 'DOWN';
@@ -345,7 +344,6 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <LivePresenceBadge style={{ padding: '7px 12px', fontSize: '0.82rem' }} />
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
             style={{

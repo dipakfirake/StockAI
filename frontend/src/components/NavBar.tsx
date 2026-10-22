@@ -26,7 +26,6 @@ import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
 import StockSearchBox from './StockSearchBox'
 import LiveTicker from './LiveTicker'
-import LivePresenceBadge from './LivePresenceBadge'
 import WatchlistSidebar from './WatchlistSidebar'
 
 export default function NavBar() {
@@ -67,8 +66,6 @@ export default function NavBar() {
           <TrendingUp size={22} />
           AI<span>Stock</span>
         </NavLink>
-
-        {isAdmin && <LivePresenceBadge style={{ marginRight: 16 }} />}
 
         {user && <LiveTicker />}
 
@@ -211,8 +208,6 @@ export default function NavBar() {
             <TrendingUp size={20} color="#3b82f6" />
             <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>AI<span style={{ color: '#3b82f6' }}>Stock</span></span>
           </NavLink>
-
-          {isAdmin && <LivePresenceBadge compact style={{ marginLeft: '4px' }} />}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
