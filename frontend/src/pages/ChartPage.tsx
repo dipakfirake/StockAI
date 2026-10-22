@@ -1727,30 +1727,64 @@ export default function ChartPage() {
         {/* Fundamental Analysis Grid */}
         {info && (
           <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <div className="card-header">
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
               <span className="card-title"><BarChart2 size={15} style={{ marginRight: 6 }} />Fundamental Analysis (Balance Sheet & Valuations)</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {info.sector && info.sector !== 'N/A' && <span className="badge badge-hold" style={{ fontSize: 11 }}>{info.sector}</span>}
+                {info.industry && info.industry !== 'N/A' && <span className="badge badge-hold" style={{ fontSize: 11 }}>{info.industry}</span>}
+              </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
-              {[
+            
+            {(() => {
+              const fundamentalItems = [
+                { label: 'Market Cap', value: info.market_cap ? (info.market_cap >= 1e7 ? `₹${(info.market_cap / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : `₹${(info.market_cap / 1e9).toFixed(1)}B`) : null },
                 { label: 'PE Ratio', value: info.pe_ratio?.toFixed(2) },
                 { label: 'Forward PE', value: info.forward_pe?.toFixed(2) },
                 { label: 'PB Ratio', value: info.price_to_book?.toFixed(2) },
+                { label: 'Book Value', value: info.book_value ? `₹${info.book_value.toFixed(2)}` : null },
                 { label: 'ROE (%)', value: info.roe ? (info.roe * 100).toFixed(2) + '%' : null, color: info.roe > 0.15 ? 'var(--color-bullish)' : '' },
-                { label: 'ROA (%)', value: info.roa ? (info.roa * 100).toFixed(2) + '%' : null },
-                { label: 'Debt to Equity', value: info.debt_to_equity?.toFixed(2), color: info.debt_to_equity > 1 ? 'var(--color-bearish)' : 'var(--color-bullish)' },
+                { label: 'ROCE / ROA (%)', value: info.roa ? (info.roa * 100).toFixed(2) + '%' : null },
+                { label: 'Debt to Equity', value: (info.debt_to_equity !== null && info.debt_to_equity !== undefined) ? info.debt_to_equity.toFixed(2) : null, color: info.debt_to_equity > 1 ? 'var(--color-bearish)' : 'var(--color-bullish)' },
                 { label: 'Div Yield', value: info.dividend_yield ? (info.dividend_yield * 100).toFixed(2) + '%' : null },
                 { label: 'Current Ratio', value: info.current_ratio?.toFixed(2) },
-                { label: 'Revenue', value: info.total_revenue ? `₹${(info.total_revenue / 1e9).toFixed(1)}B` : null },
-                { label: 'Rev Growth', value: info.revenue_growth ? (info.revenue_growth * 100).toFixed(2) + '%' : null, color: info.revenue_growth > 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
-              ].filter(i => i.value !== null && i.value !== undefined).map((ind, i) => (
-                <div key={i} style={{ background: 'var(--color-bg-secondary)', padding: '10px 12px', borderRadius: 8 }}>
-                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 2 }}>{ind.label}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 600, color: ind.color || 'var(--color-text-primary)' }}>
-                    {ind.value}
+                { label: 'Revenue (TTM)', value: info.total_revenue ? (info.total_revenue >= 1e7 ? `₹${(info.total_revenue / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : `₹${(info.total_revenue / 1e9).toFixed(1)}B`) : null },
+                { label: 'Rev Growth', value: info.revenue_growth ? (info.revenue_growth > 0 ? '+' : '') + (info.revenue_growth * 100).toFixed(2) + '%' : null, color: info.revenue_growth > 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
+                { label: 'EBITDA', value: info.ebitda ? (info.ebitda >= 1e7 ? `₹${(info.ebitda / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : `₹${(info.ebitda / 1e9).toFixed(1)}B`) : null },
+              ].filter(i => i.value !== null && i.value !== undefined);
+
+              if (fundamentalItems.length === 0) {
+                const isIndex = info.is_index || symbol.startsWith('^') || symbol.includes('INDEX');
+                return (
+                  <div style={{ padding: '16px 14px', background: 'var(--color-bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--color-text-muted)' }}>
+                    {isIndex 
+                      ? '🏛️ Aggregated Benchmark Index: Balance sheet and corporate valuation ratios apply to individual corporate companies. Sector and component weightings apply to this market basket.'
+                      : '📊 Corporate fundamental balance sheet and valuation ratios are currently being refreshed from exchange filings.'
+                    }
                   </div>
-                </div>
-              ))}
-            </div>
+                );
+              }
+
+              return (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+                    {fundamentalItems.map((ind, i) => (
+                      <div key={i} style={{ background: 'var(--color-bg-secondary)', padding: '10px 12px', borderRadius: 8 }}>
+                        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 2 }}>{ind.label}</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 600, color: ind.color || 'var(--color-text-primary)' }}>
+                          {ind.value}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {info.description && info.description !== 'Detailed company information is being updated.' && (
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--color-border)', fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                      <strong style={{ color: 'var(--color-text-secondary)', marginRight: 6 }}>Company Profile:</strong>
+                      {info.description}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 

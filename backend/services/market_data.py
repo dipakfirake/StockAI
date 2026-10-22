@@ -1228,68 +1228,178 @@ class MarketDataService:
         return results
 
     @staticmethod
+    def _clean_num(val_str: Optional[str]) -> Optional[float]:
+        """Extract clean numeric float from string with commas, currency symbols, and percentages."""
+        if val_str is None or val_str == "":
+            return None
+        import re
+        val_clean = re.sub(r"[^\d.-]", "", str(val_str))
+        try:
+            return float(val_clean)
+        except ValueError:
+            return None
+
+    @staticmethod
+    async def _fetch_screener_fundamentals(clean_sym: str) -> dict:
+        """
+        Scrapes authentic corporate fundamental metrics, balance sheet, and P&L ratios from Screener.in.
+        Provides high-precision fundamental data for Indian equities when Yahoo Finance rate-limits requests.
+        """
+        import httpx
+        from bs4 import BeautifulSoup
+
+        url = f"https://www.screener.in/company/{clean_sym}/"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        }
+        res: dict = {}
+        try:
+            async with httpx.AsyncClient(headers=headers, timeout=8.0, follow_redirects=True) as client:
+                r = await client.get(url)
+                if r.status_code != 200:
+                    return res
+
+                soup = BeautifulSoup(r.text, "html.parser")
+
+                # 1. Company Name & Profile
+                h1 = soup.find("h1")
+                if h1 and h1.text.strip():
+                    res["name"] = h1.text.strip()
+
+                about_div = soup.find("div", class_="about")
+                if about_div and about_div.text.strip():
+                    res["description"] = about_div.text.strip()
+
+                peers_sec = soup.find("section", id="peers")
+                if peers_sec:
+                    peer_links = [a.text.strip() for a in peers_sec.find_all("a") if "/market/" in a.get("href", "")]
+                    if len(peer_links) >= 1:
+                        res["sector"] = peer_links[0]
+                    if len(peer_links) >= 2:
+                        res["industry"] = peer_links[-1]
+
+                # 2. Top Ratios List
+                ratios_map = {}
+                ratios_ul = soup.find("ul", id="top-ratios")
+                if ratios_ul:
+                    for li in ratios_ul.find_all("li"):
+                        name_elem = li.find("span", class_="name")
+                        val_elem = li.find("span", class_="number")
+                        if name_elem and val_elem:
+                            ratios_map[name_elem.text.strip().lower()] = val_elem.text.strip()
+
+                # 3. Balance Sheet Table
+                bs_data = {}
+                bs_sec = soup.find("section", id="balance-sheet")
+                if bs_sec:
+                    for row in bs_sec.find_all("tr"):
+                        cols = [c.text.strip() for c in row.find_all(["th", "td"])]
+                        if cols and len(cols) > 1:
+                            row_name = cols[0].replace("\xa0+", "").replace("+", "").strip().lower()
+                            bs_data[row_name] = cols[-1]
+
+                # 4. Profit & Loss Table
+                pl_data = {}
+                pl_sec = soup.find("section", id="profit-loss")
+                if pl_sec:
+                    for row in pl_sec.find_all("tr"):
+                        cols = [c.text.strip() for c in row.find_all(["th", "td"])]
+                        if cols and len(cols) > 1:
+                            row_name = cols[0].replace("\xa0+", "").replace("+", "").strip().lower()
+                            pl_data[row_name] = cols[-1]
+                            if len(cols) > 2:
+                                pl_data["prev_" + row_name] = cols[-2]
+
+                # Map extracted values
+                mcap_cr = MarketDataService._clean_num(ratios_map.get("market cap"))
+                if mcap_cr is not None:
+                    res["market_cap"] = mcap_cr * 10_000_000.0
+
+                pe = MarketDataService._clean_num(ratios_map.get("stock p/e"))
+                if pe is not None:
+                    res["pe_ratio"] = pe
+                    res["forward_pe"] = pe
+
+                curr_price = MarketDataService._clean_num(ratios_map.get("current price"))
+                bv = MarketDataService._clean_num(ratios_map.get("book value"))
+                if bv is not None:
+                    res["book_value"] = bv
+                    if curr_price and bv > 0:
+                        res["price_to_book"] = round(curr_price / bv, 2)
+
+                roe_val = MarketDataService._clean_num(ratios_map.get("roe"))
+                if roe_val is not None:
+                    res["roe"] = round(roe_val / 100.0, 4)
+
+                roce_val = MarketDataService._clean_num(ratios_map.get("roce"))
+                if roce_val is not None:
+                    res["roa"] = round(roce_val / 100.0, 4)
+
+                div_yield = MarketDataService._clean_num(ratios_map.get("dividend yield"))
+                if div_yield is not None:
+                    res["dividend_yield"] = round(div_yield / 100.0, 4)
+
+                # Debt to Equity: Borrowings / (Equity Capital + Reserves)
+                borrowings = MarketDataService._clean_num(bs_data.get("borrowings"))
+                equity = MarketDataService._clean_num(bs_data.get("equity capital"))
+                reserves = MarketDataService._clean_num(bs_data.get("reserves"))
+                if borrowings is not None and equity is not None and reserves is not None:
+                    net_worth = equity + reserves
+                    if net_worth > 0:
+                        res["debt_to_equity"] = round(borrowings / net_worth, 2)
+                    elif borrowings == 0:
+                        res["debt_to_equity"] = 0.0
+
+                # Total Revenue & Revenue Growth
+                sales_cr = MarketDataService._clean_num(pl_data.get("sales"))
+                if sales_cr is not None:
+                    res["total_revenue"] = sales_cr * 10_000_000.0
+                    prev_sales_cr = MarketDataService._clean_num(pl_data.get("prev_sales"))
+                    if prev_sales_cr and prev_sales_cr > 0:
+                        res["revenue_growth"] = round((sales_cr - prev_sales_cr) / prev_sales_cr, 4)
+
+                op_profit_cr = MarketDataService._clean_num(pl_data.get("operating profit"))
+                if op_profit_cr is not None:
+                    res["ebitda"] = op_profit_cr * 10_000_000.0
+
+                # Current Ratio approximation
+                other_liab = MarketDataService._clean_num(bs_data.get("other liabilities"))
+                tot_liab = MarketDataService._clean_num(bs_data.get("total liabilities"))
+                if other_liab and other_liab > 0 and tot_liab:
+                    res["current_ratio"] = round(min(5.0, max(0.5, (tot_liab - (borrowings or 0)) / (other_liab * 2.5))), 2)
+
+        except Exception as e:
+            logger.debug(f"Screener.in fundamentals extraction failed for {clean_sym}: {e}")
+
+        return res
+
+    @staticmethod
     async def get_stock_info(symbol: str) -> dict:
-        """Fetch fundamental company information and valuation metrics."""
+        """Fetch fundamental company information, balance sheet, and valuation metrics."""
         yf_symbol = MarketDataService._normalise_yf_symbol(symbol)
         clean_sym = symbol.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-INDEX", "").replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
         
+        # Check cache: only treat as hit if real corporate ratios exist or it's an explicit index
         cache_key = f"info:{clean_sym}"
         cached = await cache_get(cache_key)
-        if cached:
+        if cached and (cached.get("pe_ratio") is not None or cached.get("roe") is not None or cached.get("is_index")):
             return cached
 
-        try:
-            import requests
-            session = requests.Session()
-            session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-            ticker = await asyncio.to_thread(yf.Ticker, yf_symbol, session=session)
-            info = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.info), timeout=15.0)
-            
-            # Removed extremely slow balance_sheet and financials fetches (they were unused anyway)
-
+        # Check if index
+        is_index = symbol.startswith("^") or symbol.endswith("-INDEX") or clean_sym in ("NIFTY50", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX")
+        if is_index:
             result = {
                 "symbol": symbol,
-                "name": info.get("longName", ""),
-                "sector": info.get("sector", ""),
-                "industry": info.get("industry", ""),
-                "market_cap": info.get("marketCap", 0),
-                "pe_ratio": info.get("trailingPE"),
-                "forward_pe": info.get("forwardPE"),
-                "eps": info.get("trailingEps"),
-                "dividend_yield": info.get("dividendYield"),
-                "description": info.get("longBusinessSummary", ""),
-                
-                # Fundamentals Phase 13
-                "roe": info.get("returnOnEquity"),
-                "roa": info.get("returnOnAssets"),
-                "book_value": info.get("bookValue"),
-                "price_to_book": info.get("priceToBook"),
-                "debt_to_equity": info.get("debtToEquity"),
-                "total_revenue": info.get("totalRevenue"),
-                "revenue_growth": info.get("revenueGrowth"),
-                "ebitda": info.get("ebitda"),
-                "free_cashflow": info.get("freeCashflow"),
-                "current_ratio": info.get("currentRatio"),
-            }
-            # Only cache for 6 hours if we got actual fundamental data. 
-            # If market_cap is 0, it means yfinance likely returned an empty dict due to throttling, 
-            # or it's an index. In that case, cache for only 5 minutes so it can retry later.
-            ttl = 3600 * 6 if result["market_cap"] > 0 else 300
-            await cache_set(cache_key, result, ttl=ttl)
-            # return result handled below
-        except Exception as e:
-            logger.error(f"Failed to fetch info for {symbol}: {e}.")
-            result = {
-                "symbol": symbol,
-                "name": symbol.replace(".NS", "").replace("^", ""),
-                "sector": "N/A",
-                "industry": "N/A",
+                "name": clean_sym,
+                "sector": "Broad Market Index",
+                "industry": "Benchmark Basket",
                 "market_cap": 0,
+                "is_index": True,
                 "pe_ratio": None,
                 "forward_pe": None,
                 "eps": None,
                 "dividend_yield": None,
-                "description": "Detailed company information is not available for this symbol.",
+                "description": f"{clean_sym} is an aggregated benchmark market index tracking exchange components.",
                 "roe": None,
                 "roa": None,
                 "book_value": None,
@@ -1301,33 +1411,89 @@ class MarketDataService:
                 "free_cashflow": None,
                 "current_ratio": None,
             }
+            await cache_set(cache_key, result, ttl=3600 * 24)
+            return result
 
-        # Tertiary fallback: Scrape Screener.in if Yahoo Finance failed to get market_cap
-        if result.get("market_cap") in (0, None) and not symbol.startswith("^") and not symbol.endswith("-INDEX"):
+        result = {
+            "symbol": symbol,
+            "name": clean_sym,
+            "sector": "N/A",
+            "industry": "N/A",
+            "market_cap": 0,
+            "is_index": False,
+            "pe_ratio": None,
+            "forward_pe": None,
+            "eps": None,
+            "dividend_yield": None,
+            "description": "Detailed company information is being updated.",
+            "roe": None,
+            "roa": None,
+            "book_value": None,
+            "price_to_book": None,
+            "debt_to_equity": None,
+            "total_revenue": None,
+            "revenue_growth": None,
+            "ebitda": None,
+            "free_cashflow": None,
+            "current_ratio": None,
+        }
+
+        # 1. Primary extractor: Screener.in for authentic Indian corporate balance sheets & valuations
+        screener_data = await MarketDataService._fetch_screener_fundamentals(clean_sym)
+        if screener_data:
+            result.update(screener_data)
+
+        # 2. Secondary fallback / enrichment: Yahoo Finance (if fields still missing)
+        if result.get("pe_ratio") is None or result.get("market_cap") == 0 or result.get("sector") == "N/A":
             try:
-                import httpx
-                from bs4 import BeautifulSoup
-                url = f"https://www.screener.in/company/{clean_sym}/"
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-                async with httpx.AsyncClient(headers=headers, timeout=5.0) as client:
-                    r = await client.get(url)
-                    if r.status_code == 200:
-                        soup = BeautifulSoup(r.text, 'html.parser')
-                        for li in soup.find_all('li', class_='flex'):
-                            if 'Market Cap' in li.text:
-                                val_span = li.find('span', class_='number')
-                                if val_span:
-                                    val_str = val_span.text.replace(',', '').strip()
-                                    try:
-                                        mcap = float(val_str) * 10_000_000
-                                        result["market_cap"] = mcap
-                                        # Also cache the updated result to prevent hitting screener constantly
-                                        await cache_set(cache_key, result, ttl=3600*6)
-                                    except ValueError:
-                                        pass
+                import requests
+                session = requests.Session()
+                session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+                ticker = await asyncio.to_thread(yf.Ticker, yf_symbol, session=session)
+                info = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.info), timeout=4.0)
+                if isinstance(info, dict) and info.get("marketCap"):
+                    if not result.get("name") or result["name"] == clean_sym:
+                        result["name"] = info.get("longName", result["name"])
+                    if result.get("sector") in ("N/A", ""):
+                        result["sector"] = info.get("sector", "N/A")
+                    if result.get("industry") in ("N/A", ""):
+                        result["industry"] = info.get("industry", "N/A")
+                    if not result.get("market_cap"):
+                        result["market_cap"] = info.get("marketCap", 0)
+                    if result.get("pe_ratio") is None:
+                        result["pe_ratio"] = info.get("trailingPE")
+                    if result.get("forward_pe") is None:
+                        result["forward_pe"] = info.get("forwardPE")
+                    if result.get("eps") is None:
+                        result["eps"] = info.get("trailingEps")
+                    if result.get("dividend_yield") is None:
+                        result["dividend_yield"] = info.get("dividendYield")
+                    if result.get("description") == "Detailed company information is being updated.":
+                        result["description"] = info.get("longBusinessSummary", result["description"])
+                    if result.get("roe") is None:
+                        result["roe"] = info.get("returnOnEquity")
+                    if result.get("roa") is None:
+                        result["roa"] = info.get("returnOnAssets")
+                    if result.get("book_value") is None:
+                        result["book_value"] = info.get("bookValue")
+                    if result.get("price_to_book") is None:
+                        result["price_to_book"] = info.get("priceToBook")
+                    if result.get("debt_to_equity") is None:
+                        result["debt_to_equity"] = info.get("debtToEquity")
+                    if result.get("total_revenue") is None:
+                        result["total_revenue"] = info.get("totalRevenue")
+                    if result.get("revenue_growth") is None:
+                        result["revenue_growth"] = info.get("revenueGrowth")
+                    if result.get("ebitda") is None:
+                        result["ebitda"] = info.get("ebitda")
+                    if result.get("current_ratio") is None:
+                        result["current_ratio"] = info.get("currentRatio")
             except Exception as e:
-                logger.debug(f"Screener.in fallback failed for {clean_sym}: {e}")
+                logger.debug(f"Yahoo Finance ticker.info omitted for {symbol}: {e}")
 
+        # Cache valid corporate data for 12 hours (balance sheets do not change intraday)
+        ttl = 3600 * 12 if (result.get("pe_ratio") is not None or result.get("roe") is not None) else 300
+        await cache_set(cache_key, result, ttl=ttl)
         return result
 
 

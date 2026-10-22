@@ -219,3 +219,61 @@ async def test_fyers_after_hours_prev_close_rollover(mock_cache_set, mock_cache_
         assert res["previous_close"] == 16.28
 
 
+@pytest.mark.asyncio
+@patch("backend.services.market_data.cache_get", new_callable=AsyncMock, return_value=None)
+@patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
+async def test_get_stock_info_with_screener_fundamentals(mock_cache_set, mock_cache_get):
+    """Verify get_stock_info hydrates full balance sheet and valuation ratios via Screener fallback."""
+    fake_screener_data = {
+        "name": "PC Jeweller Ltd",
+        "market_cap": 177320000000.0,
+        "pe_ratio": 23.6,
+        "forward_pe": 23.6,
+        "book_value": 9.28,
+        "price_to_book": 1.95,
+        "roe": 0.0996,
+        "roa": 0.0957,
+        "dividend_yield": 0.0,
+        "debt_to_equity": 0.04,
+        "total_revenue": 35170000000.0,
+        "revenue_growth": 0.0492,
+        "ebitda": 7670000000.0,
+        "current_ratio": 5.0,
+        "sector": "Consumer Discretionary",
+        "industry": "Gems, Jewellery And Watches",
+        "description": "PC Jeweller is engaged in the manufacturing and retail of jewellery.",
+    }
+
+    with patch.object(MarketDataService, "_fetch_screener_fundamentals", new_callable=AsyncMock) as mock_screener, \
+         patch("yfinance.Ticker") as mock_ticker:
+
+        mock_screener.return_value = fake_screener_data
+        # Simulate Yahoo Finance failing with 429
+        mock_ticker.side_effect = Exception("429 Client Error: Too Many Requests")
+
+        info = await MarketDataService.get_stock_info("PCJEWELLER.NS")
+
+        assert info is not None
+        assert info["pe_ratio"] == 23.6
+        assert info["book_value"] == 9.28
+        assert info["price_to_book"] == 1.95
+        assert info["roe"] == 0.0996
+        assert info["debt_to_equity"] == 0.04
+        assert info["total_revenue"] == 35170000000.0
+        assert info["sector"] == "Consumer Discretionary"
+        assert info["industry"] == "Gems, Jewellery And Watches"
+        mock_screener.assert_called_once_with("PCJEWELLER")
+
+
+@pytest.mark.asyncio
+@patch("backend.services.market_data.cache_get", new_callable=AsyncMock, return_value=None)
+@patch("backend.services.market_data.cache_set", new_callable=AsyncMock)
+async def test_get_stock_info_handles_index(mock_cache_set, mock_cache_get):
+    """Verify get_stock_info returns clean benchmark index metadata without failing."""
+    info = await MarketDataService.get_stock_info("^NSEI")
+    assert info is not None
+    assert info["is_index"] is True
+    assert info["sector"] == "Broad Market Index"
+    assert "benchmark" in info["description"].lower()
+
+
