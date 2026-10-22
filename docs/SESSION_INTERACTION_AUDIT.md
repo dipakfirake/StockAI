@@ -1843,6 +1843,37 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
   - Remote production probe: `http://92.4.71.210:8000/health` (200 OK) and docker pytest execution (2/2 passed in 1.82s).
 - **System Response:** Comprehensive completion report covering all mathematical formulas, UI enhancements, holding inspection modal details, and verified test results. Concluded with `<!-- GOAL_COMPLETE -->`.
 
+---
+
+### Session Entry 46: AI Forecast Navigation Blank Screen Resolution & Route Alias Hardening
+- **Timestamp:** 2026-10-22 19:42:00 IST (14:12:00 UTC)
+- **User Prompt:**  
+  `"when clicked on AI Forecast in holdings any stock then it redirects to following specific stock url like : https://stock-ai-iota-seven.vercel.app/predictions?symbol=ADANIENT.NS and screen becomes blank means nav bar and all showing but downside shows blank ."`
+- **Root Cause Diagnostics:**
+  1. `/predictions` was not defined in `frontend/src/App.tsx` routes. When users clicked "AI Forecast" in `HoldingDetailModal.tsx`, it navigated to `/predictions?symbol=...`, which React Router failed to match, rendering an empty main content container below the navbar.
+  2. In `HoldingDetailModal.tsx`, the action buttons used query parameter strings (`/predictions?symbol=...`) instead of the canonical React Router in-memory state pattern (`navigate('/chart', { state: { symbol, focus: 'ai' } })`).
+  3. `ChartPage.tsx` initial state only checked `location.state?.symbol`, ignoring raw `?symbol=` query parameters for direct external/browser links.
+- **Agent Technical Actions:**
+  1. **Fixed Navigation in `HoldingDetailModal.tsx`**:
+     - Updated "Open Chart" button: `navigate('/chart', { state: { symbol: holding.symbol } })`.
+     - Updated "AI Forecast" button: `navigate('/chart', { state: { symbol: holding.symbol, focus: 'ai' } })`.
+  2. **Hardened Route Aliases in `App.tsx`**:
+     - Added dedicated route aliases pointing to `ChartPage`:
+       - `<Route path="/predictions" element={<ChartPage />} />`
+       - `<Route path="/prediction" element={<ChartPage />} />`
+       - `<Route path="/forecast" element={<ChartPage />} />`
+     - Added global catch-all route fallback: `<Route path="*" element={<Navigate to="/dashboard" replace />} />` ensuring invalid URLs never render a blank screen.
+  3. **Multi-Channel Symbol Resolution & AI Focus in `ChartPage.tsx`**:
+     - Enhanced `locationSymbol` resolution to check query parameters (`searchParams.get('symbol')`) on mount.
+     - Added auto-scroll to `#ai-shap-card` when navigated with `focus: 'ai'` or visiting `/predictions`.
+  4. **Verification & Deployment**:
+     - Frontend production build (`tsc && vite build`): 1,986 modules transformed, 0 errors in 46.12s.
+     - Pushed commit `9dfefd9` to `origin main` (triggering Vercel deployment), pulled to Oracle Cloud VM, verified Vite HMR hot-reload.
+- **Verification Evidence:**
+  - Build: `tsc && vite build` passed (0 errors).
+  - Production sync: Synchronized with Oracle VM and pushed to GitHub main.
+- **System Response:** Detailed root cause explanation and confirmation of fix across routing, component navigation, and symbol handling.
+
 
 
 

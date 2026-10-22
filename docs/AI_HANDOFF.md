@@ -14,6 +14,31 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-22)
 
+- **AI Forecast Blank Screen Fix & Route Alias Hardening (COMPLETE & VERIFIED):**
+  - **User Problem Addressed**:
+    - When clicking "AI Forecast" on any stock in holdings (`HoldingDetailModal.tsx`), the user was redirected to `https://stock-ai-iota-seven.vercel.app/predictions?symbol=ADANIENT.NS`.
+    - The top navbar rendered normally, but the entire page below it was completely blank.
+  - **Root Cause Diagnostics**:
+    1. `/predictions` was not defined in `frontend/src/App.tsx` routes. React Router failed to match the route, rendering an empty main container.
+    2. In `HoldingDetailModal.tsx`, the action buttons used query parameter strings (`/predictions?symbol=...`) instead of the canonical React Router in-memory state pattern (`navigate('/chart', { state: { symbol, focus: 'ai' } })`).
+    3. `ChartPage.tsx` initial state only checked `location.state?.symbol`, ignoring raw `?symbol=` query parameters for direct external/browser links.
+  - **Technical Solutions Implemented**:
+    1. **Fixed Navigation in `HoldingDetailModal.tsx`**:
+       - Updated "Open Chart" button: `navigate('/chart', { state: { symbol: holding.symbol } })`.
+       - Updated "AI Forecast" button: `navigate('/chart', { state: { symbol: holding.symbol, focus: 'ai' } })`.
+    2. **Hardened Route Aliases in `App.tsx`**:
+       - Added dedicated route aliases pointing to `ChartPage`:
+         - `<Route path="/predictions" element={<ChartPage />} />`
+         - `<Route path="/prediction" element={<ChartPage />} />`
+         - `<Route path="/forecast" element={<ChartPage />} />`
+       - Added global catch-all fallback: `<Route path="*" element={<Navigate to="/dashboard" replace />} />`, preventing blank screens on invalid paths.
+    3. **Multi-Channel Symbol Resolution & AI Focus in `ChartPage.tsx`**:
+       - Enhanced `locationSymbol` resolution to check query parameters (`searchParams.get('symbol')`) on mount.
+       - Added auto-scroll to `#ai-shap-card` when navigated with `focus: 'ai'` or visiting `/predictions`.
+  - **Verification Evidence**:
+    - Frontend production build (`tsc && vite build`): 1,986 modules transformed, 0 errors.
+    - Pushed commit `9dfefd9` to `origin main` (triggering Vercel deployment), pulled to Oracle Cloud VM, verified Vite HMR hot-reload.
+
 - **Stock Holding Analytics: Holding Duration (Days Held), Buying Return %, Day's P&L (Current Stock & All Stocks), and Inspection Modal (COMPLETE & VERIFIED):**
   - **User Problem & Requirements**:
     1. Display exact profit percentage gain or loss percentage of buying for each stock holding.
