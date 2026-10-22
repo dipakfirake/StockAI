@@ -152,17 +152,25 @@ def _find_env_path() -> Path | None:
 
 
 def _extract_auth_code(raw_input: str) -> str:
-    raw = raw_input.strip()
+    # 1. Unquote and strip quotes, spaces, newlines
+    raw = urllib.parse.unquote(raw_input.strip().strip('"').strip("'").strip())
+    
+    # 2. If user pasted URL with fragment (#auth_code=...) or query (?auth_code=...)
+    if "#" in raw and "auth_code=" in raw:
+        raw = raw.replace("#", "?")
+
     if "auth_code=" in raw:
         try:
             parsed = urllib.parse.urlparse(raw)
             query = parsed.query if parsed.query else parsed.path
             params = urllib.parse.parse_qs(query)
             if "auth_code" in params and params["auth_code"]:
-                return params["auth_code"][0]
+                return params["auth_code"][0].strip()
         except Exception:
             pass
-        return raw.split("auth_code=")[1].split("&")[0].strip()
+        return raw.split("auth_code=")[1].split("&")[0].split(" ")[0].strip()
+
+    # 3. If user pasted raw auth_code or JWT token
     return raw
 
 
@@ -278,6 +286,33 @@ async def get_fyers_status(
             }
         else:
             err = prof.get("message") or "Access token expired or rejected by Fyers."
+            code = prof.get("code")
+            # Differentiate rate limit / throttle from genuine token expiry
+            is_rate_limit = (
+                code in (-360, 429)
+                or "bad request" in err.lower()
+                or "plan limit" in err.lower()
+                or "rate limit" in err.lower()
+                or "too many requests" in err.lower()
+            )
+            if is_rate_limit:
+                MarketDataService.record_fyers_rate_limit(reason=err, cooldown_seconds=30.0)
+                feed_info = MarketDataService.get_feed_status()
+                return {
+                    "configured": True,
+                    "connected": True,
+                    "token_status": "RATE_LIMITED",
+                    "name": "Trader",
+                    "fy_id": client_id,
+                    "masked_fy_id": _mask_id(client_id),
+                    "message": f"Fyers Standard plan rate limit reached (cooling down 30s). Token is active & valid; feed safely routed to Yahoo backup: {err}",
+                    "dual_engine": feed_info,
+                    "ping_ms": ping_ms,
+                    "checked_at_ist": checked_at_ist,
+                    "checked_at_iso": checked_at_iso,
+                    "fyers_live_ping": False,
+                }
+
             MarketDataService.mark_fyers_token_expired(err)
             feed_info = MarketDataService.get_feed_status()
             return {
@@ -296,7 +331,25 @@ async def get_fyers_status(
             }
     except Exception as e:
         ping_ms = round((time.perf_counter() - start_t) * 1000, 1)
-        MarketDataService.mark_fyers_token_expired(str(e))
+        err_str = str(e)
+        is_timeout = isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "timeout" in err_str.lower()
+        if is_timeout:
+            feed_info = MarketDataService.get_feed_status()
+            return {
+                "configured": True,
+                "connected": MarketDataService._fyers_token_valid,
+                "token_status": "TIMEOUT" if not MarketDataService._fyers_token_valid else "ACTIVE",
+                "name": "",
+                "fy_id": client_id,
+                "masked_fy_id": _mask_id(client_id),
+                "message": f"Fyers profile ping timed out ({ping_ms}ms). Token remains intact; Yahoo backup active.",
+                "dual_engine": feed_info,
+                "ping_ms": ping_ms,
+                "checked_at_ist": checked_at_ist,
+                "checked_at_iso": checked_at_iso,
+                "fyers_live_ping": False,
+            }
+        MarketDataService.mark_fyers_token_expired(err_str)
         feed_info = MarketDataService.get_feed_status()
         return {
             "configured": True,
@@ -305,7 +358,7 @@ async def get_fyers_status(
             "name": "",
             "fy_id": client_id,
             "masked_fy_id": _mask_id(client_id),
-            "message": f"Connection check failed: {str(e)}",
+            "message": f"Connection check failed: {err_str}",
             "dual_engine": feed_info,
             "ping_ms": ping_ms,
             "checked_at_ist": checked_at_ist,
@@ -396,8 +449,21 @@ async def update_fyers_token(
 
     token = None
     extracted_code = _extract_auth_code(raw_input)
-    is_url_or_auth_code = "auth_code=" in raw_input or raw_input.startswith("http") or len(extracted_code) < 300
+    is_url = raw_input.startswith("http://") or raw_input.startswith("https://")
+    
+    # User copied URL before Fyers appended auth_code
+    if is_url and "auth_code" not in raw_input and len(extracted_code) < 30:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The pasted URL does not contain an 'auth_code' parameter. "
+                "Please make sure you complete the Fyers login (PIN & OTP) and wait until the browser redirects to the URL containing '?auth_code=...' before copying it."
+            )
+        )
+
+    is_url_or_auth_code = "auth_code=" in raw_input or is_url or len(extracted_code) < 300
     oauth_error = None
+    freshly_exchanged_token = False
 
     # 1. Try OAuth exchange via Fyers API SessionModel if secret_key is available
     if secret_key:
@@ -414,6 +480,7 @@ async def update_fyers_token(
             resp = await asyncio.to_thread(session.generate_token)
             if resp.get("s") == "ok" and resp.get("access_token"):
                 token = resp["access_token"]
+                freshly_exchanged_token = True
             else:
                 oauth_error = resp.get("message") or resp.get("error_description") or str(resp)
         except Exception as e:
@@ -434,25 +501,35 @@ async def update_fyers_token(
         # Otherwise, user might have provided a direct full access token
         token = extracted_code
 
+    user_name = "Trader"
+    fy_id = client_id
+
     # 3. Validate token against Fyers Profile API
     try:
         fyers = fyersModel.FyersModel(client_id=client_id, is_async=False, token=token, log_path="")
         prof = await asyncio.wait_for(asyncio.to_thread(fyers.get_profile), timeout=6.0)
-        if prof.get("s") != "ok":
+        if prof.get("s") == "ok":
+            user_name = prof.get("data", {}).get("name", "Trader")
+            fy_id = prof.get("data", {}).get("fy_id", client_id)
+        else:
             msg = prof.get("message") or "Authentication failed with Fyers API."
-            if msg.lower() in ("bad request", "token is invalid or expired", "invalid token"):
-                msg = (
-                    f"{msg}. If using an auth code, it may have already been consumed. "
-                    "Please click '1. Open Fyers Login' to get a fresh login URL and activate immediately."
-                )
-            raise HTTPException(status_code=400, detail=f"Fyers verification failed: {msg}")
+            # If token was just freshly generated by Fyers OAuth SessionModel, do not abort on transient rate limits
+            if freshly_exchanged_token:
+                logger.warning(f"OAuth token exchanged successfully, but profile ping returned non-ok: {msg}. Preserving active token.")
+            else:
+                if msg.lower() in ("bad request", "token is invalid or expired", "invalid token"):
+                    msg = (
+                        f"{msg}. If using an auth code, it may have already been consumed. "
+                        "Please click '1. Open Fyers Login' to get a fresh login URL and activate immediately."
+                    )
+                raise HTTPException(status_code=400, detail=f"Fyers verification failed: {msg}")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not connect to Fyers profile: {str(e)}")
-
-    user_name = prof.get("data", {}).get("name", "Trader")
-    fy_id = prof.get("data", {}).get("fy_id", client_id)
+        if freshly_exchanged_token:
+            logger.warning(f"OAuth token exchanged successfully, but profile ping raised: {e}. Preserving active token.")
+        else:
+            raise HTTPException(status_code=400, detail=f"Could not connect to Fyers profile: {str(e)}")
 
     # 4. Immediately update in-memory process environment and Pydantic settings
     os.environ["FYERS_ACCESS_TOKEN"] = token

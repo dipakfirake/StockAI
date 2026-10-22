@@ -1497,7 +1497,43 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - `entry_zone`: `"₹429.56 – ₹432.38 (Dip to 21-EMA)"`
      - `entry_advice`: `"Stock is extended above 21-EMA. Optimal entry on a minor pullback to ₹430.97 for max profit & lower risk."`
    - Frontend Production Build: `tsc && vite build` **1,983 modules transformed, 0 errors, exit code 0**.
-**System Response**: Delivered comprehensive, empirical explanation addressing both why only Kotak Bank appeared in the BUY tab and presenting the newly implemented AI Optimal Entry Price Engine with dual profit metrics.
+### Session Entry 55: Mobile Fyers Renewal, Rate Limit Defense & Admin Session Resilience
+**Timestamp**: 2026-10-22 14:55:00 IST (09:25:00 UTC)
+**User Prompt**:
+  `"today i got same issue that from mobile i clicked on open fyers login from mobile device browser and logged in on fyers account and got 1 token then pasted it then it shows token failed and then the logout option of the admin get vanished from nav bar and also like this happens so i started laptop and first restarted backend because backend is not working i think only frontend is working after this and then i again generated fyers token by using that .bat file from my folder and uploaded it .env file by : scp -i ... .env opc@92.4.71.210:/home/opc/StockAI/.env ... and checked fyers trigger that is it active or not and at that time it shows active bnut now again it shows like folllowing ... ⚠️ Live Check Notice: Fyers token is expired (Bad request) ... encounter these types of issues coming i want to handle these every day find one best solution for this and handle these types of issues. /goal /dart-add-unit-test /dart-fix-runtime-errors"`
+**Agent Technical Actions**:
+1. **Empirical Diagnostics on Oracle Cloud VM (`92.4.71.210`)**:
+   - Inspected live production container on Oracle VM: Fyers token was verified **ACTIVE & OPERATIONAL** (Trader: `DIPAK CHANDRAKANT FIRAKE`, ID: `FAK53751`, Ping: 47.2ms). The token was NOT actually expired!
+   - Inspected container logs:
+     - Found recurring Fyers Standard plan rate limit errors: `Fyers quote returned non-ok for NSE:LTIM-EQ: {'code': -360, 'message': "You've reached the Standard plan limit of 50 requests/minute. Upgrade to Prime for higher API limits."}`
+     - Followed by: `Dual-Engine Failover Engaged: Fyers marked expired (Token expired/rejected (code -360)). Active feed switched to Yahoo Finance Backup.`
+     - And subsequent profile checks returning: `{'code': 429, 'message': 'Bad request'}`.
+   - Identified Root Cause 1: Fyers rate limits (`-360`, `429`, `"Bad request"`) were erroneously treated as token invalidations, causing the system to falsely label the token "EXPIRED".
+   - Identified Root Cause 2: JWT expiration was set to 24 hours (`ACCESS_TOKEN_EXPIRE_MINUTES: 1440`). When mobile users opened the app the next morning, JWT was expired. `AuthContext.tsx` also cleared `localStorage.removeItem('auth_token')` on any network glitch, causing the admin badge and logout button to vanish from `NavBar.tsx` and blocking API calls.
+   - Identified Root Cause 3: Mobile URL copying often had fragments (`#auth_code=...`) or percent-encoding, or user copied before redirect completed.
+2. **Implementation & Architectural Upgrades**:
+   - `backend/services/market_data.py`:
+     - Added sliding-window rate budgeter `_check_and_record_fyers_rate_budget()` (capped at 40 req/min and 4 req/sec burst). Excess queries divert seamlessly to Yahoo Chart backup without touching Fyers.
+     - Separated rate limits (`code: -360`, `429`) from auth expiration (`code: -15`, `-17`, `-300`, `401`, `403`).
+     - Added `record_fyers_rate_limit(cooldown_seconds=30.0)` which engages a 30s cooldown while preserving `_fyers_token_valid = True`.
+   - `backend/api/settings.py`:
+     - Upgraded `_extract_auth_code` to parse query parameters, URL fragments, percent-encoding, and stripped whitespace/quotes.
+     - Enhanced `get_fyers_status()` to return `token_status: "RATE_LIMITED"` and `connected: True` when throttled.
+     - Enhanced `update_fyers_token()` with explicit URL validation (detects when user copied URL before redirect finished) and preserves newly exchanged OAuth tokens even if immediate profile check is throttled.
+   - `backend/core/config.py`:
+     - Increased `ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200` (30 days) to prevent daily mobile session drops.
+   - `frontend/src/AuthContext.tsx`:
+     - Guarded `loadUser()` so `auth_token` is cleared ONLY on HTTP 401 Unauthorized, never on network disconnects or 500 server reloads.
+   - `frontend/src/pages/AdminPage.tsx`:
+     - Added 1-tap **"📋 Paste from Clipboard"** button.
+     - Added real-time **Code / URL Inspector** banner directly under the textarea.
+     - Added URL parameter listener to auto-populate and activate when redirected back with `?auth_code=...` or `#auth_code=...`.
+     - Rendered `RATE_LIMITED` badge & banner with live cooldown countdown.
+3. **Automated Verification & Evidence**:
+   - Backend Unit Tests: `test_dual_connection_engine.py` & `test_fyers_token_manager.py`: **16/16 PASSED (100% green)** in 21.67s.
+   - Frontend Production Build: `tsc && vite build`: **1,983 modules transformed, 0 errors, exit code 0** in 58.05s.
+**System Response**: Documented the root causes, deployed sliding-window rate limiter, token cooldown isolation, 30-day session persistence, and 1-tap mobile clipboard renewal to Oracle Cloud VM.
+
 
 
 

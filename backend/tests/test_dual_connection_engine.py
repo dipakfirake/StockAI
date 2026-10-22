@@ -136,3 +136,87 @@ async def test_fetch_quotes_bulk_bypasses_fyers_when_in_backup_mode():
         mock_get_client.assert_not_called()
         assert "TCS.NS" in quotes
         assert quotes["TCS.NS"]["price"] == 3800.0
+
+
+def test_record_fyers_rate_limit_maintains_token_validity():
+    """Rate limits (-360, 429) must NOT mark the Fyers token expired."""
+    assert MarketDataService._fyers_token_valid is True
+    MarketDataService.record_fyers_rate_limit(reason="Plan limit reached: 50 req/min", cooldown_seconds=30.0)
+
+    # Token must remain valid!
+    assert MarketDataService._fyers_token_valid is True
+    status = MarketDataService.get_feed_status()
+    assert status["fyers_status"] == "RATE_LIMITED"
+    assert status["active_engine"] == "BACKUP_YAHOO"
+    assert status["fyers_cooldown_remaining"] > 0
+    assert "Throttled" in status["source_label"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_quotes_bulk_handles_rate_limit_code_360_without_expiring_token():
+    """When Fyers returns -360 (Rate Limit), system temporarily diverts to Yahoo but preserves token validity."""
+    mock_fyers = MagicMock()
+    mock_fyers.quotes.return_value = {
+        "code": -360,
+        "message": "You've reached the Standard plan limit of 50 requests/minute. Upgrade to Prime for higher API limits."
+    }
+
+    sample_meta = {
+        "regularMarketPrice": 1450.0,
+        "chartPreviousClose": 1440.0,
+        "regularMarketChange": 10.0,
+        "regularMarketChangePercent": 0.69,
+        "regularMarketVolume": 1000000,
+    }
+
+    with patch.object(MarketDataService, "_get_fyers_client", new_callable=AsyncMock) as mock_get_client, \
+         patch.object(MarketDataService, "_parse_yahoo_chart_meta") as mock_parse_meta, \
+         patch("httpx.AsyncClient.get") as mock_http_get:
+
+        mock_get_client.return_value = mock_fyers
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"chart": {"result": [{"meta": sample_meta}]}}
+        mock_http_get.return_value = mock_resp
+
+        mock_parse_meta.return_value = {
+            "symbol": "INFY.NS",
+            "price": 1450.0,
+            "previous_close": 1440.0,
+            "change": 10.0,
+            "change_pct": 0.69,
+            "volume": 1000000,
+            "timestamp": "2026-10-22T09:15:00Z",
+            "data_status": "live_backup",
+            "source": "Backup (Yahoo Chart API)",
+        }
+
+        quotes = await MarketDataService.fetch_quotes_bulk(["INFY.NS"], use_fallback=True)
+
+        # Fyers token MUST remain valid!
+        assert MarketDataService._fyers_token_valid is True
+        # Engine is temporarily routed to Yahoo backup
+        assert quotes["INFY.NS"]["price"] == 1450.0
+        assert quotes["INFY.NS"]["source"] == "Backup (Yahoo Chart API)"
+
+
+def test_extract_auth_code_variants():
+    """Test URL and auth code parsing from mobile redirect formats."""
+    from backend.api.settings import _extract_auth_code
+
+    # 1. Full standard redirect URL
+    url1 = "https://trade.fyers.in/api-login/redirect-uri/index.html?s=ok&code=200&auth_code=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.testcode"
+    assert _extract_auth_code(url1) == "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.testcode"
+
+    # 2. URL fragment format (#auth_code=...)
+    url2 = "https://trade.fyers.in/api-login/redirect-uri/index.html#auth_code=eyJhbGciOiJIUzI1NiJ9.fragment_code"
+    assert _extract_auth_code(url2) == "eyJhbGciOiJIUzI1NiJ9.fragment_code"
+
+    # 3. Percent-encoded URL
+    url3 = "https://trade.fyers.in/api-login/redirect-uri/index.html?auth_code=eyJ0eX%3D%3D"
+    assert _extract_auth_code(url3) == "eyJ0eX=="
+
+    # 4. Direct code with quotes or whitespace
+    code_raw = '  "eyJhbGciOiJIUzI1NiJ9.raw_code"  '
+    assert _extract_auth_code(code_raw) == "eyJhbGciOiJIUzI1NiJ9.raw_code"
+

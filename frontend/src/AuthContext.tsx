@@ -60,9 +60,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {
         // Preferences are optional — degrade gracefully to localStorage-only state
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load user', err);
-      localStorage.removeItem('auth_token');
+      // ONLY wipe auth_token if the backend explicitly rejected it as 401 Unauthorized.
+      // Retain token on network disconnects, timeouts, or temporary 502/503 server restarts so mobile users are not booted out.
+      if (err?.response?.status === 401) {
+        localStorage.removeItem('auth_token');
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }

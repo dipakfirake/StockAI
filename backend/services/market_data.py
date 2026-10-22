@@ -119,6 +119,32 @@ class MarketDataService:
     _active_engine: str = "PRIMARY_FYERS"  # "PRIMARY_FYERS" or "BACKUP_YAHOO"
     _last_fyers_tick_time: float = 0.0
     _last_yahoo_tick_time: float = 0.0
+    _fyers_request_timestamps: list = []
+
+    @classmethod
+    def _check_and_record_fyers_rate_budget(cls) -> bool:
+        """
+        Enforces Fyers Standard API Plan limits:
+        - Max 50 requests/min (safety cap at 40 requests/min)
+        - Max 5 requests/sec (safety cap at 4 requests/sec)
+        Returns True if within budget, False if budget exhausted (route to backup).
+        """
+        import time
+        now = time.time()
+        # Keep only timestamps within last 60 seconds
+        cls._fyers_request_timestamps = [t for t in cls._fyers_request_timestamps if now - t < 60.0]
+        
+        # Check 1-second burst:
+        burst_count = sum(1 for t in cls._fyers_request_timestamps if now - t < 1.0)
+        if burst_count >= 4:
+            return False
+            
+        # Check 60-second limit:
+        if len(cls._fyers_request_timestamps) >= 40:
+            return False
+            
+        cls._fyers_request_timestamps.append(now)
+        return True
 
     @classmethod
     def get_feed_status(cls) -> dict:
@@ -126,14 +152,25 @@ class MarketDataService:
         import time
         now = time.time()
         is_fyers_available = cls._fyers_token_valid and (now >= cls._fyers_cooldown_until)
+        is_rate_limited = cls._fyers_token_valid and (now < cls._fyers_cooldown_until)
         current_engine = "PRIMARY_FYERS" if is_fyers_available else "BACKUP_YAHOO"
+        cooldown_remaining = max(0, int(cls._fyers_cooldown_until - now))
+
+        source_label = "Fyers API (Real-time Push)"
+        if current_engine != "PRIMARY_FYERS":
+            if is_rate_limited:
+                source_label = f"Yahoo Finance (Throttled: Resuming Fyers in {cooldown_remaining}s)"
+            else:
+                source_label = "Yahoo Finance (Autonomous 3s Live Backup)"
+
         return {
             "active_engine": current_engine,
             "fyers_valid": cls._fyers_token_valid,
-            "fyers_cooldown_remaining": max(0, int(cls._fyers_cooldown_until - now)),
+            "fyers_status": "RATE_LIMITED" if is_rate_limited else ("ACTIVE" if cls._fyers_token_valid else "EXPIRED"),
+            "fyers_cooldown_remaining": cooldown_remaining,
             "fyers_token_error": cls._fyers_token_error_reason,
             "fyers_expiry_schedule": "06:00 AM IST Daily",
-            "source_label": "Fyers API (Real-time Push)" if current_engine == "PRIMARY_FYERS" else "Yahoo Finance (Autonomous 3s Live Backup)",
+            "source_label": source_label,
             "dual_connection_active": True,
         }
 
@@ -146,6 +183,14 @@ class MarketDataService:
         cls._active_engine = "BACKUP_YAHOO"
         cls._fyers_cooldown_until = time.time() + cooldown_seconds
         logger.warning(f"Dual-Engine Failover Engaged: Fyers marked expired ({reason}). Active feed switched to Yahoo Finance Backup.")
+
+    @classmethod
+    def record_fyers_rate_limit(cls, reason: str = "Rate limit reached", cooldown_seconds: float = 30.0) -> None:
+        """Throttles Fyers temporarily WITHOUT marking the token expired."""
+        import time
+        cls._fyers_cooldown_until = max(cls._fyers_cooldown_until, time.time() + cooldown_seconds)
+        cls._fyers_token_error_reason = reason
+        logger.warning(f"Dual-Engine: Fyers rate-limited ({reason}). Temporarily diverting to Yahoo Finance backup for {cooldown_seconds}s. Token remains VALID.")
 
     @classmethod
     def reset_fyers_health(cls) -> None:
@@ -316,7 +361,7 @@ class MarketDataService:
             logger.debug(f"Quote cache hit: {original_symbol}")
             return cached
 
-        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
+        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbol}
@@ -364,28 +409,28 @@ class MarketDataService:
                         return await MarketDataService.fetch_quote(original_symbol.replace(".BO", ".NS"))
                     else:
                         logger.warning(f"Fyers returned zero price for {fyers_symbol}, falling through to backup")
-                elif response.get("code") == 429:
-                    MarketDataService._fyers_cooldown_until = now + 45.0
-                    logger.warning("Fyers rate limit (429) hit in single quote. Entering 45s cooldown.")
+                elif response.get("code") in (429, -360):
+                    MarketDataService._fyers_cooldown_until = now + 30.0
+                    logger.warning(f"Fyers rate limit ({response.get('code')}) hit in single quote. Entering 30s cooldown (token remains valid).")
                 elif fyers_symbol.startswith("BSE:"):
                     return await MarketDataService.fetch_quote(original_symbol.replace(".BO", ".NS"))
                 else:
                     err_msg = str(response)
                     resp_code = response.get("code")
-                    if resp_code in (-300, -360, -17, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
+                    if resp_code in (-15, -17, -300, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
                         MarketDataService.mark_fyers_token_expired(f"Token expired/rejected (code {resp_code})", cooldown_seconds=300.0)
-                    elif "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg:
-                        MarketDataService._fyers_cooldown_until = now + 45.0
-                        logger.warning("Fyers WAF rate limit hit in single quote. Entering 45s cooldown.")
+                    elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
+                        MarketDataService._fyers_cooldown_until = now + 30.0
+                        logger.warning("Fyers rate limit (-360/429) hit in single quote. Entering 30s cooldown (token remains valid).")
                     logger.warning(f"Fyers quote returned non-ok for {fyers_symbol}: {response}")
 
             except Exception as e:
                 err_str = str(e).lower()
-                if "-300" in err_str or "-360" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
+                if "-360" in err_str or "429" in err_str or "rate limit" in err_str or "1015" in err_str or "plan limit" in err_str:
+                    MarketDataService._fyers_cooldown_until = now + 30.0
+                    logger.warning("Fyers rate limit exception in single quote. Entering 30s cooldown (token remains valid).")
+                elif "-300" in err_str or "-15" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
                     MarketDataService.mark_fyers_token_expired(f"Fyers auth exception: {e}", cooldown_seconds=300.0)
-                elif "429" in err_str or "rate limit" in err_str or "1015" in err_str:
-                    MarketDataService._fyers_cooldown_until = now + 45.0
-                    logger.warning("Fyers WAF rate limit exception. Entering 45s cooldown.")
                 logger.error(f"Failed to fetch Fyers quote for {original_symbol}: {e}")
         else:
             remaining = int(MarketDataService._fyers_cooldown_until - now)
@@ -482,7 +527,7 @@ class MarketDataService:
         fyers_symbols_str = ",".join(fyers_to_orig.keys())
         
         quotes_dict = {}
-        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
+        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbols_str}
@@ -528,25 +573,25 @@ class MarketDataService:
                                     await cache_set(f"quote:{orig_sym}", q_obj, ttl=settings.CACHE_TTL_QUOTE)
                                 except Exception:
                                     pass
-                elif response.get("code") == 429:
-                    MarketDataService._fyers_cooldown_until = now + 45.0
-                    logger.warning("Fyers rate limit (429) hit in bulk quotes. Entering 45s cooldown.")
+                elif response.get("code") in (429, -360):
+                    MarketDataService._fyers_cooldown_until = now + 30.0
+                    logger.warning(f"Fyers rate limit ({response.get('code')}) hit in bulk quotes. Entering 30s cooldown (token remains valid).")
                 else:
                     err_msg = str(response)
                     resp_code = response.get("code")
-                    if resp_code in (-300, -360, -17, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
+                    if resp_code in (-15, -17, -300, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
                         MarketDataService.mark_fyers_token_expired(f"Bulk quote token error (code {resp_code})", cooldown_seconds=300.0)
-                    elif "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg:
-                        MarketDataService._fyers_cooldown_until = now + 45.0
-                        logger.warning("Fyers WAF rate limit detected in bulk quotes. Entering 45s cooldown.")
+                    elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
+                        MarketDataService._fyers_cooldown_until = now + 30.0
+                        logger.warning("Fyers rate limit (-360/429) detected in bulk quotes. Entering 30s cooldown (token remains valid).")
                     logger.error(f"Fyers bulk quote returned non-ok: {response}")
             except Exception as e:
                 err_str = str(e).lower()
-                if "-300" in err_str or "-360" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
+                if "-360" in err_str or "429" in err_str or "rate limit" in err_str or "1015" in err_str or "plan limit" in err_str:
+                    MarketDataService._fyers_cooldown_until = now + 30.0
+                    logger.warning("Fyers rate limit exception in bulk quotes. Entering 30s cooldown (token remains valid).")
+                elif "-300" in err_str or "-15" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
                     MarketDataService.mark_fyers_token_expired(f"Bulk quote auth exception: {e}", cooldown_seconds=300.0)
-                elif "429" in err_str or "rate limit" in err_str or "1015" in err_str:
-                    MarketDataService._fyers_cooldown_until = now + 45.0
-                    logger.warning("Fyers WAF rate limit exception in bulk quotes. Entering 45s cooldown.")
                 logger.error(f"Fyers bulk quote failed: {e}")
         else:
             remaining = int(MarketDataService._fyers_cooldown_until - now)

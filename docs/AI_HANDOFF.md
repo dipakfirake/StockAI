@@ -12,6 +12,40 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-10-22)
+
+- **Mobile Fyers Token Renewal, Rate Limit Defense & Admin Session Resilience:**
+  - **User Problem Addressed**:
+    1. On mobile browser, user clicked "Open Fyers Login", logged in, pasted token/URL into Admin page, and it showed "token failed".
+    2. Immediately afterward, user was logged out (admin name and logout option vanished from the top navbar), and backend appeared non-functional.
+    3. User was forced to use laptop, generate token via `.bat` script, run `scp` to push `.env` to Oracle Cloud VM (`92.4.71.210`), and restart containers via SSH.
+    4. Even after manual update, Admin page later showed: `⚠️ Live Check Notice: Fyers token is expired (Bad request). Autonomous Yahoo Finance Backup Engine is actively feeding stock prices with zero disruption. Fyers API V3 Live State: EXPIRED (06:00 AM)`.
+  - **Empirical Diagnostics on Oracle Cloud VM (`92.4.71.210`)**:
+    - Live container inspection revealed user's token was **ACTIVE & OPERATIONAL** (Trader: `DIPAK CHANDRAKANT FIRAKE`, ID: `FAK53751`, Ping: 47.2ms). The token was NOT expired!
+    - Container logs revealed recurring Fyers Standard plan rate limit errors: `{'code': -360, 'message': "You've reached the Standard plan limit of 50 requests/minute. Upgrade to Prime for higher API limits."}` followed by `fyers.get_profile()` returning `{'code': 429, 'message': 'Bad request'}`.
+    - Root Cause 1: `market_data.py` and `settings.py` erroneously treated `code: -360` and `429` as token expirations, calling `mark_fyers_token_expired()` and flipping the UI to "EXPIRED".
+    - Root Cause 2: JWT tokens had `ACCESS_TOKEN_EXPIRE_MINUTES: 1440` (24 hours), causing mobile sessions to expire daily. Furthermore, `AuthContext.tsx` wiped `localStorage.removeItem('auth_token')` on any transient network or 500 error, stripping the navbar profile and logout buttons.
+    - Root Cause 3: Mobile clipboard handling lacked 1-tap paste, and URL parameters were occasionally truncated or percent-encoded by mobile browsers.
+  - **Solutions Implemented & Verified**:
+    1. **Sliding-Window Rate Limiter & Cooldown Isolation (`backend/services/market_data.py`)**:
+       - Implemented token bucket rate limiter `_check_and_record_fyers_rate_budget()` (safety threshold: 40 req/min, 4 req/sec burst). Excess calls safely divert to Yahoo Chart backup without hitting Fyers.
+       - Disconnected rate limits (`code in (-360, 429)`) from auth expiration (`code in (-15, -17, -300, 401, 403)`). Rate limits invoke `record_fyers_rate_limit(cooldown_seconds=30.0)` while keeping `_fyers_token_valid = True`.
+    2. **Resilient Status & Token Exchange (`backend/api/settings.py`)**:
+       - `get_fyers_status()` returns `token_status: "RATE_LIMITED"` with `connected: True` on 429 / -360 instead of marking token expired.
+       - Profile ping timeouts (`asyncio.TimeoutError`) no longer invalidate the token.
+       - `update_fyers_token()` parses URL fragments (`#auth_code=...`), percent-encoded strings, and preserves newly minted OAuth tokens even if immediate profile ping is throttled.
+    3. **30-Day Session Persistence & Network Resilience (`backend/core/config.py`, `frontend/src/AuthContext.tsx`)**:
+       - Increased `ACCESS_TOKEN_EXPIRE_MINUTES = 43200` (30 days).
+       - In `AuthContext.tsx`, `auth_token` is cleared ONLY on HTTP 401 Unauthorized, never on network disconnects or 500 server reloads.
+    4. **Mobile UX Upgrade (`frontend/src/pages/AdminPage.tsx`)**:
+       - Added 1-tap **"📋 Paste from Clipboard"** button.
+       - Added real-time **Code / URL Inspector** banner directly beneath the textarea.
+       - Added auto-detection and activation when redirected with `?auth_code=...` or `#auth_code=...`.
+       - Rendered `RATE_LIMITED` badge & banner with live cooldown timer.
+  - **Verification Evidence**:
+    - Backend Unit Tests: `backend/tests/test_dual_connection_engine.py` & `backend/tests/test_fyers_token_manager.py` **16/16 PASSED (100% green)**.
+    - Frontend Production Build: `tsc && vite build` **1,983 modules transformed, 0 errors, exit code 0**.
+
 ## Latest verified checks (2026-10-21)
 
 - **AI Optimal Entry Price Engine & NIFTY 50 Screener Breadth Resolution:**
