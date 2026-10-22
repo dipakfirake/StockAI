@@ -1818,27 +1818,29 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - Implemented transparent, exact mathematical gain/loss formula on purchase/entry price:
        $\text{pnl\_pct} = \frac{\text{Current Price} - \text{Entry Price}}{\text{Entry Price}} \times 100 \times \text{multiplier}$.
      - Displayed both in the holdings table alongside rupee P&L and prominently in the inspection modal.
-  3. **Today's Profit & Loss for Current Stock**:
-     - Extracted authoritative `previous_close` from market quotes or candle delta:
-       $\text{day\_change} = \text{Current Price} - \text{Previous Close}$,
-       $\text{day\_change\_pct} = \frac{\text{day\_change}}{\text{previous\_close}} \times 100$,
+  3. **Today's Profit & Loss for Current Stock (Refined User Specification)**:
+     - **When bought TODAY** (`is_bought_today` or `days_held == 0`): Today's P&L is calculated strictly from the **execution price (`entry_price`) at the exact purchase time today**, NOT the previous day's close or day's starting price:
+       $\text{day\_baseline} = \text{entry\_price}$,
+       $\text{day\_change} = \text{Current Price} - \text{entry\_price}$,
+       $\text{day\_change\_pct} = \frac{\text{day\_change}}{\text{entry\_price}} \times 100$,
        $\text{day\_pnl} = \text{day\_change} \times \text{quantity} \times \text{multiplier}$.
-     - Displayed for each holding row with color-coded rupee gain and % day change.
+     - **When bought PREVIOUSLY** (`days_held > 0`): Today's P&L is the session change from the previous day's close (`previous_close`).
+     - Displayed for each holding row with color-coded rupee gain, % day change, and tooltip indicating baseline reference.
   4. **Today's Day P&L Across All Stocks Portfolio-Wide**:
-     - Aggregate calculation: $\text{total\_day\_pnl} = \sum \text{day\_pnl}_i$, and $\text{total\_day\_pnl\_pct} = \frac{\text{total\_day\_pnl}}{\sum \text{previous\_close}_i \times \text{quantity}_i} \times 100$.
+     - Aggregate calculation: $\text{total\_day\_pnl} = \sum \text{day\_pnl}_i$, and $\text{total\_day\_pnl\_pct} = \frac{\text{total\_day\_pnl}}{\sum \text{day\_baseline}_i \times \text{quantity}_i} \times 100$.
      - Added prominent top-level summary card in `PortfolioPage.tsx`: **"Today's Day P&L (All Stocks)"** with amount & %, and added **"Total Invested (Holdings)"** card.
      - Added **"Day's P&L (Today)"** in `PaperTradingPage.tsx` header alongside Realized, Unrealized, Invested, and Current Value.
   5. **Interactive Stock Holding Inspection Modal (`HoldingDetailModal.tsx`)**:
      - Clicking on any stock holding row in `PortfolioPage` or `PaperTradingPage` opens an interactive modal.
-     - Shows: Holding Duration badge & bought date, Return on Buying (₹ & %), Today's Day P&L (₹ & %), Price & Investment Breakdown (Buy Price, LTP, Invested, Current Value, Prev Close, Day Change/share), and quick actions ("Open Chart", "AI Forecast", "Square Off/Exit").
+     - Shows: Holding Duration badge & bought date, Return on Buying (₹ & %), Today's Day P&L (₹ & %), Today's Baseline Reference (`₹{entry_price} (Buy Price)` or `₹{previous_close} (Prev Close)`), Price & Investment Breakdown, and quick actions ("Open Chart", "AI Forecast", "Square Off/Exit").
   6. **Automated Testing & Production Deployment**:
-     - Created `backend/tests/test_portfolio_holdings_analytics.py`: 2/2 tests PASSED locally in 12.54s and on the Oracle VM container in 1.86s.
-     - Frontend production build (`tsc && vite build`): 1,986 modules transformed, 0 errors.
-     - Pushed to `origin main` (commit `1808c60`), pulled on Oracle VM `92.4.71.210`, restarted `stockbackend` container, verified healthy live execution and Vite HMR update.
+     - Updated `backend/tests/test_portfolio_holdings_analytics.py`: Verified both previously held stocks (prev_close baseline) and stocks bought today (buy price baseline). 2/2 tests PASSED locally in 14.24s and on the Oracle VM container in 1.82s.
+     - Frontend production build (`tsc && vite build`): 1,986 modules transformed, 0 errors, built in 38.77s.
+     - Pushed to `origin main` (commit `57d3ef2`), pulled on Oracle VM `92.4.71.210`, restarted `stockbackend` container, verified healthy live execution and Vite HMR update.
 - **Verification Evidence:**
   - Automated tests: `backend/tests/test_portfolio_holdings_analytics.py` (2/2 passed).
-  - Frontend production build: `npm --prefix frontend run build` (0 errors, 36.45s).
-  - Remote production probe: `http://92.4.71.210:8000/health` (200 OK) and docker pytest execution (2/2 passed in 1.86s).
+  - Frontend production build: `npm --prefix frontend run build` (0 errors, 38.77s).
+  - Remote production probe: `http://92.4.71.210:8000/health` (200 OK) and docker pytest execution (2/2 passed in 1.82s).
 - **System Response:** Comprehensive completion report covering all mathematical formulas, UI enhancements, holding inspection modal details, and verified test results. Concluded with `<!-- GOAL_COMPLETE -->`.
 
 

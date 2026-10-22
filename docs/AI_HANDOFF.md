@@ -22,15 +22,15 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
     4. Display Today's Profit and Loss for the current stock (`day_pnl`, `day_change_pct`).
     5. Display Today's Day P&L across all stocks portfolio-wide (`total_day_pnl`, `total_day_pnl_pct`).
   - **Backend Implementation**:
-    - `backend/api/portfolio.py`:
+    - `backend/api/portfolio.py` & `backend/api/paper_trading.py`:
       - Precise holding duration calculation: `delta_seconds = (now_utc - opened_at_utc).total_seconds(); days_held = int(delta_seconds // 86400)`. Formats `buy_date_formatted` ("22 Oct 2026, 02:45 PM").
       - Profit percentage gain/loss on purchase price: `pnl_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2)`.
-      - Today's P&L for current stock: `day_pnl = round(day_change * t.quantity * multiplier, 2)` and `day_change_pct = round((day_change / prev_close) * 100.0, 2)`.
+      - **Today's P&L Baseline Specification (User Clarification)**:
+        * If a stock was **bought TODAY** (`is_bought_today` or `days_held == 0`): Today's P&L is calculated strictly from the **execution price (`entry_price`) at the exact purchase time today**, NOT the previous day's close or day's starting price. Baseline = `entry_price`, `day_change = current_price - entry_price`, `day_pnl = (current_price - entry_price) * quantity * multiplier`.
+        * If a stock was **bought PREVIOUSLY** (`days_held > 0`): Baseline = `previous_close` (overnight holding change during today's market session).
       - Portfolio aggregates: `total_invested`, `total_day_pnl`, and `total_day_pnl_pct`.
-    - `backend/api/paper_trading.py`:
-      - Enriched `list_paper_trades` with `days_held`, `buy_date_formatted`, `pnl_pct`, `invested`, `value`, `previous_close`, `day_change`, `day_change_pct`, and `day_pnl`.
     - `backend/tests/test_portfolio_holdings_analytics.py`:
-      - Focused unit tests covering both empty portfolios and populated multi-position portfolios with buy return %, days held, day's P&L, and portfolio aggregates.
+      - Focused unit tests covering empty portfolios, previously held positions (prev_close baseline), and positions bought today (buy price baseline), verifying exact P&L and percentages.
   - **Frontend Implementation**:
     - `frontend/src/components/HoldingDetailModal.tsx`:
       - Dedicated sleek holding inspection modal with holding duration badge ("14 Days Held" / "Bought Today"), purchase date, buy return % card, today's day P&L card, price & investment breakdown table, and quick actions ("Open Chart", "AI Forecast", "Square Off/Exit").
