@@ -67,6 +67,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: stockcelery
+    hostname: stockcelery
     command: celery -A backend.celery_app worker --loglevel=info --concurrency=2
     env_file:
       - .env
