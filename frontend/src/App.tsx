@@ -65,6 +65,12 @@ export default function App() {
               <Route path="/admin" element={<AdminPage />} />
               <Route path="/admin/sentinel" element={<SentinelMonitorPage />} />
               <Route path="/login" element={<LoginPage />} />
+              {/* AI Forecast & Prediction Route Aliases */}
+              <Route path="/predictions" element={<ChartPage />} />
+              <Route path="/prediction" element={<ChartPage />} />
+              <Route path="/forecast" element={<ChartPage />} />
+              {/* Catch-all fallback so unmatched routes never show a blank screen */}
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </main>
           <AIAssistantWidget />

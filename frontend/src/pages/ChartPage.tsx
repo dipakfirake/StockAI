@@ -72,8 +72,8 @@ export default function ChartPage() {
   const { theme } = useTheme()
 
   // ─── Persisted chart state (localStorage → instant restore, no flicker) ─────
-  // Symbol is passed via navigate state to keep it OUT of the URL bar
-  const locationSymbol = (location.state as any)?.symbol
+  const queryParamSym = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('symbol') : null
+  const locationSymbol = (location.state as any)?.symbol || queryParamSym
   const [symbol, setSymbol] = useLocalStorage('chart_symbol', locationSymbol || '^NSEI')
   const [timeframe, setTimeframe] = useLocalStorage<string>('chart_timeframe', '1d')
   const [isHeikinAshi, setIsHeikinAshi] = useLocalStorage('chart_is_heikin_ashi', false)
@@ -193,21 +193,41 @@ export default function ChartPage() {
     }
   }, [location.state])
 
-  // Privacy protection: parse encrypted token if provided, and ensure URL bar remains strictly /chart
+  // Privacy protection & flexible routing: parse plain ?symbol= or encrypted token, load symbol, and clean URL
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search)
-      const encToken = searchParams.get('token') || searchParams.get('s') || searchParams.get('q')
-      if (encToken) {
+      const rawSymbol = searchParams.get('symbol') || searchParams.get('s') || searchParams.get('q')
+      const encToken = searchParams.get('token')
+
+      let symToLoad: string | null = null
+      if (rawSymbol) {
+        symToLoad = rawSymbol.trim().toUpperCase()
+      } else if (encToken) {
         const dec = deobfuscateTicker(encToken)
-        if (dec && dec !== symbol) {
-          setSymbol(dec)
-          setSearchInput(dec)
-        }
+        if (dec) symToLoad = dec.toUpperCase()
+      }
+
+      if (symToLoad && symToLoad !== symbol) {
+        setSymbol(symToLoad)
+        setSearchInput(symToLoad)
       }
       sanitizeBrowserUrl('/chart')
     }
-  }, [])
+  }, [location.search])
+
+  // Auto-scroll to AI forecast if navigated with focus: 'ai' or /predictions route
+  useEffect(() => {
+    const isAiFocus = (location.state as any)?.focus === 'ai' || location.pathname.includes('prediction') || location.pathname.includes('forecast')
+    if (isAiFocus) {
+      setTimeout(() => {
+        const el = document.getElementById('ai-shap-card') || document.getElementById('ai-score-ring')
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      }, 400)
+    }
+  }, [location.state, location.pathname])
 
   // Bug Fix: Clear selectedPattern when symbol changes (old pattern of TCS shouldn't show on RELIANCE)
   useEffect(() => {
@@ -1464,7 +1484,7 @@ export default function ChartPage() {
             </div>
           </div>
         {/* AI Score Ring */}
-          <div style={{ marginLeft: 'auto', textAlign: 'center', flexShrink: 0 }}>
+          <div id="ai-score-ring" style={{ marginLeft: 'auto', textAlign: 'center', flexShrink: 0 }}>
             {user?.subscription_tier === 'PRO' ? (
               aiScore ? (() => {
                 const confidence = Math.round(aiScore.confidence * 100);
@@ -1789,7 +1809,7 @@ export default function ChartPage() {
         )}
 
         {/* SHAP Explanations Grid */}
-        <div className="card" style={{ gridColumn: '1 / -1', position: 'relative', overflow: 'hidden' }}>
+        <div id="ai-shap-card" className="card" style={{ gridColumn: '1 / -1', position: 'relative', overflow: 'hidden' }}>
           <div className="card-header">
             <span className="card-title"><Activity size={15} style={{ marginRight: 6 }} />ML Feature Contributions (SHAP)</span>
             {aiScore?.model && <span className="badge badge-hold" style={{ fontSize: 11 }}>Model: {aiScore.model}</span>}

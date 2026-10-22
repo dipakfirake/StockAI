@@ -317,7 +317,7 @@ export default function HoldingDetailModal({
               className="btn btn-secondary"
               onClick={() => {
                 onClose()
-                navigate(`/chart?symbol=${encodeURIComponent(holding.symbol)}`)
+                navigate('/chart', { state: { symbol: holding.symbol } })
               }}
               style={{
                 display: 'flex',
@@ -335,7 +335,7 @@ export default function HoldingDetailModal({
               className="btn btn-secondary"
               onClick={() => {
                 onClose()
-                navigate(`/predictions?symbol=${encodeURIComponent(holding.symbol)}`)
+                navigate('/chart', { state: { symbol: holding.symbol, focus: 'ai' } })
               }}
               style={{
                 display: 'flex',
