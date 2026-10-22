@@ -16,7 +16,12 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 - **Real-Time Live Users Online Tracking System (COMPLETE & VERIFIED):**
   - **Feature Overview**:
-    - Real-time active user tracking on both desktop and mobile platforms with pulsating emerald live count badge (`🟢 X Live`) in Navbar.
+    - Real-time active user tracking on both desktop and mobile platforms with pulsating emerald live count badge (`🟢 X Live`).
+    - **Visibility Access Control**: The visual badge is strictly restricted to **Administrators only** (`isAdmin = Boolean(user?.is_admin || user?.email === 'admin@stockai.com')`). Regular visitors and free users do not see the counter, but their presence is counted via global `PresenceProvider`.
+    - Displayed exclusively to Admins on:
+      1. Desktop and Mobile Navbar (`NavBar.tsx`)
+      2. Administrative Control Center header (`AdminPage.tsx`)
+      3. 24/7 Sentinel Threat Surveillance Watchdog header (`SentinelMonitorPage.tsx`)
     - Zero disruption to broker tick streams, WebSockets, or high-speed execution engines.
     - Instant count increment on page/tab open or focus.
     - Instant count decrement when moving mobile browser to "Recent Apps / App Switcher", switching tabs, or closing the browser.

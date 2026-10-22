@@ -1663,6 +1663,31 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
   - Production container API probe: Verified on `92.4.71.210:8000`.
 - **System Response:** Completed end-to-end implementation and production deployment of the real-time live presence counter system, complete with walkthrough artifact and verified test evidence.
 
+---
+
+### Session Entry 42
+- **Timestamp:** 2026-10-22 17:42:00 IST (12:12:00 UTC)
+- **User Prompt:**  
+  `"where to see this and only admins can see this"`
+- **Agent Technical Actions:**
+  1. **Access Control Enforcement**:
+     - Restricted `LivePresenceBadge` visibility in `frontend/src/components/NavBar.tsx` to administrators only: `{isAdmin && <LivePresenceBadge ... />}` on both Desktop and Mobile header rows.
+     - Regular guests, visitors, and non-admin traders do not see the live counter badge, preventing data leakage to external clients.
+  2. **Application-Wide Presence Decoupling**:
+     - Implemented `frontend/src/PresenceContext.tsx` (`PresenceProvider` and `usePresenceContext`).
+     - Wrapped the application in `PresenceProvider` inside `App.tsx`.
+     - Ensured every visitor and mobile user is automatically and accurately tracked via Page Visibility API and `sendBeacon` with a single, shared listener loop, regardless of authentication state.
+  3. **Dedicated Admin Surveillance Locations**:
+     - Added `<LivePresenceBadge />` to `frontend/src/pages/AdminPage.tsx` header action bar.
+     - Added `<LivePresenceBadge />` to `frontend/src/pages/SentinelMonitorPage.tsx` header action bar.
+  4. **Verification**:
+     - Frontend Production Build: `tsc && vite build` passed (1,986 modules transformed, 0 errors, built in 33.54s).
+     - Git: Staged, committed, pushed to `origin main`, and pulled on Oracle Cloud VM (`stockai-server`).
+- **Verification Evidence:**
+  - `npm --prefix frontend run build`: 0 TypeScript/Vite errors.
+  - Remote deployment to Oracle VM verified.
+- **System Response:** Explained exact locations where administrators can see the live counter (Navbar, Admin Control Center, Sentinel Watchdog) and confirmed that non-admin users cannot see it.
+
 
 
 
