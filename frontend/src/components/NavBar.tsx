@@ -69,7 +69,7 @@ export default function NavBar() {
           AI<span>Stock</span>
         </NavLink>
 
-        <LivePresenceBadge style={{ marginRight: 16 }} />
+        {isAdmin && <LivePresenceBadge style={{ marginRight: 16 }} />}
 
         {user && <LiveTicker />}
 
@@ -213,7 +213,7 @@ export default function NavBar() {
             <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>AI<span style={{ color: '#3b82f6' }}>Stock</span></span>
           </NavLink>
 
-          <LivePresenceBadge compact style={{ marginLeft: '4px' }} />
+          {isAdmin && <LivePresenceBadge compact style={{ marginLeft: '4px' }} />}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

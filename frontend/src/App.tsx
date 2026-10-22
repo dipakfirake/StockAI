@@ -18,6 +18,7 @@ import AdminPage from './pages/AdminPage'
 import SentinelMonitorPage from './pages/SentinelMonitorPage'
 import { AuthProvider } from './AuthContext'
 import { ThemeProvider } from './ThemeContext'
+import { PresenceProvider } from './PresenceContext'
 
 import AIAssistantWidget from './components/AIAssistantWidget'
 import { ToastContainer, toast } from './components/Toast'
@@ -41,7 +42,8 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PresenceProvider>
+          <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <div className="app">
           <NavBar />
           <main className="main-content">
@@ -69,6 +71,7 @@ export default function App() {
           <ToastContainer />
         </div>
       </Router>
+      </PresenceProvider>
       </AuthProvider>
     </ThemeProvider>
   )

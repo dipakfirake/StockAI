@@ -1,5 +1,5 @@
 import React from 'react'
-import { usePresence } from '../hooks/usePresence'
+import { usePresenceContext } from '../PresenceContext'
 
 interface LivePresenceBadgeProps {
   compact?: boolean
@@ -8,7 +8,7 @@ interface LivePresenceBadgeProps {
 }
 
 export default function LivePresenceBadge({ compact = false, className = '', style }: LivePresenceBadgeProps) {
-  const { liveCount } = usePresence()
+  const { liveCount } = usePresenceContext()
 
   return (
     <div

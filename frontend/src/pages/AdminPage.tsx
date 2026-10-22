@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { adminApi, settingsApi } from '../services/api';
 import { Link } from 'react-router-dom';
+import LivePresenceBadge from '../components/LivePresenceBadge';
 import {
   Smartphone,
   ExternalLink,
@@ -337,7 +338,8 @@ export default function AdminPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <LivePresenceBadge style={{ padding: '8px 14px', fontSize: '0.85rem' }} />
           <Link
             to="/admin/sentinel"
             style={{
