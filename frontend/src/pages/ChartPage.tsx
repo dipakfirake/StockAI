@@ -983,6 +983,22 @@ export default function ChartPage() {
             try {
               candleSeriesRef.current.update(updatedCandle)
             } catch (_) {}
+
+            // Dynamically update volume bar if provided
+            if (volumeSeriesRef.current && lastVolumeRef.current && res.data.volume) {
+              const currentVol = lastVolumeRef.current
+              const updatedVol: HistogramData = {
+                time: currentVol.time,
+                value: Number(res.data.volume),
+                color: newPrice >= Number(currentLast.open)
+                  ? 'rgba(16, 185, 129, 0.4)' 
+                  : 'rgba(239, 68, 68, 0.4)'
+              }
+              lastVolumeRef.current = updatedVol
+              try {
+                volumeSeriesRef.current.update(updatedVol)
+              } catch (_) {}
+            }
           }
         }
       } catch (_) {}

@@ -59,7 +59,7 @@ class FyersStreamService:
         self._symbol_map: Dict[str, str] = {}  # Fyers symbol -> Target symbol (e.g. NSE:RELIANCE-EQ -> RELIANCE.NS)
         self._lock = asyncio.Lock()
 
-        # Pre-seed default core indices
+        # Pre-seed default core indices and high-activity equity symbols
         self._default_indices = [
             "NSE:NIFTY50-INDEX",
             "NSE:NIFTYBANK-INDEX",
@@ -67,6 +67,16 @@ class FyersStreamService:
             "NSE:INDIAVIX-INDEX",
             "NSE:NIFTYIT-INDEX",
             "NSE:NIFTYMIDCAP50-INDEX",
+            "NSE:PCJEWELLER-EQ",
+            "NSE:RELIANCE-EQ",
+            "NSE:HDFCBANK-EQ",
+            "NSE:INFY-EQ",
+            "NSE:TCS-EQ",
+            "NSE:ICICIBANK-EQ",
+            "NSE:SBIN-EQ",
+            "NSE:KOTAKBANK-EQ",
+            "NSE:BHARTIARTL-EQ",
+            "NSE:ITC-EQ",
         ]
         for fyers_sym in self._default_indices:
             self._subscribed_symbols.add(fyers_sym)
@@ -153,7 +163,7 @@ class FyersStreamService:
             self._socket = FyersDataSocket(
                 access_token=formatted_token,
                 log_path=None,
-                litemode=True,        # Sub-millisecond tick streaming mode
+                litemode=False,        # Full Mode for tick accuracy, OHLC, volume, and exact price changes
                 write_to_file=False,
                 reconnect=True,
                 on_connect=self._on_open,
@@ -223,11 +233,6 @@ class FyersStreamService:
             if not isinstance(message, dict):
                 return
 
-            from backend.services.market_data import MarketDataService
-            MarketDataService._last_fyers_tick_time = datetime.now().timestamp()
-            MarketDataService._fyers_token_valid = True
-            MarketDataService._active_engine = "PRIMARY_FYERS"
-
             fyers_sym = message.get("symbol")
             if not fyers_sym:
                 return
@@ -236,18 +241,38 @@ class FyersStreamService:
             if ltp is None or float(ltp) <= 0:
                 return
 
-            price = float(ltp)
-            change = float(message.get("ch", 0.0) or 0.0)
-            change_pct = float(message.get("chp", 0.0) or 0.0)
+            import time
+            from backend.services.market_data import MarketDataService
+
+            now_ts = time.time()
+            MarketDataService._last_fyers_tick_time = now_ts
+            MarketDataService._fyers_token_valid = True
+            MarketDataService._active_engine = "PRIMARY_FYERS"
+            MarketDataService._fyers_cooldown_until = 0.0
+
+            price = round(float(ltp), 2)
+            calc_change = float(message.get("ch", 0.0) or 0.0)
+            calc_change_pct = float(message.get("chp", 0.0) or 0.0)
             volume = int(message.get("vol_traded_today", message.get("volume", 0)) or 0)
+            prev_close = float(message.get("prev_close_price", 0.0) or 0.0)
             open_price = float(message["open_price"]) if "open_price" in message and message["open_price"] is not None else None
             high_price = float(message["high_price"]) if "high_price" in message and message["high_price"] is not None else None
             low_price = float(message["low_price"]) if "low_price" in message and message["low_price"] is not None else None
-            timestamp = str(message.get("timestamp") or datetime.now().isoformat())
+            timestamp = str(message.get("timestamp") or datetime.now(timezone.utc).isoformat())
 
-            # Resolve mapped symbol (e.g., NSE:NIFTY50-INDEX -> ^NSEI, NSE:RELIANCE-EQ -> RELIANCE.NS)
-            from backend.services.market_data import MarketDataService
+            if calc_change != 0.0 and (prev_close <= 0.0 or abs(prev_close - price) < 1e-4):
+                prev_close = round(price - calc_change, 2)
+            elif prev_close <= 0.0:
+                prev_close = price
+
+            if calc_change == 0.0 and calc_change_pct != 0.0 and prev_close > 0.0:
+                calc_change = round(price - prev_close, 2)
+            elif calc_change_pct == 0.0 and calc_change != 0.0 and prev_close > 0.0:
+                calc_change_pct = round((calc_change / prev_close) * 100.0, 2)
+
+            # Resolve mapped symbol (e.g., NSE:NIFTY50-INDEX -> ^NSEI, NSE:PCJEWELLER-EQ -> PCJEWELLER.NS)
             target_symbol = self._symbol_map.get(fyers_sym) or MarketDataService._normalise_yf_symbol(fyers_sym)
+            clean_symbol = target_symbol.replace(".NS", "").replace(".BO", "").replace("^", "").strip().upper()
 
             # Update in-memory Redis cache asynchronously
             if self._loop and self._loop.is_running():
@@ -259,35 +284,43 @@ class FyersStreamService:
                     broadcast_market_update(
                         symbol=target_symbol,
                         price=price,
-                        change=change,
-                        change_pct=change_pct,
+                        change=round(calc_change, 2),
+                        change_pct=round(calc_change_pct, 2),
                         volume=volume,
                         timestamp=timestamp,
                         open_price=open_price,
                         high_price=high_price,
-                        low_price=low_price
+                        low_price=low_price,
+                        source="Fyers WebSocket Stream",
+                        data_status="realtime"
                     ),
                     self._loop
                 )
 
-                # 2. Update cache key so REST requests get instant cache hit
+                # 2. Update cache key under both target_symbol and original format so REST requests get instant cache hit
                 cached_quote = {
                     "symbol": target_symbol,
                     "price": price,
-                    "change": change,
-                    "change_pct": change_pct,
+                    "previous_close": round(prev_close, 2),
+                    "change": round(calc_change, 2),
+                    "change_pct": round(calc_change_pct, 2),
                     "volume": volume,
                     "open": open_price,
                     "high": high_price,
                     "low": low_price,
+                    "52w_high": high_price if high_price else 0.0,
+                    "52w_low": low_price if low_price else 0.0,
                     "timestamp": timestamp,
-                    "source": "Fyers WebSocket Stream",
+                    "source": "Fyers API",
                     "data_status": "realtime"
                 }
-                asyncio.run_coroutine_threadsafe(
-                    cache_set(f"quote:{target_symbol}", cached_quote, ttl=2),
-                    self._loop
-                )
+
+                # Store with 15s TTL so fast subsequent REST requests hit cache directly without hitting Fyers REST 50 req/min limit
+                for key_alias in (target_symbol, fyers_sym, clean_symbol):
+                    asyncio.run_coroutine_threadsafe(
+                        cache_set(f"quote:{key_alias}", cached_quote, ttl=15),
+                        self._loop
+                    )
 
         except Exception as e:
             logger.debug(f"Error handling Fyers tick: {e}")

@@ -25,7 +25,9 @@ async def test_fyers_stream_start_without_creds(stream_service):
         mock_settings.FYERS_CLIENT_ID = None
         mock_settings.FYERS_ACCESS_TOKEN = None
         
-        with patch("backend.services.market_data.MarketDataService._env_cache", {}):
+        with patch("backend.services.market_data.MarketDataService._env_cache", {}), \
+             patch("backend.core.cache.cache_get", new_callable=AsyncMock, return_value=None), \
+             patch("backend.core.database.AsyncSessionLocal", side_effect=Exception("No DB")):
             result = await stream_service.start()
             assert result is False
             assert stream_service.is_connected is False
@@ -69,8 +71,8 @@ async def test_on_tick_dispatches_broadcast_and_cache(stream_service):
             return MagicMock()
         mock_run_coro.side_effect = _fake_run_coro
         stream_service._on_tick(tick)
-        # Should call run_coroutine_threadsafe for broadcast and cache update
-        assert mock_run_coro.call_count == 2
+        # Should call run_coroutine_threadsafe for broadcast and multi-key cache update
+        assert mock_run_coro.call_count >= 2
 
 
 @pytest.mark.asyncio

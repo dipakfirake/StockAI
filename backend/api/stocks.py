@@ -167,9 +167,12 @@ async def get_quote(symbol: str, current_user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail=f"No quote data found for {safe_symbol}")
     if not quote.get("market_cap") or quote.get("market_cap") == 0:
         try:
-            info = await asyncio.wait_for(market_data_service.get_stock_info(safe_symbol), timeout=15.0)
-            if info and info.get("market_cap"):
-                quote["market_cap"] = info["market_cap"]
+            from backend.core.cache import cache_get
+            cached_info = await cache_get(f"stock_info:{safe_symbol}")
+            if cached_info and cached_info.get("market_cap"):
+                quote["market_cap"] = cached_info["market_cap"]
+            else:
+                asyncio.create_task(market_data_service.get_stock_info(safe_symbol))
         except Exception:
             pass
     return quote

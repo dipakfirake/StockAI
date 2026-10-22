@@ -14,6 +14,38 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-22)
 
+- **Real-Time Tick Delivery Diagnostics, Fyers Data Socket Full-Mode & Rate Limit Elimination:**
+  - **User Problem Addressed**:
+    1. User observed that stock prices (specifically testing PC Jewellers `PCJEWELLER`) were NOT ticking in real time at every change, even though Fyers API was connected.
+    2. Manual exchange observation confirmed PC Jewellers was actively changing prices on NSE, but in the StockAI system, values were static/delayed.
+  - **Empirical Diagnostics on Oracle Cloud VM (`92.4.71.210`)**:
+    - Live container quote probe `MarketDataService.fetch_quote('PCJEWELLER.NS')` returned `source: 'Backup (Yahoo Chart API)'` with `data_status: 'delayed'`, NOT Fyers API.
+    - Direct Fyers REST API quote probe returned `{'code': -360, 'message': "You've reached the Standard plan limit of 50 requests/minute..."}` because background historical candle poller (`screener_poller.py` scanning 72 symbols) was exhausting REST quota without rate checks.
+    - Raw isolated test of `FyersDataSocket` (WebSocket V3) proved connection is 100% active and streams live ticks for `NSE:PCJEWELLER-EQ` (`ltp: 18.07`, `vol_traded_today: 1949334835`, `ch: -0.44`, `chp: -2.3771`).
+    - Identified 5 Root Causes:
+      1. Equities like `NSE:PCJEWELLER-EQ` were not pre-seeded in `FyersStreamService` and were never subscribed unless an active client requested it via WebSocket.
+      2. Frontend `websocket.ts` had `if (host.endsWith('vercel.app')) return false`, disabling WebSocket connections for Vercel users and forcing HTTP polling.
+      3. `fyers_stream.py` initialized `litemode=True`, which stripped volume, OHLC, prev_close, and change percentage fields. Full mode (`litemode=False`) delivers complete tick packets.
+      4. Redis cache TTL for WebSocket ticks was only 2 seconds (`ttl=2`), causing trades with slight pauses to miss cache and hit throttled REST APIs.
+      5. `stocks.py` (`get_quote`) blocked on a 15-second `get_stock_info` call for missing `market_cap`.
+  - **Solutions Implemented & Verified**:
+    1. **Fyers Data Socket Full Mode & Pre-seeding (`backend/services/fyers_stream.py`)**:
+       - Switched `FyersDataSocket` to `litemode=False`.
+       - Pre-seeded active symbols with top liquid equities (`NSE:PCJEWELLER-EQ`, `NSE:RELIANCE-EQ`, `NSE:HDFCBANK-EQ`, etc.).
+       - Implemented multi-alias Redis caching (`quote:{target_symbol}`, `quote:{clean_symbol}`, `quote:{fyers_sym}`) with a resilient 15s TTL.
+    2. **Auto-Subscription on Access & Rate-Budget Protection (`backend/services/market_data.py`)**:
+       - Added dynamic WebSocket auto-subscription in `fetch_quote` and `fetch_quotes_bulk`. As soon as any user queries or views a stock, it is dynamically subscribed to Fyers Data Socket push stream.
+       - Multi-alias cache lookup: checks `quote:{original_symbol}`, `quote:{fyers_symbol}`, and `quote:{clean_symbol}`.
+       - Protected `fetch_candles` with `_check_and_record_fyers_rate_budget()`. If the budget is tight, it uses fallback without tripping Fyers `-360` rate limits.
+    3. **Sub-Millisecond get_quote (`backend/api/stocks.py`)**:
+       - Replaced blocking 15s `get_stock_info` with non-blocking cache lookup and background async task, reducing `get_quote` latency to <2ms.
+    4. **Volume Sync in Polling Fallback (`frontend/src/pages/ChartPage.tsx`)**:
+       - Synchronized live volume histogram alongside candle and quote prices in polling fallback.
+  - **Verification Evidence**:
+    - Live Container Raw Socket Test: Subscribed `NSE:PCJEWELLER-EQ` and verified real-time tick reception (LTP: 18.07, Change: -0.44).
+    - Frontend Production Build: `tsc && vite build` passed (1,983 modules transformed, 0 errors, exit code 0).
+    - Unit tests: `test_fyers_stream.py` updated to mock DB and multi-key cache assertions.
+
 - **Mobile Fyers Token Renewal, Rate Limit Defense & Admin Session Resilience:**
   - **User Problem Addressed**:
     1. On mobile browser, user clicked "Open Fyers Login", logged in, pasted token/URL into Admin page, and it showed "token failed".

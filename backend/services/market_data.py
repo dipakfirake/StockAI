@@ -349,17 +349,34 @@ class MarketDataService:
 
     @staticmethod
     async def fetch_quote(symbol: str) -> Optional[dict]:
-        """Fetch live quote with caching (TTL: 60s) via Fyers."""
+        """Fetch live quote with caching via Fyers."""
         import time
         now = time.time()
         original_symbol = symbol
         fyers_symbol = MarketDataService._normalise_symbol(symbol)
+        clean_symbol = original_symbol.replace(".NS", "").replace(".BO", "").replace("^", "").strip().upper()
         cache_key = f"quote:{original_symbol}"
         
-        cached = await cache_get(cache_key)
+        # 1. Check multi-alias cache (target symbol, clean symbol, or fyers symbol)
+        cached = await cache_get(cache_key) or await cache_get(f"quote:{fyers_symbol}") or await cache_get(f"quote:{clean_symbol}")
         if cached and cached.get("price", 0) > 0:
             logger.debug(f"Quote cache hit: {original_symbol}")
+            # Ensure background WebSocket subscription is active for live ticks
+            try:
+                from backend.services.fyers_stream import fyers_stream_service
+                if fyers_stream_service.is_connected:
+                    asyncio.create_task(fyers_stream_service.subscribe_symbols([fyers_symbol]))
+            except Exception:
+                pass
             return cached
+
+        # Auto-subscribe to Fyers WebSocket push stream so exchange ticks flow immediately
+        try:
+            from backend.services.fyers_stream import fyers_stream_service
+            if fyers_stream_service.is_connected:
+                asyncio.create_task(fyers_stream_service.subscribe_symbols([fyers_symbol]))
+        except Exception:
+            pass
 
         if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
             try:
@@ -530,6 +547,14 @@ class MarketDataService:
         # If all symbols are already fresh in cache (from WebSocket push ticks or recent reads), return immediately!
         if not missing_symbols:
             return quotes_dict
+
+        # Auto-subscribe missing symbols to Fyers WebSocket push stream
+        try:
+            from backend.services.fyers_stream import fyers_stream_service
+            if fyers_stream_service.is_connected and missing_symbols:
+                asyncio.create_task(fyers_stream_service.subscribe_symbols([MarketDataService._normalise_symbol(s) for s in missing_symbols]))
+        except Exception:
+            pass
 
         fyers_to_orig: dict[str, list[str]] = {}
         for s in missing_symbols:
@@ -767,9 +792,13 @@ class MarketDataService:
 
         fyers_interval = FYERS_INTERVAL_MAP[timeframe]
 
-        try:
-            fyers = await MarketDataService._get_fyers_client()
-            all_candles = []
+        import time
+        now = time.time()
+
+        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
+            try:
+                fyers = await MarketDataService._get_fyers_client()
+                all_candles = []
             
             # 1. Determine the global start and end timestamps
             if start_date and end_date:
@@ -819,8 +848,11 @@ class MarketDataService:
                     if response.get("s") == "ok":
                         break
                     
-                    # If authentication fails (-16), rate limited (429), symbol is invalid (-300), or no data exists (pre-IPO), skip immediately without retry delay
-                    if response.get("code") in [-16, -300, 429] or response.get("s") in ["no_data", "error"]:
+                    # If authentication fails (-16), rate limited (429/-360), symbol is invalid (-300), or no data exists (pre-IPO), skip immediately without retry delay
+                    if response.get("code") in (-360, 429):
+                        MarketDataService.record_fyers_rate_limit("Fyers history rate limited", cooldown_seconds=30.0)
+                        break
+                    if response.get("code") in [-16, -300] or response.get("s") in ["no_data", "error"]:
                         break
                         
                     logger.warning(f"Fyers history failed for {fyers_symbol} ({chunk_start.date()} to {chunk_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")
