@@ -14,6 +14,26 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-22)
 
+- **Celery Flower Offline Worker Diagnostics & Deterministic Hostname Fix (COMPLETE & VERIFIED):**
+  - **User Problem & Symptom Observed in Flower (`http://92.4.71.210:5555/`)**:
+    - Flower showed 2 workers: `celery@37c3b9c0774f` (Online, 0 active, 1640 succeeded) and `celery@54638d580e24` (Offline, 2 active, 6440 succeeded).
+    - Total active tasks showed as 2.
+  - **Empirical Diagnostics**:
+    1. Docker assigns ephemeral container IDs as hostnames if not specified.
+    2. Celery workers derive their node names as `celery@<hostname>`.
+    3. The container `54638d580e24` was the previous worker instance terminated 7 hours earlier during a code/compose update.
+    4. Flower had been running for 36 hours without restarting, preserving the dead worker in its in-memory event tracking table, including 2 tasks that were in-flight at the exact moment of container shutdown.
+    5. Direct broker probe on Redis DB 1 confirmed: `llen celery = 0` (zero pending tasks) and `zcard unacked = 0` (zero unacknowledged tasks). `celery inspect active` on the active worker returned `- empty -`. Zero tasks were stuck or lost.
+  - **Permanent Resolution**:
+    1. Added `hostname: stockcelery` to `celery_worker` in `docker-compose.yml`. Worker nodename is now permanently deterministic (`celery@stockcelery`).
+    2. Deployed to Oracle Cloud VM, recreated `stockcelery`, and restarted `stockflower` to clear stale in-memory worker history.
+    3. Flower now cleanly shows exactly 1 worker: `celery@stockcelery` (Online: True, Active: 0, Succeeded: 100%, Failed: 0).
+  - **Verification Evidence**:
+    - `celery status`: `celery@stockcelery: OK (1 node online)`.
+    - `celery inspect active`: `empty`.
+    - Flower dashboard: `celery@stockcelery` is the only worker; 0 offline workers, 0 stuck tasks.
+    - All 7 containers healthy on Oracle Cloud VM.
+
 - **AI Forecast Blank Screen Fix & Route Alias Hardening (COMPLETE & VERIFIED):**
   - **User Problem Addressed**:
     - When clicking "AI Forecast" on any stock in holdings (`HoldingDetailModal.tsx`), the user was redirected to `https://stock-ai-iota-seven.vercel.app/predictions?symbol=ADANIENT.NS`.

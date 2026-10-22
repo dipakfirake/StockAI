@@ -1872,7 +1872,33 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
 - **Verification Evidence:**
   - Build: `tsc && vite build` passed (0 errors).
   - Production sync: Synchronized with Oracle VM and pushed to GitHub main.
-- **System Response:** Detailed root cause explanation and confirmation of fix across routing, component navigation, and symbol handling.
+---
+
+### Session Entry 47: Celery Flower Offline Worker Diagnostics & Deterministic Hostname Fix
+- **Timestamp:** 2026-10-22 22:10:00 IST (16:40:00 UTC)
+- **User Prompt:**  
+  `"[Flower](http://92.4.71.210:5555/)[Workers]... celery@37c3b9c0774f Online 0 1637 0 1640 0 ... celery@54638d580e24 Offline 2 6444 0 6440 0 ... Total 2 8081 0 8080 0"`
+- **Root Cause Diagnostics:**
+  1. **Ephemeral Docker Hostnames**: Without an explicit `hostname` setting in `docker-compose.yml`, Docker assigns random ephemeral container IDs as hostnames (e.g., `54638d580e24`, `37c3b9c0774f`).
+  2. **Celery Worker Naming**: Celery constructs worker nodenames as `celery@<hostname>`. When `stockcelery` was recreated 7 hours ago during a service update, its name changed from `celery@54638d580e24` to `celery@37c3b9c0774f`.
+  3. **Flower In-Memory State Retention**: The Flower monitoring daemon (`stockflower`) had been running for 36 hours without restarting. It preserved the terminated container in memory as an "Offline" worker, retaining 2 tasks that were in-flight at the exact millisecond the old container was destroyed.
+  4. **Empirical Broker Validation**: Direct probe into Redis broker DB 1 revealed `llen celery = 0` (zero pending tasks) and `zcard unacked = 0` (zero stuck tasks). `celery inspect active` on the active worker returned `- empty -` (zero stuck tasks). The system was 100% operational with zero failures.
+- **Agent Technical Actions:**
+  1. **Configured Deterministic Worker Hostname (`docker-compose.yml`)**:
+     - Added `hostname: stockcelery` to `celery_worker` service.
+     - Worker nodename is now permanently deterministic: `celery@stockcelery`.
+     - Container recreations or restarts will no longer create orphan worker IDs in Flower.
+  2. **Recreated Container & Flushed Flower Memory**:
+     - Deployed update to Oracle Cloud VM (`opc@92.4.71.210`).
+     - Recreated `stockcelery` with hostname `stockcelery`.
+     - Restarted `stockflower` to clear the 36-hour stale in-memory snapshot.
+- **Verification Evidence:**
+  - `celery -A backend.celery_app status`: `-> celery@stockcelery: OK (1 node online)`.
+  - `celery inspect active`: `-> celery@stockcelery: OK - empty -`.
+  - Flower HTML & Worker API check (`http://92.4.71.210:5555/`): Exactly 1 worker listed: `celery@stockcelery` (Online: True, Active: 0, Succeeded: 3, Failed: 0). Stale offline worker completely eradicated.
+  - All 7 containers healthy on Oracle Cloud VM (`stockcelery`, `stockbeat`, `stockbackend`, `stockflower`, `stockfrontend`, `stockdb`, `stockredis`).
+- **System Response:** Clear explanation of why Flower showed the offline worker and phantom active tasks, proof that zero tasks were stuck in the broker, and confirmation of the permanent deterministic hostname resolution.
+
 
 
 
