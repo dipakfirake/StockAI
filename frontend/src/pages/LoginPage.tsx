@@ -29,7 +29,7 @@ export default function LoginPage() {
         const res = await axios.post('/api/auth/login', formData, {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         })
-        await login(res.data.access_token)
+        await login(res.data.access_token, res.data.user)
         navigate('/dashboard')
       } else {
         // Register

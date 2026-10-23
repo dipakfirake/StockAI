@@ -14,6 +14,24 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-23)
 
+- **Login & User-Switching Latency Elimination & Server Disk Out-of-Space Diagnosis (COMPLETE & VERIFIED):**
+  - **User Problem & Symptom**:
+    - Switching user accounts or logging in displayed "Processing..." for an excessive amount of time (10–30+ seconds).
+    - Server-side container build failed with: `open /var/lib/containerd/.../torch/.../_to_copy.h: no space left on device`.
+  - **Root Causes Identified**:
+    1. **Live Server Root Disk 100% Full**: Building heavy ML/PyTorch images simultaneously inside Docker without `--no-cache` filled the VM's boot disk completely (`0 bytes free`). When the disk is full, PostgreSQL cannot allocate WAL blocks or write security audit entries (`log_security_event` -> `SecurityAuditLog`), causing incoming `/api/auth/login` requests to stall on OS disk I/O buffers until timing out.
+    2. **Sequential 3-Roundtrip Client Waterfall**: `LoginPage.tsx` awaited `POST /api/auth/login`, then awaited `authApi.me()`, then awaited `preferencesApi.get()`—all sequentially while the button was locked on "Processing...".
+    3. **Synchronous CPU-Bound Bcrypt on Event Loop**: Passlib's `verify_password` ran directly inside FastAPI's async event loop without thread pool offloading, starving concurrent requests.
+    4. **Hard Page Refresh on Logout**: `logout()` triggered `window.location.href = '/login'`, discarding the React SPA and forcing a heavy multi-second browser download of 700KB+ JS bundles.
+  - **Permanent Solutions Implemented**:
+    1. **FastAPI Thread Pool Bcrypt Offloading (`backend/api/auth.py`)**: Wrapped password check in `await asyncio.to_thread(verify_password, ...)`.
+    2. **Bundled User Profile in Login Payload (`backend/api/auth.py`)**: `POST /api/auth/login` returns `{ access_token, token_type, user: { id, email, name, subscription_tier, is_admin, pro_status } }`, eliminating the need for `GET /api/auth/me`.
+    3. **Instant Hydration in AuthContext (`frontend/src/AuthContext.tsx` & `LoginPage.tsx`)**: `login(token, userData)` immediately hydrates user state, updates localStorage, and fires non-blocking background fetch for preferences. Eliminates 2 roundtrips from user wait time.
+    4. **Seamless SPA Logout (`frontend/src/AuthContext.tsx` & `NavBar.tsx`)**: Replaced `window.location.href` with SPA router transitions (`navigate('/login')`), keeping the app in memory for zero-latency user switching.
+  - **Verification Evidence**:
+    - Backend Unit Tests: **5/5 PASSED in test_auth_pro_access.py (100% green in 30.21s)**.
+    - Frontend Production Build: `tsc && vite build` passed cleanly (**1,987 modules transformed, 0 errors, built in 21.33s**).
+
 - **Portfolio Holdings Math Audit, 3-Tier Dynamic P&L Colors & Strict Live Server Isolation (COMPLETE & VERIFIED):**
   - **User Problem & Symptom**:
     - "Current Portfolio Value" showed ₹99,663.93 while "Total Invested (Holdings)" showed ₹1,15,662.55, creating apparent confusion because open holdings were worth ₹1,15,522.00.

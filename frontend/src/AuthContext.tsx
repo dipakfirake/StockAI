@@ -16,7 +16,7 @@ interface AuthContextType {
   loading: boolean;
   /** All user preferences loaded from the server after login */
   preferences: Record<string, any>;
-  login: (token: string) => void;
+  login: (token: string, userData?: User) => Promise<void> | void;
   logout: () => void;
   upgradeToPro: () => void;
   reloadUser: () => Promise<void>;
@@ -93,8 +93,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadUser();
   }, []);
 
-  const login = async (token: string) => {
+  const login = async (token: string, userData?: User) => {
     localStorage.setItem('auth_token', token);
+    if (userData) {
+      // Instant hydration: user profile is already in the login response payload
+      setUser(userData);
+      try {
+        localStorage.setItem('auth_user_cache', JSON.stringify(userData));
+      } catch {
+        // Ignore storage write issues
+      }
+      setLoading(false);
+      // Non-blocking background fetch for user preferences so login transitions immediately
+      preferencesApi.get()
+        .then(prefRes => setPreferences(prefRes.data ?? {}))
+        .catch(() => {});
+      return;
+    }
+    // Fallback if userData was not provided
     await loadUser();
   };
 
@@ -103,7 +119,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('auth_user_cache');
     setUser(null);
     setPreferences({});
-    window.location.href = '/login';
+    // Seamless SPA navigation to /login without forcing a heavy page reload
+    if (window.location.pathname !== '/login') {
+      window.history.pushState({}, '', '/login');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
   };
 
   const upgradeToPro = () => {

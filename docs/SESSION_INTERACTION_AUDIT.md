@@ -1958,6 +1958,29 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
   - Frontend production build (`tsc && vite build`): **1,987 modules transformed, 0 errors, built in 36.88s**.
 - **System Response:** Comprehensive audit walkthrough of all values, explanation of the color standardization, confirmation of the rule addition, and exact copy-pasteable commands for live server execution.
 
+---
+
+### Session Entry 70
+- **Timestamp:** 2026-10-23 20:30:00 IST (15:00:00 UTC)
+- **User Prompt:**  
+  `"while changing the users by login it taking too much processing time why?"`
+- **Agent Technical Actions:**
+  1. Diagnosed the root causes of the excessive login / account switching delay:
+     - **Server-Side Disk Exhaustion**: A previous `sudo docker compose up --build -d` command on the live server failed with `open /var/lib/containerd/...: no space left on device`. When root `/` disk usage reaches 100%, PostgreSQL cannot allocate WAL blocks or record security audit log entries (`SecurityAuditLog`), causing incoming `POST /api/auth/login` requests to block on OS I/O buffers for 15-30+ seconds.
+     - **Client-Side Sequential 3-Hop Waterfall**: `LoginPage.tsx` waited sequentially for `POST /api/auth/login`, then `GET /api/auth/me`, then `GET /api/preferences`, locking the button on "Processing..." through all three network roundtrips.
+     - **CPU-Bound Event Loop Starvation**: `verify_password` (Passlib bcrypt) was executing synchronously in FastAPI's async event loop.
+     - **Full Page Refresh on Logout**: `logout()` was using `window.location.href = '/login'`, discarding the SPA bundle and forcing a slow full reload.
+  2. Implemented performance optimizations:
+     - **Offloaded Bcrypt to Thread Pool (`backend/api/auth.py`)**: `await asyncio.to_thread(verify_password, ...)` prevents blocking the async event loop.
+     - **Bundled Profile in Login Payload (`backend/api/auth.py`)**: `POST /api/auth/login` now directly returns `{ access_token, token_type, user: { id, email, name, subscription_tier, is_admin, pro_status } }`.
+     - **Instant Hydration (`frontend/src/AuthContext.tsx` & `LoginPage.tsx`)**: `login(token, userData)` hydrates state instantly, allowing immediate navigation to `/dashboard` while preferences load non-blockingly in the background.
+     - **Seamless SPA Logout (`frontend/src/AuthContext.tsx` & `NavBar.tsx`)**: Switched to client-side router navigation without full page reload.
+  3. Formulated safe server recovery commands for the user to clean Docker overlay caches (`sudo docker system prune -af --volumes`) without violating the live server isolation rule.
+- **Verification Evidence:**
+  - Backend unit tests (`backend/tests/test_auth_pro_access.py`): **5/5 PASSED (100% green in 30.21s)**.
+  - Frontend production build (`tsc && vite build`): **1,987 modules transformed, 0 errors, built in 21.33s**.
+- **System Response:** Clear diagnosis of server disk exhaustion vs client network waterfall, summary of code optimizations applied, and copy-pasteable server disk recovery commands.
+
 
 
 

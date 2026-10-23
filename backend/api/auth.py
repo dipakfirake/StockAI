@@ -1,4 +1,5 @@
 import uuid
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -99,7 +100,23 @@ async def login(
     result = await db.execute(select(User).where(User.email == username))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
+        brute_force_protector.record_failure(client_ip, username)
+        log_security_event(
+            event_type="AUTH_LOGIN_FAILED",
+            severity="WARNING",
+            ip_address=client_ip,
+            details={"email": username, "reason": "User not found"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Offload CPU-intensive bcrypt to thread pool so async event loop never blocks
+    is_valid = await asyncio.to_thread(verify_password, form_data.password, user.hashed_password)
+    if not is_valid:
         brute_force_protector.record_failure(client_ip, username)
         log_security_event(
             event_type="AUTH_LOGIN_FAILED",
@@ -134,7 +151,23 @@ async def login(
         user_id=str(user.id),
         details={"email": username},
     )
-    return {"access_token": token, "token_type": "bearer"}
+
+    is_admin = bool(user.is_admin or user.email.lower().strip() == "admin@stockai.com")
+    user_payload = {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "subscription_tier": "PRO" if is_admin else user.subscription_tier,
+        "is_admin": is_admin,
+        "pro_status": "APPROVED" if is_admin else (user.pro_status or "NONE"),
+        "pro_requested_at": user.pro_requested_at.isoformat() if user.pro_requested_at else None,
+    }
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user_payload,
+    }
 
 
 @router.get("/me")

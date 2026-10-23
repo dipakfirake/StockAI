@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import {
   LayoutDashboard,
@@ -29,6 +29,7 @@ import LiveTicker from './LiveTicker'
 import WatchlistSidebar from './WatchlistSidebar'
 
 export default function NavBar() {
+  const navigate = useNavigate()
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -137,7 +138,7 @@ export default function NavBar() {
             </span>
 
             <button 
-              onClick={logout} 
+              onClick={() => { logout(); navigate('/login'); }} 
               title="Logout" 
               style={{ 
                 flexShrink: 0,
@@ -339,7 +340,7 @@ export default function NavBar() {
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{user.email}</div>
                 </div>
                 <button
-                  onClick={() => { setMobileMenuOpen(false); logout(); }}
+                  onClick={() => { setMobileMenuOpen(false); logout(); navigate('/login'); }}
                   style={{
                     padding: '8px 14px',
                     background: 'rgba(239, 68, 68, 0.15)',
