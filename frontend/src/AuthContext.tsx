@@ -38,19 +38,34 @@ const AuthContext = createContext<AuthContextType>({
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  // Optimistically hydrate user from local storage cache so navbar and components never flash logged-out state
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const cached = localStorage.getItem('auth_user_cache');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [preferences, setPreferences] = useState<Record<string, any>>({});
 
   const loadUser = async () => {
     const token = localStorage.getItem('auth_token');
     if (!token) {
+      setUser(null);
+      localStorage.removeItem('auth_user_cache');
       setLoading(false);
       return;
     }
     try {
       const res = await authApi.me();
       setUser(res.data);
+      try {
+        localStorage.setItem('auth_user_cache', JSON.stringify(res.data));
+      } catch {
+        // Ignore storage write issues
+      }
 
       // After confirming the user is valid, load their server-side preferences.
       // This is done in parallel-safe way — a failure here must never block the app.
@@ -61,11 +76,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Preferences are optional — degrade gracefully to localStorage-only state
       }
     } catch (err: any) {
-      console.error('Failed to load user', err);
+      console.warn('Backend user profile check notice:', err?.message || err);
       // ONLY wipe auth_token if the backend explicitly rejected it as 401 Unauthorized.
-      // Retain token on network disconnects, timeouts, or temporary 502/503 server restarts so mobile users are not booted out.
+      // Retain token and cached user on network disconnects, timeouts, or temporary 502/503 server restarts so users are NEVER booted out.
       if (err?.response?.status === 401) {
         localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user_cache');
         setUser(null);
       }
     } finally {
@@ -84,6 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user_cache');
     setUser(null);
     setPreferences({});
     window.location.href = '/login';

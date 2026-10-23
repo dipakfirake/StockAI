@@ -22,6 +22,7 @@ import { PresenceProvider } from './PresenceContext'
 
 import AIAssistantWidget from './components/AIAssistantWidget'
 import { ToastContainer, toast } from './components/Toast'
+import { ReconnectingBanner } from './components/ReconnectingBanner'
 import { alertWebSocket } from './services/websocket'
 import { useEffect } from 'react'
 
@@ -45,6 +46,7 @@ export default function App() {
         <PresenceProvider>
           <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <div className="app">
+          <ReconnectingBanner />
           <NavBar />
           <main className="main-content">
             <Routes>

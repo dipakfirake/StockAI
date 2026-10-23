@@ -15,14 +15,55 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Handle auth errors globally
+// Interface for retry tracking
+interface RetryConfig {
+  __retryCount?: number;
+  method?: string;
+  url?: string;
+  headers?: any;
+}
+
+// Handle responses, silent exponential backoff retry on server restart (502/503/network), and auth errors safely
 api.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('auth_token')
-      window.location.href = '/login'
+  (res) => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('api_connection_state', { detail: { state: 'connected' } }))
     }
+    return res
+  },
+  async (err) => {
+    const config = err.config as (RetryConfig & typeof err.config) | undefined
+    const isNetworkError = !err.response || err.code === 'ERR_NETWORK' || err.code === 'ECONNABORTED' || err.message?.includes('Network Error')
+    const isServerRestart = err.response && (err.response.status === 502 || err.response.status === 503 || err.response.status === 504)
+
+    // Silently retry GET requests up to 3 times with exponential backoff during server restarts or transient network dropouts
+    const isRetryableMethod = !config?.method || ['get', 'head', 'options'].includes(config.method.toLowerCase())
+    const canRetry = config && isRetryableMethod && (isNetworkError || isServerRestart) && (config.__retryCount || 0) < 3
+
+    if (canRetry) {
+      config.__retryCount = (config.__retryCount || 0) + 1
+      const delayMs = Math.min(2500, 500 * Math.pow(2, config.__retryCount - 1)) + Math.random() * 150
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('api_connection_state', { detail: { state: 'reconnecting', attempt: config.__retryCount } }))
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+      return api(config)
+    }
+
+    // Only redirect on authentic HTTP 401 from protected routes, never on network error or server reload
+    if (err.response?.status === 401) {
+      const isAuthRoute = config?.url?.includes('/auth/login') || config?.url?.includes('/auth/register')
+      if (!isAuthRoute && localStorage.getItem('auth_token')) {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('auth_user_cache')
+        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+          window.location.href = '/login'
+        }
+      }
+    }
+
     return Promise.reject(err)
   }
 )

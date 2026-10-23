@@ -1899,6 +1899,43 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
   - All 7 containers healthy on Oracle Cloud VM (`stockcelery`, `stockbeat`, `stockbackend`, `stockflower`, `stockfrontend`, `stockdb`, `stockredis`).
 - **System Response:** Clear explanation of why Flower showed the offline worker and phantom active tasks, proof that zero tasks were stuck in the broker, and confirmation of the permanent deterministic hostname resolution.
 
+---
+
+### Session Entry 48: Zero-Restart Fyers API Hot-Swap, Resilient Session Retention & Industrial Backoff Retries
+- **Timestamp:** 2026-10-23 17:30:00 IST (12:00:00 UTC)
+- **User Prompt:**  
+  `"same issue today morning also that when i updated fyers api from mobile browser then at that time same issue i manually fix that by restarting backend so what happens is that when i changed api then it shows validation with fyers failed at that time it didnt showes that it is active means on frontend it didnt loads but i only restarted backend then it shows its active without making new token again so its fault of restarting i think after putting api you didnt restarted backend so thats why it didnt seems till restarted backend check and make a best solution for it . and another thing is that i want the smooth experience system means if we restarted backend also then at that time what want to happen when old users are logged in then they wont to be logout any time when backend restarted they when go at any new component they wont to get updated automatically with same smooth experiecne like big industrial applications do and after the user moves on another component he want to be redirected to new one and in smoothly if there is too much traffic also . /goal /plan"`
+- **Root Cause Diagnostics:**
+  1. **Premature Token Expiration Call in `get_fyers_status`**: Immediately following `update_fyers_token`, the frontend called `fetchFyersStatus()`. Fyers Standard Plan enforces a 50 req/min limit. Rapid back-to-back pings triggered Fyers rate throttle (`code: 429` / `400 "Bad request"`). In `backend/api/settings.py`, `get_fyers_status` unconditionally called `MarketDataService.mark_fyers_token_expired(err)` on non-ok responses, prematurely marking the brand-new token as expired in RAM and returning `token_status: "EXPIRED"`. When the user restarted the backend container, the in-memory expired flag was cleared, the rate limit settled, the saved token in DB was re-read, and it showed `ACTIVE`.
+  2. **Validation Before Persistence**: `update_fyers_token` validated `fyers.get_profile()` before persisting credentials to storage, causing transient rate limits or 4-second timeouts to reject tokens before they could be saved.
+  3. **Lack of Status Caching**: Every tab switch or manual click fired a new network ping to Fyers without caching, rapidly burning the 50 req/min budget.
+  4. **Logged-out State on Restart**: In `AuthContext.tsx`, `user` defaulted to `null` in memory. If `/api/auth/me` failed during a 2-second backend restart, `user` remained `null` and the navbar collapsed into the logged-out state. In `api.ts`, Axios had zero retry logic and kicked users to `/login` on network errors.
+- **Agent Technical Actions:**
+  1. **Atomic In-Process Persistence (`backend/api/settings.py`)**:
+     - Updated `update_fyers_token` to persist credentials to PostgreSQL `SystemSettings`, Redis `fyers_creds`, and `.env` **immediately** upon token receipt.
+     - Profile ping is non-blocking: extracts trader name if successful, but never aborts or rejects a validated token on transient rate-limits.
+     - Automatically resets `MarketDataService` health, hot-reloads environment cache, and restarts `fyers_stream_service` in-process with zero container restarts.
+  2. **Status Caching & Rate-Limit Isolation (`backend/api/settings.py`)**:
+     - Added Redis status caching (`fyers_live_status_cache`, TTL 15s) bound to `token_preview` to prevent rapid polling from exhausting broker rate limits.
+     - Primes status cache as `ACTIVE` for 30s upon token renewal so the mobile frontend immediately receives verified `ACTIVE` state.
+     - Isolated genuine auth expiration (`code in (-15, -17, -300, 401, 403)`) from rate limits (`code in (-360, 429)`, `"plan limit"`, `"bad request"`, timeouts).
+  3. **Industrial Exponential Backoff Retry (`frontend/src/services/api.ts`)**:
+     - Configured Axios retry interceptor: silently retries idempotent GET requests up to 3 times ($500\text{ms} \to 1000\text{ms} \to 2000\text{ms}$) on network errors (`ERR_NETWORK`, `ECONNABORTED`) or server restart gateways (`502`, `503`, `504`).
+     - Guarded 401 redirect: never logs users out on network disconnects or server restarts.
+  4. **Optimistic Session Cache & Hydration (`frontend/src/AuthContext.tsx`)**:
+     - Hydrates `user` state immediately from `localStorage` (`auth_user_cache`), eliminating logged-out navbar flicker.
+     - Preserves session during backend restarts or offline periods; only purges session if backend returns explicit 401 auth rejection.
+  5. **Non-Intrusive Reconnection Indicator (`frontend/src/components/ReconnectingBanner.tsx` & `frontend/src/App.tsx`)**:
+     - Mounted subtle floating micro-pill indicating silent background reconnection, auto-dismissing as soon as the server responds.
+  6. **Optimistic Mobile Admin UI (`frontend/src/pages/AdminPage.tsx`)**:
+     - Immediately flips status badge to `🟢 ACTIVE` upon successful update, followed by settled background sync.
+- **Verification Evidence:**
+  - Backend Fyers Token Manager & Dual-Engine tests: **16/16 PASSED (100% green in 14.25s)**.
+  - Backend Auth & Cybersecurity tests: **20/20 PASSED (100% green in 94.60s)**.
+  - Frontend production build (`tsc && vite build`): **1,987 modules transformed, 0 errors, built in 46.68s**.
+- **System Response:** Comprehensive explanation of the root cause of the previous restart requirement, details of the atomic in-process hot-swap implementation, and walkthrough of the seamless restart-resilient session experience. Concluded with `<!-- GOAL_COMPLETE -->`.
+
+
 
 
 

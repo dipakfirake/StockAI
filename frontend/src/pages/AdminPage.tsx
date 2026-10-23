@@ -272,9 +272,26 @@ export default function AdminPage() {
     setTokenMessage(null);
     try {
       const res = await settingsApi.updateFyersToken(authInput.trim());
-      setTokenMessage({ text: res.data?.message || 'Fyers token updated successfully! WebSocket feeds reconnected.', type: 'success' });
+      const successMsg = res.data?.message || 'Fyers token updated successfully! Live feeds active with zero restart.';
+      setTokenMessage({ text: successMsg, type: 'success' });
       setAuthInput('');
-      await fetchFyersStatus();
+
+      // Optimistically flip status to ACTIVE immediately
+      setFyersStatus((prev: any) => ({
+        ...prev,
+        configured: true,
+        connected: true,
+        token_status: 'ACTIVE',
+        name: res.data?.name || prev?.name || 'Trader',
+        fy_id: res.data?.fy_id || prev?.fy_id,
+        message: successMsg,
+        fyers_live_ping: true,
+      }));
+
+      // Background status refresh to sync full telemetry
+      setTimeout(() => {
+        fetchFyersStatus();
+      }, 1200);
     } catch (err: any) {
       setTokenMessage({
         text: err.response?.data?.detail || 'Failed to activate Fyers token. Please verify the code/URL.',

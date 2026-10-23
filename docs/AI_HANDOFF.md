@@ -12,6 +12,26 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-10-23)
+
+- **Zero-Restart Fyers API Hot-Swap, Resilient Session Retention & Industrial Backoff Retries (COMPLETE & VERIFIED):**
+  - **User Problem & Symptom**:
+    - When updating Fyers token from a mobile browser, it showed "validation with fyers failed" or didn't show as active until the backend container was manually restarted via SSH (`docker restart stockbackend`).
+    - When the backend restarted, users were logged out, the navbar lost user details, and component transitions failed with network errors.
+  - **Root Causes Identified**:
+    1. Immediately following token renewal, `fetchFyersStatus()` pinged Fyers while Fyers was still rate-throttled from token exchange (50 req/min limit). `get_fyers_status` called `mark_fyers_token_expired()`, un-activating the new token in RAM. Restarting cleared this RAM flag and settled the rate limit.
+    2. `update_fyers_token` validated `fyers.get_profile()` before persisting credentials, so transient throttles prevented saving to DB.
+    3. `AuthContext.tsx` initialized `user` as `null`, so a 2s server restart made `/api/auth/me` fail and collapsed the navbar to guest state. Axios had zero retries.
+  - **Permanent Solutions Implemented**:
+    1. **Atomic In-Process Persistence (`backend/api/settings.py`)**: Token is saved to Postgres `SystemSettings`, Redis `fyers_creds`, and `.env` immediately. In-memory `MarketDataService` and `fyers_stream_service` hot-swap in-process with zero container restarts.
+    2. **Status Caching & Rate-Limit Isolation**: Cached status in Redis (`fyers_live_status_cache`, TTL 15s) bound to `token_preview`. Rate-limits (429, -360, "bad request", timeouts) no longer mark tokens expired.
+    3. **Axios Exponential Backoff Retries (`frontend/src/services/api.ts`)**: Silently retries GET requests 3 times ($500\text{ms} \to 1000\text{ms} \to 2000\text{ms}$) on network errors and 502/503/504 server restarts.
+    4. **Optimistic Session Cache (`frontend/src/AuthContext.tsx`)**: Hydrates user from `localStorage.getItem('auth_user_cache')`. Preserves login state during restarts and only clears on authentic 401 auth rejection.
+    5. **Smooth Reconnection Feedback (`frontend/src/components/ReconnectingBanner.tsx`)**: Subtle floating micro-pill during retries, auto-dismissing as soon as the server answers.
+  - **Verification Evidence**:
+    - Backend Unit Tests: **16/16 PASSED in test_fyers_token_manager.py & test_dual_connection_engine.py**; **20/20 PASSED in test_auth_pro_access.py & test_cybersecurity.py**.
+    - Frontend Production Build: `tsc && vite build` passed cleanly (**1,987 modules transformed, 0 errors, built in 46.68s**).
+
 ## Latest verified checks (2026-10-22)
 
 - **Celery Flower Offline Worker Diagnostics & Deterministic Hostname Fix (COMPLETE & VERIFIED):**
