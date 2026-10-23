@@ -12,7 +12,7 @@ import {
   Percent, 
   Briefcase 
 } from 'lucide-react'
-import { formatINR, formatNumber2Dec } from '../utils/formatters'
+import { formatINR, formatNumber2Dec, getPnlColor, getPnlClass, getPnlSign } from '../utils/formatters'
 
 interface HoldingData {
   trade_id?: string
@@ -27,7 +27,12 @@ interface HoldingData {
   invested?: number
   value?: number
   unrealized_pnl: number
+  gross_pnl?: number
+  total_charges?: number
+  commission?: number
+  stt_tax?: number
   pnl_pct?: number
+  price_change_pct?: number
   day_change?: number
   day_change_pct?: number
   day_pnl?: number
@@ -58,19 +63,41 @@ export default function HoldingDetailModal({
   if (!isOpen || !holding) return null
 
   const isBuy = holding.direction === 'BUY'
-  const isOverallProfitable = (holding.unrealized_pnl ?? 0) >= 0
-  const isDayProfitable = (holding.day_pnl ?? 0) >= 0
+  const overallPnl = holding.unrealized_pnl ?? 0
+  const dayPnl = holding.day_pnl ?? 0
   const daysHeld = holding.days_held ?? 0
 
   const investedAmt = holding.invested ?? (holding.entry_price * holding.quantity)
   const currentVal = holding.value ?? (holding.current_price * holding.quantity)
   const buyReturnPct = holding.pnl_pct ?? (
-    holding.entry_price > 0 
-      ? Number((((holding.current_price - holding.entry_price) / holding.entry_price) * 100 * (isBuy ? 1 : -1)).toFixed(2))
+    investedAmt > 0 
+      ? Number(((overallPnl / investedAmt) * 100).toFixed(2))
       : 0
   )
-  const dayGainAmt = holding.day_pnl ?? 0
+  const dayGainAmt = dayPnl
   const dayGainPct = holding.day_change_pct ?? 0
+
+  const overallBorder = overallPnl > 0.0001
+    ? 'rgba(16, 185, 129, 0.4)'
+    : overallPnl < -0.0001
+    ? 'rgba(239, 68, 68, 0.4)'
+    : 'rgba(255, 255, 255, 0.2)'
+  const overallBg = overallPnl > 0.0001
+    ? 'rgba(16, 185, 129, 0.08)'
+    : overallPnl < -0.0001
+    ? 'rgba(239, 68, 68, 0.08)'
+    : 'rgba(255, 255, 255, 0.04)'
+
+  const dayBorder = dayPnl > 0.0001
+    ? 'rgba(16, 185, 129, 0.4)'
+    : dayPnl < -0.0001
+    ? 'rgba(239, 68, 68, 0.4)'
+    : 'rgba(255, 255, 255, 0.2)'
+  const dayBg = dayPnl > 0.0001
+    ? 'rgba(16, 185, 129, 0.08)'
+    : dayPnl < -0.0001
+    ? 'rgba(239, 68, 68, 0.08)'
+    : 'rgba(255, 255, 255, 0.04)'
 
   return (
     <div 
@@ -200,12 +227,12 @@ export default function HoldingDetailModal({
             )}
           </div>
 
-          {/* Primary Metrics: Buy Return % and Today's P&L */}
+          {/* Primary Metrics: Buy Return % and Today's P&L (Strict Red / Green / White) */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            {/* Overall Profit/Loss % on Buying */}
+            {/* Overall Return on Buying */}
             <div style={{
-              background: isOverallProfitable ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
-              border: `1px solid ${isOverallProfitable ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+              background: overallBg,
+              border: `1px solid ${overallBorder}`,
               borderRadius: 12,
               padding: '16px',
             }}>
@@ -213,23 +240,29 @@ export default function HoldingDetailModal({
                 <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 600, color: 'var(--color-text-muted)' }}>
                   Return on Buying
                 </span>
-                {isOverallProfitable ? <TrendingUp size={16} className="positive" /> : <TrendingDown size={16} className="negative" />}
+                {overallPnl > 0.0001 ? (
+                  <TrendingUp size={16} style={{ color: '#10b981' }} />
+                ) : overallPnl < -0.0001 ? (
+                  <TrendingDown size={16} style={{ color: '#ef4444' }} />
+                ) : (
+                  <Clock size={16} style={{ color: '#ffffff' }} />
+                )}
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.5px' }} className={isOverallProfitable ? 'positive mono' : 'negative mono'}>
-                {buyReturnPct >= 0 ? '+' : ''}{buyReturnPct.toFixed(2)}%
+              <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.5px', color: getPnlColor(overallPnl) }} className="mono">
+                {getPnlSign(buyReturnPct)}{buyReturnPct.toFixed(2)}%
               </div>
-              <div style={{ fontSize: 13, marginTop: 4, fontWeight: 500 }} className={isOverallProfitable ? 'positive mono' : 'negative mono'}>
-                {holding.unrealized_pnl >= 0 ? '+' : ''}{formatINR(holding.unrealized_pnl)}
+              <div style={{ fontSize: 13, marginTop: 4, fontWeight: 500, color: getPnlColor(overallPnl) }} className="mono">
+                {getPnlSign(overallPnl)}{formatINR(overallPnl)}
               </div>
               <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 6 }}>
-                Total profit/loss since purchase
+                Net profit/loss after charges
               </div>
             </div>
 
             {/* Today's Profit & Loss for Current Stock */}
             <div style={{
-              background: isDayProfitable ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
-              border: `1px solid ${isDayProfitable ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+              background: dayBg,
+              border: `1px solid ${dayBorder}`,
               borderRadius: 12,
               padding: '16px',
             }}>
@@ -237,13 +270,13 @@ export default function HoldingDetailModal({
                 <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 600, color: 'var(--color-text-muted)' }}>
                   Today's Day P&L
                 </span>
-                <Clock size={15} style={{ color: 'var(--color-text-muted)' }} />
+                <Clock size={15} style={{ color: getPnlColor(dayPnl) }} />
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.5px' }} className={isDayProfitable ? 'positive mono' : 'negative mono'}>
-                {dayGainAmt >= 0 ? '+' : ''}{formatINR(dayGainAmt)}
+              <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.5px', color: getPnlColor(dayPnl) }} className="mono">
+                {getPnlSign(dayGainAmt)}{formatINR(dayGainAmt)}
               </div>
-              <div style={{ fontSize: 13, marginTop: 4, fontWeight: 500 }} className={isDayProfitable ? 'positive mono' : 'negative mono'}>
-                {dayGainPct >= 0 ? '+' : ''}{dayGainPct.toFixed(2)}% Today
+              <div style={{ fontSize: 13, marginTop: 4, fontWeight: 500, color: getPnlColor(dayGainPct) }} className="mono">
+                {getPnlSign(dayGainPct)}{dayGainPct.toFixed(2)}% Today
               </div>
               <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 6 }}>
                 {holding.is_bought_today || daysHeld === 0
@@ -289,6 +322,24 @@ export default function HoldingDetailModal({
                 </div>
               </div>
               <div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Gross Market Movement</div>
+                <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2, color: getPnlColor(holding.price_change_pct ?? (holding.current_price - holding.entry_price)) }} className="mono">
+                  {getPnlSign(holding.price_change_pct ?? (holding.current_price - holding.entry_price))}
+                  {holding.price_change_pct !== undefined 
+                    ? `${holding.price_change_pct.toFixed(2)}%` 
+                    : `${(((holding.current_price - holding.entry_price) / holding.entry_price) * 100 * (isBuy ? 1 : -1)).toFixed(2)}%`}
+                  {holding.gross_pnl !== undefined && ` (${getPnlSign(holding.gross_pnl)}${formatINR(holding.gross_pnl)})`}
+                </div>
+              </div>
+              {holding.total_charges !== undefined && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Charges (Brokerage + STT)</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2, color: 'var(--color-text-secondary)' }} className="mono">
+                    {formatINR(holding.total_charges)}
+                  </div>
+                </div>
+              )}
+              <div>
                 <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Today's Baseline Reference</div>
                 <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2, color: 'var(--color-text-secondary)' }} className="mono">
                   {holding.is_bought_today || daysHeld === 0 ? `${formatINR(holding.entry_price)} (Buy Price)` : `${formatINR(holding.previous_close)} (Prev Close)`}
@@ -297,8 +348,8 @@ export default function HoldingDetailModal({
               {holding.day_change !== undefined && (
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Today's Price Change / Share</div>
-                  <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2 }} className={isDayProfitable ? 'positive mono' : 'negative mono'}>
-                    {holding.day_change >= 0 ? '+' : ''}{formatINR(holding.day_change)}
+                  <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2, color: getPnlColor(holding.day_change) }} className="mono">
+                    {getPnlSign(holding.day_change)}{formatINR(holding.day_change)}
                   </div>
                 </div>
               )}

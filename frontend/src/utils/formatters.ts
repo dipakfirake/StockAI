@@ -39,3 +39,39 @@ export function formatNumber2Dec(val: number | string | null | undefined, fallba
     maximumFractionDigits: 2,
   })
 }
+
+/**
+ * Strict 3-tier color resolver for P&L and prices:
+ * - Profit (> 0): Vibrant Green (#10b981)
+ * - Loss (< 0): Crimson Red (#ef4444)
+ * - Zero / No profit no loss (== 0): Pure White (#ffffff)
+ */
+export function getPnlColor(val: number | string | null | undefined): string {
+  if (val === null || val === undefined || val === '') return '#ffffff'
+  const num = typeof val === 'number' ? val : Number(val)
+  if (isNaN(num) || Math.abs(num) <= 0.0001) return '#ffffff'
+  return num > 0 ? '#10b981' : '#ef4444'
+}
+
+/**
+ * Resolves CSS class for 3-tier P&L styling:
+ * - Profit (> 0): 'positive'
+ * - Loss (< 0): 'negative'
+ * - Zero (== 0): 'neutral-zero'
+ */
+export function getPnlClass(val: number | string | null | undefined): string {
+  if (val === null || val === undefined || val === '') return 'neutral-zero'
+  const num = typeof val === 'number' ? val : Number(val)
+  if (isNaN(num) || Math.abs(num) <= 0.0001) return 'neutral-zero'
+  return num > 0 ? 'positive' : 'negative'
+}
+
+/**
+ * Returns '+' for positive values, and '' for zero or negative values.
+ */
+export function getPnlSign(val: number | string | null | undefined): string {
+  if (val === null || val === undefined || val === '') return ''
+  const num = typeof val === 'number' ? val : Number(val)
+  if (isNaN(num) || Math.abs(num) <= 0.0001) return ''
+  return num > 0 ? '+' : ''
+}

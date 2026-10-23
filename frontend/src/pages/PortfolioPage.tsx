@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { portfolioApi } from '../services/api'
 import { PieChart, TrendingUp, TrendingDown, Clock, Calendar, Eye, HelpCircle } from 'lucide-react'
 import HoldingDetailModal from '../components/HoldingDetailModal'
-import { formatINR, formatNumber2Dec } from '../utils/formatters'
+import { formatINR, formatNumber2Dec, getPnlColor, getPnlClass, getPnlSign } from '../utils/formatters'
 
 export default function PortfolioPage() {
   const [portfolio, setPortfolio] = useState<any>(null)
@@ -20,8 +20,15 @@ export default function PortfolioPage() {
 
   if (loading) return <div className="loading">Loading portfolio…</div>
 
-  const totalPnlColor = portfolio?.total_pnl >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)'
-  const totalDayPnlColor = (portfolio?.total_day_pnl ?? 0) >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)'
+  const totalDayPnl = portfolio?.total_day_pnl ?? 0
+  const totalDayPnlBorder = totalDayPnl > 0.0001
+    ? 'rgba(16, 185, 129, 0.4)'
+    : totalDayPnl < -0.0001
+    ? 'rgba(239, 68, 68, 0.4)'
+    : 'rgba(255, 255, 255, 0.2)'
+
+  // Sum of holdings current market value
+  const holdingsMarketValue = portfolio?.total_current_value ?? portfolio?.allocation?.reduce((sum: number, a: any) => sum + (a.value || 0), 0) ?? portfolio?.current_value
 
   return (
     <div>
@@ -39,20 +46,20 @@ export default function PortfolioPage() {
             gap: 16, 
             marginBottom: 24 
           }}>
-            {/* 1. Current Value */}
+            {/* 1. Holdings Current Market Value */}
             <div className="card">
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>
-                Current Portfolio Value
+                Holdings Current Value
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                {formatINR(portfolio.current_value)}
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
+                {formatINR(holdingsMarketValue)}
               </div>
               <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                Started: {formatINR(portfolio.initial_capital)}
+                Market value of {portfolio.allocation?.length || 0} open positions
               </div>
             </div>
 
-            {/* 2. Total Invested */}
+            {/* 2. Total Invested (Holdings) */}
             <div className="card">
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>
                 Total Invested (Holdings)
@@ -66,18 +73,18 @@ export default function PortfolioPage() {
             </div>
 
             {/* 3. Today's Day P&L (All Stocks) */}
-            <div className="card" style={{ border: `1px solid ${(portfolio.total_day_pnl ?? 0) >= 0 ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}` }}>
+            <div className="card" style={{ border: `1px solid ${totalDayPnlBorder}` }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                 <span style={{ fontSize: 12, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
                   Today's Day P&L (All Stocks)
                 </span>
-                <Clock size={14} style={{ color: totalDayPnlColor }} />
+                <Clock size={14} style={{ color: getPnlColor(totalDayPnl) }} />
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: totalDayPnlColor }}>
-                {(portfolio.total_day_pnl ?? 0) >= 0 ? '+' : ''}{formatINR(portfolio.total_day_pnl ?? 0)}
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: getPnlColor(totalDayPnl) }}>
+                {getPnlSign(totalDayPnl)}{formatINR(totalDayPnl)}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: totalDayPnlColor, marginTop: 4 }}>
-                {(portfolio.total_day_pnl_pct ?? 0) >= 0 ? '+' : ''}{(portfolio.total_day_pnl_pct ?? 0).toFixed(2)}% Today
+              <div style={{ fontSize: 12, fontWeight: 600, color: getPnlColor(portfolio.total_day_pnl_pct), marginTop: 4 }}>
+                {getPnlSign(portfolio.total_day_pnl_pct)}{(portfolio.total_day_pnl_pct ?? 0).toFixed(2)}% Today
               </div>
             </div>
 
@@ -87,26 +94,32 @@ export default function PortfolioPage() {
                 <span style={{ fontSize: 12, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
                   Total P&L (All Time)
                 </span>
-                {portfolio.total_pnl >= 0 ? <TrendingUp size={14} className="positive" /> : <TrendingDown size={14} className="negative" />}
+                {portfolio.total_pnl > 0.0001 ? (
+                  <TrendingUp size={14} style={{ color: '#10b981' }} />
+                ) : portfolio.total_pnl < -0.0001 ? (
+                  <TrendingDown size={14} style={{ color: '#ef4444' }} />
+                ) : (
+                  <Clock size={14} style={{ color: '#ffffff' }} />
+                )}
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: totalPnlColor }}>
-                {portfolio.total_pnl >= 0 ? '+' : ''}{formatINR(portfolio.total_pnl)}
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: getPnlColor(portfolio.total_pnl) }}>
+                {getPnlSign(portfolio.total_pnl)}{formatINR(portfolio.total_pnl)}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: totalPnlColor, marginTop: 4 }}>
-                {portfolio.total_pnl_pct >= 0 ? '+' : ''}{portfolio.total_pnl_pct?.toFixed(2)}% Total Return
+              <div style={{ fontSize: 12, fontWeight: 600, color: getPnlColor(portfolio.total_pnl_pct), marginTop: 4 }}>
+                {getPnlSign(portfolio.total_pnl_pct)}{portfolio.total_pnl_pct?.toFixed(2)}% Total Return
               </div>
             </div>
 
-            {/* 5. Win Rate */}
+            {/* 5. Account Net Equity */}
             <div className="card">
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>
-                Win Rate
+                Account Net Equity
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>
-                {Math.round(portfolio.win_rate * 100)}%
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                {formatINR(portfolio.current_value)}
               </div>
               <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                {portfolio.closed_trades} closed trades
+                Virtual balance (Started: {formatINR(portfolio.initial_capital)})
               </div>
             </div>
 
@@ -118,8 +131,8 @@ export default function PortfolioPage() {
               <div style={{ fontSize: 24, fontWeight: 700 }}>
                 {portfolio.open_trades} <span style={{ fontSize: 16, color: 'var(--color-text-muted)', fontWeight: 400 }}>/ {portfolio.pending_orders} pending</span>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                Unrealized: {formatINR(portfolio.unrealized_pnl)}
+              <div style={{ fontSize: 11, marginTop: 4, color: getPnlColor(portfolio.unrealized_pnl) }}>
+                Unrealized: {getPnlSign(portfolio.unrealized_pnl)}{formatINR(portfolio.unrealized_pnl)}
               </div>
             </div>
           </div>
@@ -163,8 +176,6 @@ export default function PortfolioPage() {
                   </thead>
                   <tbody>
                     {portfolio.allocation.map((a: any, i: number) => {
-                      const isOverallProfitable = (a.unrealized_pnl ?? 0) >= 0
-                      const isDayProfitable = (a.day_pnl ?? 0) >= 0
                       const daysHeld = a.days_held ?? 0
 
                       return (
@@ -215,23 +226,23 @@ export default function PortfolioPage() {
                           {/* Current Price */}
                           <td className="mono" style={{ fontWeight: 600 }}>{formatINR(a.current_price)}</td>
 
-                          {/* Today's Profit & Loss for Current Stock */}
-                          <td className={isDayProfitable ? 'positive mono' : 'negative mono'} style={{ whiteSpace: 'nowrap' }}>
-                            <div>
-                              {(a.day_pnl ?? 0) >= 0 ? '+' : ''}{formatINR(a.day_pnl ?? 0)}
+                          {/* Today's Profit & Loss for Current Stock (Strict Red / Green / White) */}
+                          <td className={`${getPnlClass(a.day_pnl)} mono`} style={{ whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 600, color: getPnlColor(a.day_pnl) }}>
+                              {getPnlSign(a.day_pnl)}{formatINR(a.day_pnl ?? 0)}
                             </div>
-                            <div style={{ fontSize: 11, opacity: 0.85 }}>
-                              {(a.day_change_pct ?? 0) >= 0 ? '+' : ''}{(a.day_change_pct ?? 0).toFixed(2)}%
+                            <div style={{ fontSize: 11, opacity: 0.9, color: getPnlColor(a.day_change_pct) }}>
+                              {getPnlSign(a.day_change_pct)}{(a.day_change_pct ?? 0).toFixed(2)}%
                             </div>
                           </td>
 
-                          {/* Profit percentage gain or loss percentage of buying */}
-                          <td className={isOverallProfitable ? 'positive mono' : 'negative mono'} style={{ whiteSpace: 'nowrap' }}>
-                            <div style={{ fontWeight: 600 }}>
-                              {a.unrealized_pnl >= 0 ? '+' : ''}{formatINR(a.unrealized_pnl)}
+                          {/* Overall Return on Buy (Net Return % matching Net Rupee P&L, Strict Red / Green / White) */}
+                          <td className={`${getPnlClass(a.unrealized_pnl)} mono`} style={{ whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 600, color: getPnlColor(a.unrealized_pnl) }}>
+                              {getPnlSign(a.unrealized_pnl)}{formatINR(a.unrealized_pnl)}
                             </div>
-                            <div style={{ fontSize: 11, opacity: 0.9 }}>
-                              {(a.pnl_pct ?? 0) >= 0 ? '+' : ''}{(a.pnl_pct ?? 0).toFixed(2)}%
+                            <div style={{ fontSize: 11, opacity: 0.9, color: getPnlColor(a.pnl_pct) }}>
+                              {getPnlSign(a.pnl_pct)}{(a.pnl_pct ?? 0).toFixed(2)}%
                             </div>
                           </td>
 
@@ -245,7 +256,7 @@ export default function PortfolioPage() {
                                 <div style={{ 
                                   width: `${Math.min(100, Math.max(0, a.weight_pct || 0))}%`, 
                                   height: '100%', 
-                                  background: isOverallProfitable ? 'var(--color-bullish)' : 'var(--color-bearish)', 
+                                  background: getPnlColor(a.unrealized_pnl), 
                                   borderRadius: 3 
                                 }} />
                               </div>

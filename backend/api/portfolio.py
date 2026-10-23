@@ -29,6 +29,7 @@ async def get_portfolio(
             "initial_capital": 100000.0,
             "current_value": 100000.0,
             "total_invested": 0.0,
+            "total_current_value": 0.0,
             "total_pnl": 0.0,
             "total_pnl_pct": 0.0,
             "total_day_pnl": 0.0,
@@ -81,18 +82,21 @@ async def get_portfolio(
         if t.product_type == "DELIVERY":
             stt = current_price * t.quantity * 0.001
 
-        unrealized = multiplier * (current_price - entry_p) * t.quantity - comm - stt
+        gross_pnl = multiplier * (current_price - entry_p) * t.quantity
+        unrealized = gross_pnl - comm - stt
         total_unrealized += unrealized
 
         invested = entry_p * t.quantity
         value = current_price * t.quantity
         total_invested += invested
 
-        # Profit percentage gain or loss percentage of buying
-        pnl_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2) if entry_p > 0 else 0.0
+        # Net Return on Buying percentage (matches rupee unrealized P&L after commission & STT)
+        pnl_pct = round((unrealized / invested) * 100.0, 2) if invested > 0 else 0.0
+        # Gross price movement percentage (raw market movement from entry)
+        price_change_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2) if entry_p > 0 else 0.0
 
         # Days held calculation & Indian IST timezone resolution
-        opened_at = t.opened_at if t.opened_at else now_utc
+        opened_at = t.opened_at if isinstance(getattr(t, "opened_at", None), datetime) else now_utc
         opened_at_utc = opened_at if opened_at.tzinfo else opened_at.replace(tzinfo=timezone.utc)
         delta_seconds = max(0.0, (now_utc - opened_at_utc).total_seconds())
         days_held = int(delta_seconds // 86400)
@@ -142,7 +146,12 @@ async def get_portfolio(
             "invested": round(invested, 2),
             "value": round(value, 2),
             "unrealized_pnl": round(unrealized, 2),
+            "gross_pnl": round(gross_pnl, 2),
+            "total_charges": round(comm + stt, 2),
+            "commission": round(comm, 2),
+            "stt_tax": round(stt, 2),
             "pnl_pct": pnl_pct,
+            "price_change_pct": price_change_pct,
             "day_change": day_change,
             "day_change_pct": day_change_pct,
             "day_pnl": day_pnl,
@@ -157,15 +166,17 @@ async def get_portfolio(
     # Day's PnL percentage across all open holdings
     total_day_pnl_pct = round((total_day_pnl / total_prev_value) * 100.0, 2) if total_prev_value > 0 else 0.0
 
-    # Weight allocation
-    total_value = sum(a["value"] for a in allocation) or 1.0
+    # Holdings Current Market Value & Weight allocation
+    total_current_value = sum(a["value"] for a in allocation)
+    weight_denominator = total_current_value if total_current_value > 0 else 1.0
     for a in allocation:
-        a["weight_pct"] = round(a["value"] / total_value * 100, 2)
+        a["weight_pct"] = round(a["value"] / weight_denominator * 100, 2)
 
     return {
         "initial_capital": initial_capital,
         "current_value": round(current_value, 2),
         "total_invested": round(total_invested, 2),
+        "total_current_value": round(total_current_value, 2),
         "total_pnl": round(total_pnl, 2),
         "total_pnl_pct": round(total_pnl / initial_capital * 100, 2) if initial_capital > 0 else 0.0,
         "total_day_pnl": round(total_day_pnl, 2),

@@ -19,9 +19,10 @@
   --color-sell: #ff5722;
   --color-hold: #ff9800;
   
-  --color-bullish: #4caf50;
-  --color-bearish: #f44336;
+  --color-bullish: #10b981;
+  --color-bearish: #ef4444;
   --color-neutral: #ff9800;
+  --color-pnl-zero: #ffffff;
 }
 
 [data-theme='dark'], :root {
@@ -425,8 +426,9 @@ a:hover { color: var(--color-accent-blue-hover); }
 .badge-watch { background: rgba(59,130,246,0.15); color: var(--color-accent-blue); }
 
 /* ===== Price change colors ===== */
-.positive { color: var(--color-bullish); }
-.negative { color: var(--color-bearish); }
+.positive { color: var(--color-bullish, #10b981); }
+.negative { color: var(--color-bearish, #ef4444); }
+.neutral-zero { color: var(--color-pnl-zero, #ffffff); }
 .neutral { color: var(--color-neutral); }
 
 /* ===== Grid utilities ===== */

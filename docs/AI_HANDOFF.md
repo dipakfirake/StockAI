@@ -14,6 +14,40 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-23)
 
+- **Portfolio Holdings Math Audit, 3-Tier Dynamic P&L Colors & Strict Live Server Isolation (COMPLETE & VERIFIED):**
+  - **User Problem & Symptom**:
+    - "Current Portfolio Value" showed ₹99,663.93 while "Total Invested (Holdings)" showed ₹1,15,662.55, creating apparent confusion because open holdings were worth ₹1,15,522.00.
+    - Overall Return on Buy showed rupee net profit (e.g. +₹160.63 for TCS) alongside gross price return percentage (+0.82%), when the true net return on ₹25,094 is +0.64%.
+    - User requested strict three-tier color hierarchy: Profit (> 0) = Green, Loss (< 0) = Red, Zero / No Profit No Loss (== 0) = Pure White.
+    - User explicitly mandated a new rule: Agents must never execute commands directly on the live server; all work is local only, and remote commands must be given to the user to run manually.
+  - **Root Causes Identified**:
+    1. Card 1 was displaying Account Net Equity (`initial_capital + total_pnl` = 100,000 - 336.07 = 99,663.93), but was labeled "Current Portfolio Value", while Card 2 was labeled "Total Invested (Holdings)", leaving out the open holdings market value (₹1,15,522.00) that matches the table rows.
+    2. Backend `portfolio.py` deducted brokerage and STT from `unrealized` P&L (₹160.63), but computed `pnl_pct` as gross price movement (+0.82%), creating a numerical mismatch.
+    3. CSS and component classes were using binary `>= 0` booleans, turning zero/flat prices green instead of white.
+  - **Permanent Solutions Implemented**:
+    1. **Strict Live Server Isolation Rule**: Added permanently to `AGENTS.md`, `GEMINI.md`, and `.agents/rules/universal-agent-rules.md`. Agents work locally only.
+    2. **Backend Holdings Value Parity (`backend/api/portfolio.py` & `backend/api/paper_trading.py`)**:
+       - Exposes `total_current_value = sum(a["value"] for a in allocation)` (₹1,15,522.00).
+       - Aligns `pnl_pct` to net return on invested capital (`(unrealized / invested) * 100`).
+       - Exposes `price_change_pct`, `gross_pnl`, and `total_charges` for complete transparency.
+       - Hardened `opened_at` / `closed_at` handling against non-datetime mock attributes.
+    3. **Three-Tier Color Hierarchy (`formatters.ts` & `index.css`)**:
+       - `getPnlColor(val)`: `#10b981` (Profit), `#ef4444` (Loss), `#ffffff` (Zero).
+       - `getPnlClass(val)`: `'positive'`, `'negative'`, `'neutral-zero'`.
+       - `getPnlSign(val)`: `'+'` for positive, `''` for zero/negative.
+       - Enforced across `PortfolioPage.tsx`, `PaperTradingPage.tsx`, and `HoldingDetailModal.tsx`.
+    4. **Clear Card Presentation (`PortfolioPage.tsx`)**:
+       - Card 1: **Holdings Current Value** (`₹1,15,522.00`) — Market value of open positions.
+       - Card 2: **Total Invested (Holdings)** (`₹1,15,662.55`) — Open positions capital deployed.
+       - Card 3: **Today's Day P&L (All Stocks)** — Dynamic 3-tier color and border.
+       - Card 4: **Total P&L (All Time)** — Dynamic 3-tier color and trend icon.
+       - Card 5: **Account Net Equity** (`₹99,663.93`) — Virtual balance (Started: ₹1,00,000.00).
+       - Card 6: **Open Positions / Orders** — Open trades & unrealized P&L in dynamic 3-tier color.
+  - **Verification Evidence**:
+    - Backend Unit Tests: **3/3 PASSED in test_portfolio_holdings_analytics.py** (including zero P&L assertions).
+    - Backend Math & Crash Resilience: **14/14 PASSED in test_endpoint_crash_and_math_audit.py**.
+    - Frontend Production Build: `tsc && vite build` passed cleanly (**1,987 modules transformed, 0 errors, built in 36.88s**).
+
 - **Zero-Restart Fyers API Hot-Swap, Resilient Session Retention & Industrial Backoff Retries (COMPLETE & VERIFIED):**
   - **User Problem & Symptom**:
     - When updating Fyers token from a mobile browser, it showed "validation with fyers failed" or didn't show as active until the backend container was manually restarted via SSH (`docker restart stockbackend`).

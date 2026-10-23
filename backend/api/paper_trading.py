@@ -118,7 +118,8 @@ async def list_paper_trades(
     now_ist = now_utc.astimezone(ist_tz)
     result = []
     for t in trades:
-        opened_at_utc = t.opened_at if t.opened_at.tzinfo else t.opened_at.replace(tzinfo=timezone.utc)
+        opened_at = t.opened_at if isinstance(getattr(t, "opened_at", None), datetime) else now_utc
+        opened_at_utc = opened_at if opened_at.tzinfo else opened_at.replace(tzinfo=timezone.utc)
         delta_sec = max(0.0, (now_utc - opened_at_utc).total_seconds())
         days_held = int(delta_sec // 86400)
         buy_date_formatted = opened_at_utc.strftime("%d %b %Y, %I:%M %p")
@@ -142,7 +143,7 @@ async def list_paper_trades(
             "status": t.status,
             "realized_pnl": float(t.realized_pnl) if t.realized_pnl is not None else None,
             "opened_at": opened_at_utc.isoformat(),
-            "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+            "closed_at": t.closed_at.isoformat() if isinstance(getattr(t, "closed_at", None), datetime) else None,
             "days_held": days_held,
             "buy_date_formatted": buy_date_formatted,
             "is_bought_today": is_bought_today,
@@ -157,7 +158,10 @@ async def list_paper_trades(
                 multiplier = 1 if t.direction == "BUY" else -1
                 entry_p = float(t.entry_price) if t.entry_price is not None else current_price
                 comm = float(t.commission) if t.commission is not None else 0.0
-                unrealized = multiplier * (current_price - entry_p) * t.quantity - comm
+                stt = float(t.stt_tax) if t.stt_tax is not None else (current_price * t.quantity * 0.001 if t.product_type == "DELIVERY" else 0.0)
+                gross_pnl = multiplier * (current_price - entry_p) * t.quantity
+                unrealized = gross_pnl - comm - stt
+                invested = entry_p * t.quantity
                 
                 # If bought today: Day's P&L is calculated from purchase price, NOT today's starting price
                 if is_bought_today:
@@ -177,12 +181,15 @@ async def list_paper_trades(
                 day_change = round(current_price - day_baseline, 2)
                 day_change_pct = round((day_change / day_baseline) * 100.0, 2) if day_baseline > 0 else 0.0
                 day_pnl = round(day_change * t.quantity * multiplier, 2)
-                pnl_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2) if entry_p > 0 else 0.0
+                pnl_pct = round((unrealized / invested) * 100.0, 2) if invested > 0 else 0.0
+                price_change_pct = round(((current_price - entry_p) / entry_p) * 100.0 * multiplier, 2) if entry_p > 0 else 0.0
 
                 entry["current_price"] = round(current_price, 2)
                 entry["unrealized_pnl"] = round(unrealized, 2)
+                entry["gross_pnl"] = round(gross_pnl, 2)
                 entry["pnl_pct"] = pnl_pct
-                entry["invested"] = round(entry_p * t.quantity, 2)
+                entry["price_change_pct"] = price_change_pct
+                entry["invested"] = round(invested, 2)
                 entry["value"] = round(current_price * t.quantity, 2)
                 entry["previous_close"] = round(day_baseline, 2)
                 entry["day_baseline"] = round(day_baseline, 2)

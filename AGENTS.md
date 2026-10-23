@@ -44,6 +44,7 @@ For prose-only requests, do not run unrelated destructive or expensive checks. S
 ## Safety and repository discipline
 
 - **STRICT CONFIDENTIALITY RULE:** You are strictly forbidden from scanning, viewing, reading, or analyzing the `.env` file under any circumstances, as it contains highly confidential keys and tokens. If you need a new environment variable added, instruct the user to add it manually or append it to `.env.example`, but NEVER read the actual `.env` file.
+- **STRICT LIVE SERVER ISOLATION RULE:** You are strictly forbidden from executing commands directly on the live/remote production server (via SSH, SCP, paramiko, rsync, or remote shell execution). All development, building, testing, linting, and Docker container verification must be performed exclusively on **localhost** / local Docker. Whenever changes need to be applied to the live production server, you must **never** run remote commands yourself; you must provide the user with the exact, tested, copy-pasteable commands (such as `git pull origin main`, `docker compose build`, `docker compose restart`, etc.) for the user to execute on the live server manually.
 - Use the smallest safe change; do not overwrite unrelated user edits.
 - Never use destructive git commands or delete data without explicit user approval.
 - Validate external inputs, enforce authorization on every protected route, and prevent cross-user data or alert leakage.

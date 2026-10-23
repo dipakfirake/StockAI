@@ -156,7 +156,10 @@ async def test_portfolio_holdings_analytics_calculation():
         assert r_item["current_price"] == 2800.0
         assert r_item["invested"] == 25000.0
         assert r_item["value"] == 28000.0
-        assert r_item["pnl_pct"] == 12.0  # +12% buy gain
+        assert r_item["gross_pnl"] == 3000.0
+        assert r_item["unrealized_pnl"] == 2972.0  # 3000 - 28 STT
+        assert r_item["pnl_pct"] == 11.89  # Net return on buy (2972 / 25000)
+        assert r_item["price_change_pct"] == 12.0  # Gross price movement
         assert r_item["day_change"] == 50.0
         assert r_item["day_pnl"] == 500.0  # +50 * 10 = +500
 
@@ -168,7 +171,10 @@ async def test_portfolio_holdings_analytics_calculation():
         assert i_item["current_price"] == 1500.0
         assert i_item["invested"] == 32000.0
         assert i_item["value"] == 30000.0
-        assert i_item["pnl_pct"] == -6.25  # -6.25% buy loss
+        assert i_item["gross_pnl"] == -2000.0
+        assert i_item["unrealized_pnl"] == -2030.0  # -2000 - 30 STT
+        assert i_item["pnl_pct"] == -6.34  # Net return on buy (-2030 / 32000)
+        assert i_item["price_change_pct"] == -6.25  # Gross price movement
         assert i_item["day_change"] == -50.0
         assert i_item["day_pnl"] == -1000.0  # -50 * 20 = -1000
 
@@ -181,7 +187,10 @@ async def test_portfolio_holdings_analytics_calculation():
         assert t_item["current_price"] == 3850.0
         assert t_item["invested"] == 19000.0  # 3800 * 5
         assert t_item["value"] == 19250.0     # 3850 * 5
-        assert t_item["pnl_pct"] == 1.32      # (3850 - 3800) / 3800 = +1.32%
+        assert t_item["gross_pnl"] == 250.0
+        assert t_item["unrealized_pnl"] == 230.75  # 250 - 19.25 STT
+        assert t_item["pnl_pct"] == 1.21      # (230.75 / 19000) = +1.21%
+        assert t_item["price_change_pct"] == 1.32  # (3850 - 3800) / 3800 = +1.32%
         assert t_item["day_change"] == 50.0   # 3850 - 3800 = +50 (from buy price!)
         assert t_item["day_change_pct"] == 1.32
         assert t_item["day_pnl"] == 250.0     # +50 * 5 = +250 (from buy price, not +750 from prev close)
@@ -189,6 +198,8 @@ async def test_portfolio_holdings_analytics_calculation():
         # 2. Verify Portfolio Aggregate Totals
         # Total Invested: 25,000 + 32,000 + 19,000 = 76,000
         assert res["total_invested"] == 76000.0
+        # Total Current Value of Holdings: 28,000 + 30,000 + 19,250 = 77,250
+        assert res["total_current_value"] == 77250.0
 
         # Total Day's P&L for all stocks: +500 (Reliance) + (-1000) (Infy) + 250 (TCS) = -250.0
         assert res["total_day_pnl"] == -250.0
@@ -196,3 +207,58 @@ async def test_portfolio_holdings_analytics_calculation():
         # Total Baseline Value: (2750 * 10) + (1550 * 20) + (3800 * 5) = 27,500 + 31,000 + 19,000 = 77,500
         # Total Day P&L %: (-250 / 77,500) * 100 = -0.32%
         assert res["total_day_pnl_pct"] == -0.32
+
+
+@pytest.mark.asyncio
+async def test_portfolio_zero_pnl_holding():
+    """Verify holding with zero change (no profit, no loss) yields exact 0.0 values."""
+    user_id = uuid.uuid4()
+    user = MagicMock()
+    user.id = user_id
+
+    now = datetime.now(timezone.utc)
+    t = PaperTrade(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        symbol="SBIN.NS",
+        direction="BUY",
+        order_type="MARKET",
+        product_type="INTRADAY",
+        quantity=10,
+        entry_price=Decimal("800.00"),
+        commission=Decimal("0.00"),
+        status="OPEN",
+        opened_at=now,
+    )
+
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [t]
+    mock_db.execute.return_value = mock_result
+
+    quotes_map = {
+        "SBIN.NS": {
+            "symbol": "SBIN.NS",
+            "price": 800.0,
+            "previous_close": 800.0,
+            "change": 0.0,
+            "change_pct": 0.0,
+        }
+    }
+
+    with patch("backend.api.portfolio.market_data_service.fetch_quotes_bulk", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = quotes_map
+        res = await get_portfolio(current_user=user, db=mock_db)
+
+        alloc = res["allocation"]
+        assert len(alloc) == 1
+        item = alloc[0]
+        assert item["unrealized_pnl"] == 0.0
+        assert item["pnl_pct"] == 0.0
+        assert item["price_change_pct"] == 0.0
+        assert item["day_pnl"] == 0.0
+        assert item["day_change"] == 0.0
+        assert item["day_change_pct"] == 0.0
+        assert res["total_day_pnl"] == 0.0
+        assert res["total_day_pnl_pct"] == 0.0
+

@@ -3,7 +3,7 @@ import { paperTradingApi, stocksApi } from '../services/api'
 import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle, Calendar, Eye } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
 import HoldingDetailModal from '../components/HoldingDetailModal'
-import { formatINR, formatNumber2Dec } from '../utils/formatters'
+import { formatINR, formatNumber2Dec, getPnlColor, getPnlClass, getPnlSign } from '../utils/formatters'
 
 export default function PaperTradingPage() {
   const [trades, setTrades] = useState<any[]>([])
@@ -95,20 +95,20 @@ export default function PaperTradingPage() {
         <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Total Realized P&L</div>
-            <div style={{ fontSize: 24, fontWeight: 600 }} className={totalPnL >= 0 ? 'positive' : 'negative'}>
-              {totalPnL >= 0 ? '+' : ''}{formatINR(totalPnL)}
+            <div style={{ fontSize: 24, fontWeight: 600, color: getPnlColor(totalPnL) }} className={`${getPnlClass(totalPnL)} mono`}>
+              {getPnlSign(totalPnL)}{formatINR(totalPnL)}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Day's P&L (Today)</div>
-            <div style={{ fontSize: 24, fontWeight: 600 }} className={totalDayPnL >= 0 ? 'positive' : 'negative'}>
-              {totalDayPnL >= 0 ? '+' : ''}{formatINR(totalDayPnL)}
+            <div style={{ fontSize: 24, fontWeight: 600, color: getPnlColor(totalDayPnL) }} className={`${getPnlClass(totalDayPnL)} mono`}>
+              {getPnlSign(totalDayPnL)}{formatINR(totalDayPnL)}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>Open Unrealized P&L</div>
-            <div style={{ fontSize: 24, fontWeight: 600 }} className={openPnL >= 0 ? 'positive' : 'negative'}>
-              {openPnL >= 0 ? '+' : ''}{formatINR(openPnL)}
+            <div style={{ fontSize: 24, fontWeight: 600, color: getPnlColor(openPnL) }} className={`${getPnlClass(openPnL)} mono`}>
+              {getPnlSign(openPnL)}{formatINR(openPnL)}
             </div>
           </div>
           <div>
@@ -212,19 +212,23 @@ export default function PaperTradingPage() {
                     <td className="mono">{formatINR(t.entry_price)}</td>
                     <td className="mono">{t.current_price ? formatINR(t.current_price) : '—'}</td>
                     
-                    {/* Today's P&L for current stock */}
-                    <td className={isDayProfitable ? 'positive mono' : 'negative mono'}>
-                      <div>{t.day_pnl !== undefined ? `${t.day_pnl >= 0 ? '+' : ''}${formatINR(t.day_pnl)}` : '—'}</div>
-                      <div style={{ fontSize: 11, opacity: 0.85 }}>
-                        {t.day_change_pct !== undefined ? `${t.day_change_pct >= 0 ? '+' : ''}${t.day_change_pct.toFixed(2)}%` : ''}
+                    {/* Today's P&L for current stock (Strict Red / Green / White) */}
+                    <td className={`${getPnlClass(t.day_pnl)} mono`} style={{ whiteSpace: 'nowrap' }}>
+                      <div style={{ color: getPnlColor(t.day_pnl), fontWeight: 600 }}>
+                        {t.day_pnl !== undefined ? `${getPnlSign(t.day_pnl)}${formatINR(t.day_pnl)}` : '—'}
+                      </div>
+                      <div style={{ fontSize: 11, opacity: 0.9, color: getPnlColor(t.day_change_pct) }}>
+                        {t.day_change_pct !== undefined ? `${getPnlSign(t.day_change_pct)}${t.day_change_pct.toFixed(2)}%` : ''}
                       </div>
                     </td>
 
-                    {/* Overall Profit/Loss % of buying */}
-                    <td className={isOverallProfitable ? 'positive mono' : 'negative mono'} style={{ fontWeight: 500 }}>
-                      <div>{t.unrealized_pnl !== undefined ? `${t.unrealized_pnl >= 0 ? '+' : ''}${formatINR(t.unrealized_pnl)}` : '—'}</div>
-                      <div style={{ fontSize: 11, opacity: 0.85 }}>
-                        {t.pnl_pct !== undefined ? `${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(2)}%` : ''}
+                    {/* Overall Profit/Loss % of buying (Strict Red / Green / White) */}
+                    <td className={`${getPnlClass(t.unrealized_pnl)} mono`} style={{ whiteSpace: 'nowrap' }}>
+                      <div style={{ color: getPnlColor(t.unrealized_pnl), fontWeight: 600 }}>
+                        {t.unrealized_pnl !== undefined ? `${getPnlSign(t.unrealized_pnl)}${formatINR(t.unrealized_pnl)}` : '—'}
+                      </div>
+                      <div style={{ fontSize: 11, opacity: 0.9, color: getPnlColor(t.pnl_pct) }}>
+                        {t.pnl_pct !== undefined ? `${getPnlSign(t.pnl_pct)}${t.pnl_pct.toFixed(2)}%` : ''}
                       </div>
                     </td>
 
