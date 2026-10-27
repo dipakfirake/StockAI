@@ -30,7 +30,7 @@ import WatchlistSidebar from './WatchlistSidebar'
 
 export default function NavBar() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, loading: authLoading, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [watchlistOpen, setWatchlistOpen] = useState(false)
@@ -69,6 +69,14 @@ export default function NavBar() {
         </NavLink>
 
         {user && <LiveTicker />}
+
+        {/* FIX: Show subtle 'Connecting…' while auth check is in flight (no cache) */}
+        {!user && authLoading && (
+          <div style={{ marginLeft: 'auto', opacity: 0.45, fontSize: '0.78rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3b82f6', display: 'inline-block', animation: 'pulse 1.4s ease-in-out infinite' }} />
+            Connecting…
+          </div>
+        )}
 
         {user && (
           <div className="nav-actions" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>

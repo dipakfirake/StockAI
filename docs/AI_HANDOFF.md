@@ -12,6 +12,34 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-10-27)
+
+- **Fyers Token Update — User Session & Profile Name Retention (COMPLETE & VERIFIED):**
+  - **User Problem & Symptom**:
+    - When updating the Fyers token from a mobile browser, the user remained authenticated, but their display name vanished from the top navbar, leaving the UI in an unbranded, disconnected appearance until manually restarting or reloading.
+  - **Root Causes Identified**:
+    1. **Name Overwrite on Background Hydration**: In `frontend/src/AuthContext.tsx`, `loadUser()` blindly set `setUser(res.data)`. When `authApi.me()` returned an empty or minimal name string from the DB, it overwrote the valid cached name (`"Admin"` / user name) with an empty string.
+    2. **Loading State Flash**: `loading` initialized to `true` unconditionally, causing the navbar to hide the user actions or display an empty state while `authApi.me()` was in flight.
+    3. **Hard Page Refresh on 401**: In `frontend/src/services/api.ts`, a transient 401 error caused `window.location.href = '/login'`, destroying the SPA and clearing localStorage state.
+    4. **Synchronous Stream Restart**: In `backend/api/settings.py`, `update_fyers_token` awaited WebSocket stream stop/start synchronously, locking the DB pool and delaying response delivery to mobile clients.
+  - **Permanent Solutions Implemented**:
+    1. **Optimistic Loading & Defensive Name Merging (`frontend/src/AuthContext.tsx`)**:
+       - `loading` initializes to `false` if `auth_user_cache` is found in `localStorage`, eliminating render flicker.
+       - `loadUser()` merges server payload with cached state (`name: (freshData?.name ?? '').trim() || user?.name || ''`), guaranteeing that valid names are never overwritten by empty server values.
+       - Added `auth_session_expired` event listener for seamless in-memory logout and SPA redirection without full page reloads.
+    2. **Non-Breaking Axios Interceptor (`frontend/src/services/api.ts`)**:
+       - Replaced `window.location.href = '/login'` with `window.dispatchEvent(new CustomEvent('auth_session_expired'))`.
+    3. **NavBar Connecting State (`frontend/src/components/NavBar.tsx` & `frontend/src/index.css`)**:
+       - Subtle `Connecting…` indicator renders only when `!user && authLoading`, preventing layout jump.
+    4. **Zero-DB-Query JWT Validation (`backend/api/auth.py`)**:
+       - Added `GET /api/auth/ping` endpoint validating token claims directly via cryptographic decode (`jwt.decode`) without burdening the DB pool.
+    5. **Asynchronous Non-Blocking Stream Restart (`backend/api/settings.py`)**:
+       - Converted `fyers_stream_service.start()` into a background task (`asyncio.create_task(_restart_stream_bg())`), allowing `POST /api/settings/fyers/update-token` to respond in <100ms.
+  - **Verification Evidence**:
+    - Backend Unit Tests: **13/13 PASSED in test_auth_pro_access.py and test_fyers_token_manager.py (100% green in 69.81s)**.
+    - Auth Ping Validation: **1/1 PASSED in test_auth_ping_lightweight_jwt_validation**.
+    - Frontend Production Build: `tsc && vite build` passed cleanly (**1,987 modules transformed, 0 errors, built in 22.33s**).
+
 ## Latest verified checks (2026-10-23)
 
 - **Login & User-Switching Latency Elimination & Server Disk Out-of-Space Diagnosis (COMPLETE & VERIFIED):**

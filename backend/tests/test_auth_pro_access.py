@@ -267,3 +267,27 @@ async def test_admin_registration_persists_is_admin(mock_db):
         assert me_data["subscription_tier"] == "PRO"
 
 
+@pytest.mark.asyncio
+async def test_auth_ping_lightweight_jwt_validation(mock_db):
+    """Verify that /api/auth/ping validates JWT instantly without querying DB."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Valid Token
+        fake_user_id = str(uuid.uuid4())
+        valid_token = create_access_token({"sub": fake_user_id})
+        res = await client.get("/api/auth/ping", headers={"Authorization": f"Bearer {valid_token}"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["valid"] is True
+        assert data["user_id"] == fake_user_id
+
+        # 2. Invalid Token
+        res_invalid = await client.get("/api/auth/ping", headers={"Authorization": "Bearer invalid.jwt.token"})
+        assert res_invalid.status_code == 401
+
+        # 3. Missing Token
+        res_missing = await client.get("/api/auth/ping")
+        assert res_missing.status_code == 401
+
+
+

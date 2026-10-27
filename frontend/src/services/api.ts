@@ -58,8 +58,13 @@ api.interceptors.response.use(
       if (!isAuthRoute && localStorage.getItem('auth_token')) {
         localStorage.removeItem('auth_token')
         localStorage.removeItem('auth_user_cache')
-        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-          window.location.href = '/login'
+        // FIX: Dispatch a custom event instead of window.location.href='/login'.
+        // Hard page reload wipes the entire React SPA, destroys NavBar state, and
+        // forces a slow re-download of 700KB+ JS bundles.
+        // The auth_session_expired event is caught by AuthContext.tsx to gracefully
+        // reset user state and navigate via React Router without a page reload.
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('auth_session_expired'))
         }
       }
     }

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
-from backend.core.auth import verify_password, hash_password, create_access_token, get_current_user
+from backend.core.auth import verify_password, hash_password, create_access_token, get_current_user, oauth2_scheme
 from backend.core.auth_security import validate_password_strength, brute_force_protector
 from backend.core.audit_logger import log_security_event
 from backend.models.user import User
@@ -195,4 +195,24 @@ async def upgrade_tier(current_user: User = Depends(get_current_user)):
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         detail="Direct self-upgrade is disabled. Please complete payment checkout or request Admin approval at /api/subscription/request-pro.",
     )
+
+
+@router.get("/ping")
+async def ping_auth(token: str = Depends(oauth2_scheme)):
+    """
+    Ultra-lightweight JWT validation endpoint.
+    Returns minimal user info from token claims without any DB query.
+    Used for silent session heartbeat without burdening the DB pool.
+    """
+    from jose import JWTError, jwt
+    from backend.core.config import settings
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return {"valid": True, "user_id": user_id}
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired or invalid")
+
 

@@ -617,13 +617,17 @@ async def update_fyers_token(
     except Exception as e:
         logger.info(f"Fyers profile ping notice ({e}). Token preserved as active.")
 
-    # 5. Restart WebSocket Tick Stream dynamically with new token
-    try:
-        from backend.services.fyers_stream import fyers_stream_service
-        await fyers_stream_service.stop()
-        await fyers_stream_service.start()
-    except Exception as e:
-        logger.warning(f"Could not dynamically restart fyers_stream_service: {e}")
+    # 5. Restart WebSocket Tick Stream dynamically with new token (non-blocking background task)
+    async def _restart_stream_bg():
+        try:
+            from backend.services.fyers_stream import fyers_stream_service
+            await asyncio.sleep(0.3)
+            await fyers_stream_service.stop()
+            await fyers_stream_service.start()
+        except Exception as e:
+            logger.warning(f"Could not dynamically restart fyers_stream_service in background: {e}")
+
+    asyncio.create_task(_restart_stream_bg())
 
     # 6. Prime the live status cache so immediate frontend tab checks show 🟢 ACTIVE instantly
     try:

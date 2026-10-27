@@ -1981,6 +1981,38 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
   - Frontend production build (`tsc && vite build`): **1,987 modules transformed, 0 errors, built in 21.33s**.
 - **System Response:** Clear diagnosis of server disk exhaustion vs client network waterfall, summary of code optimizations applied, and copy-pasteable server disk recovery commands.
 
+---
+
+### Session Entry 71: Fyers Token Update — User Session & Profile Name Retention
+- **Timestamp:** 2026-10-27 23:05:00 IST (17:35:00 UTC)
+- **User Prompt:**  
+  `"same issue i got at today morjing for updating fyers token i want again to turn on my laptop and also want to restart backend same issue at morjing inupdated fyers and i didnt got logout but name of the user got vanished and nothing happns only frontend sees like that ./goal /plan"`
+- **Agent Technical Actions:**
+  1. **Root Cause Analysis**:
+     - Identified that updating Fyers token causes subsequent background hydration (`loadUser()`) to call `GET /api/auth/me`. For accounts where `user.name` is blank in the DB, `res.data.name` returned `""` and directly overwrote the valid cached name (`"Admin"` / user name) via `setUser(res.data)`.
+     - `loading` state initialized to `true` on mount, causing the navbar to flash or hide authenticated user actions.
+     - Axios interceptor on 401 executed `window.location.href = '/login'`, destroying the React SPA.
+     - `update_fyers_token` awaited WebSocket stream stop/start synchronously, holding DB pool connections.
+  2. **Technical Solutions Implemented**:
+     - **`frontend/src/AuthContext.tsx`**:
+       - Initialized `loading` to `false` when `auth_user_cache` is found in `localStorage`, eliminating render flicker.
+       - Implemented defensive name merging: `name: (freshData?.name ?? '').trim() || user?.name || ''`.
+       - Added `auth_session_expired` event listener for graceful in-memory logout and SPA redirection.
+     - **`frontend/src/services/api.ts`**:
+       - Replaced `window.location.href = '/login'` with `window.dispatchEvent(new CustomEvent('auth_session_expired'))`.
+     - **`frontend/src/components/NavBar.tsx` & `frontend/src/index.css`**:
+       - Added subtle pulsating `Connecting…` indicator when `!user && authLoading`.
+     - **`backend/api/auth.py`**:
+       - Added `GET /api/auth/ping` endpoint validating token claims directly via cryptographic decode (`jwt.decode`) without querying the database.
+     - **`backend/api/settings.py`**:
+       - Converted `fyers_stream_service.start()` into a non-blocking background task (`asyncio.create_task(_restart_stream_bg())`).
+  3. **Verification Evidence**:
+     - Frontend production build (`tsc && vite build`): **1,987 modules transformed, 0 errors, built in 22.33s**.
+     - Backend unit tests (`test_auth_pro_access.py` and `test_fyers_token_manager.py`): **13/13 PASSED (100% green in 69.81s)**.
+     - Auth Ping unit test (`test_auth_ping_lightweight_jwt_validation`): **PASSED**.
+- **System Response:** Complete walkthrough of diagnosed root causes, code remediations applied across frontend and backend, verified test evidence, and copy-pasteable commands for live server deployment.
+
+
 
 
 

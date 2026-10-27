@@ -47,7 +47,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return null;
     }
   });
-  const [loading, setLoading] = useState(true);
+
+  // FIX 1: Only start in loading=true when there is NO cached user.
+  // If a user was cached (most common case after Fyers token update), loading=false
+  // immediately so the NavBar never flickers blank during the background authApi.me()
+  // roundtrip that happens during/after the Fyers token update endpoint.
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      return !localStorage.getItem('auth_user_cache');
+    } catch {
+      return true;
+    }
+  });
   const [preferences, setPreferences] = useState<Record<string, any>>({});
 
   const loadUser = async () => {
@@ -60,15 +71,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     try {
       const res = await authApi.me();
-      setUser(res.data);
+      const freshData: User = res.data;
+
+      // FIX 2: Never overwrite a valid cached display name with an empty/null value
+      // from the server. Admin accounts may have an empty User.name column in the DB,
+      // causing GET /auth/me to return name: "" → NavBar shows nothing.
+      // Merge strategy: prefer the fresh non-empty name; fall back to cached name; last resort empty string.
+      const merged: User = {
+        ...freshData,
+        name: (freshData?.name ?? '').trim() || user?.name || '',
+      };
+      setUser(merged);
       try {
-        localStorage.setItem('auth_user_cache', JSON.stringify(res.data));
+        localStorage.setItem('auth_user_cache', JSON.stringify(merged));
       } catch {
         // Ignore storage write issues
       }
 
       // After confirming the user is valid, load their server-side preferences.
-      // This is done in parallel-safe way — a failure here must never block the app.
+      // This is done in a parallel-safe way — a failure here must never block the app.
       try {
         const prefRes = await preferencesApi.get();
         setPreferences(prefRes.data ?? {});
@@ -78,7 +99,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (err: any) {
       console.warn('Backend user profile check notice:', err?.message || err);
       // ONLY wipe auth_token if the backend explicitly rejected it as 401 Unauthorized.
-      // Retain token and cached user on network disconnects, timeouts, or temporary 502/503 server restarts so users are NEVER booted out.
+      // Retain token and cached user on network disconnects, timeouts, or temporary
+      // 502/503 server restarts (e.g. during Fyers stream restart) so users are NEVER booted out.
       if (err?.response?.status === 401) {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_user_cache');
@@ -91,6 +113,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     loadUser();
+  }, []);
+
+  // FIX 3: Listen for the auth_session_expired custom event dispatched by the Axios
+  // response interceptor on a genuine 401. This replaces window.location.href='/login'
+  // (which causes a hard page reload, wiping the SPA and making the NavBar appear ghost)
+  // with a graceful in-memory state reset and React Router SPA navigation.
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user_cache');
+      setUser(null);
+      setPreferences({});
+      // SPA navigation — no page reload, no bundle re-download, no name flash
+      if (window.location.pathname !== '/login') {
+        window.history.pushState({}, '', '/login');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
+    };
+    window.addEventListener('auth_session_expired', handleSessionExpired);
+    return () => window.removeEventListener('auth_session_expired', handleSessionExpired);
   }, []);
 
   const login = async (token: string, userData?: User) => {
