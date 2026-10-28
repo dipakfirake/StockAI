@@ -67,5 +67,9 @@ class Settings(BaseSettings):
     FYERS_REDIRECT_URI: str = "http://localhost:8000/api/fyers/callback"
     FYERS_ACCESS_TOKEN: str | None = None
 
+    # Google OAuth2 Authentication (100% Free Web Client)
+    GOOGLE_CLIENT_ID: str | None = None
+
+
 
 settings = Settings()

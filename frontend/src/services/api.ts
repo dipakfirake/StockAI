@@ -167,12 +167,19 @@ export const aiApi = {
 
 // ===== Auth endpoints =====
 export const authApi = {
+  getConfig: () => api.get('/auth/config'),
   login: (email: string, password: string) =>
     api.post('/auth/login', new URLSearchParams({ username: email, password }), {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     }),
   register: (email: string, password: string, name: string) =>
     api.post('/auth/register', { email, password, name }),
+  sendRegistrationOtp: (data: { email: string; password: string; name: string }) =>
+    api.post('/auth/send-registration-otp', data),
+  verifyRegistrationOtp: (data: { email: string; otp: string }) =>
+    api.post('/auth/verify-registration-otp', data),
+  googleAuth: (credential: string) =>
+    api.post('/auth/google', { credential }),
   me: () => api.get('/auth/me'),
   upgrade: () => api.post('/auth/upgrade'),
 }

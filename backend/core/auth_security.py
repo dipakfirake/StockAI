@@ -94,12 +94,58 @@ def validate_password_strength(password: str) -> None:
     """
     Enforce industrial password complexity:
     - At least 8 characters
+    - At most 128 characters (prevents bcrypt DoS CPU exhaustion)
     - At least one letter (a-z, A-Z)
     - At least one digit or special character
     """
     if len(password) < 8:
         raise ValueError("Password must be at least 8 characters long.")
+    if len(password) > 128:
+        raise ValueError("Password must not exceed 128 characters.")
     if not re.search(r"[A-Za-z]", password):
         raise ValueError("Password must contain at least one alphabetic character.")
     if not re.search(r"[0-9!@#$%^&*(),.?\":{}|<>]", password):
         raise ValueError("Password must contain at least one digit or special character.")
+
+
+def validate_email_syntax(email: str) -> str:
+    """
+    Validates RFC 5322 compliance, length bounds, and blocks CRLF/control injection.
+    Returns normalized, lowercased, stripped email string.
+    """
+    clean = email.strip()
+    if not clean:
+        raise ValueError("Email address cannot be empty.")
+    
+    # Reject CRLF and control characters to prevent header injection
+    if any(c in clean for c in ("\r", "\n", "\0", "\t")):
+        raise ValueError("Email address contains illegal control characters.")
+
+    if len(clean) < 5:
+        raise ValueError("Email address is too short.")
+    if len(clean) > 254:
+        raise ValueError("Email address must not exceed 254 characters.")
+
+    email_regex = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+    if not email_regex.match(clean):
+        raise ValueError("Please provide a valid email address (e.g., name@domain.com).")
+
+    return clean.lower()
+
+
+def sanitize_display_name(name: str) -> str:
+    """
+    Sanitizes user display names against XSS and control characters.
+    Enforces 2 to 60 character length limits.
+    """
+    clean = re.sub(r"<[^>]*>?", "", name).strip()
+    clean = re.sub(r"\s+", " ", clean)
+
+    if not clean:
+        raise ValueError("Full name cannot be empty.")
+    if len(clean) < 2:
+        raise ValueError("Name must be at least 2 characters long.")
+    if len(clean) > 60:
+        raise ValueError("Name must not exceed 60 characters.")
+
+    return clean

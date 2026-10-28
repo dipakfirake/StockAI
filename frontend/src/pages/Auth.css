@@ -111,3 +111,188 @@
   color: #10b981;
   border: 1px solid rgba(16, 185, 129, 0.3);
 }
+
+/* Google Sign-In & Social Divider */
+.auth-google-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 1.2rem;
+}
+
+.auth-google-custom-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background-color: #1e293b;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: var(--color-text-primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-google-custom-btn:hover {
+  background-color: #334155;
+  border-color: #475569;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin: 1.2rem 0;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.auth-divider span {
+  padding: 0 0.8rem;
+}
+
+/* OTP Verification UI */
+.otp-header {
+  text-align: center;
+  margin-bottom: 1.2rem;
+}
+
+.otp-header p {
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 0.5rem 0 0;
+}
+
+.otp-target-email {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.otp-input-field {
+  text-align: center;
+  letter-spacing: 10px;
+  font-size: 1.6rem !important;
+  font-weight: 800;
+  padding: 0.75rem !important;
+}
+
+.otp-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.otp-resend-btn {
+  background: none;
+  border: none;
+  color: var(--color-accent-blue);
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0;
+}
+
+.otp-resend-btn:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.otp-back-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.otp-back-btn:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+/* =========================================================================
+   LIVE PASSWORD CRITERIA CHECKLIST & REAL-TIME INPUT VALIDATION
+   ========================================================================= */
+.password-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 6px;
+  font-size: 0.76rem;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  transition: color 0.2s ease;
+}
+
+.checklist-item.valid {
+  color: #10b981;
+  font-weight: 500;
+}
+
+.field-hint-error {
+  font-size: 0.74rem;
+  color: #ef4444;
+  margin-top: 4px;
+}
+
+/* =========================================================================
+   5-MINUTE OTP EXPIRY COUNTDOWN BADGE
+   ========================================================================= */
+.otp-expiry-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.otp-expiry-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+  transition: all 0.25s ease;
+}
+
+.otp-expiry-badge.warning {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+}
+
+.otp-expiry-badge.expired {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+

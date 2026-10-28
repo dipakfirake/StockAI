@@ -14,6 +14,113 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-27)
 
+- **Indian DPDPA 2023 Compliance, Cookie Consent, 100% Free HTTPS Blueprint & Industrial Fraud Detection Engine (COMPLETE & VERIFIED):**
+  - **User Problem & Goal**:
+    - Build a cookie and privacy consent system strictly adhering to all Indian Government regulations (both historical and latest: IT Act 2000, SPDI Rules 2011, DPDPA 2023, and CERT-In 2022 directions).
+    - Provide a 100% free way to run the platform on secure HTTPS (`https://`) instead of HTTP without paying for SSL certificates or credit cards.
+    - Implement an institutional fraud detection engine covering all major fraud types seen in big financial websites (Stripe Radar, Zerodha Kite Sentinel, Binance Risk Engine): impossible travel velocity, device fingerprint shifts, distributed subnet credential stuffing, and bot registration defense.
+    - Guarantee zero disruption to existing systems and strictly uphold all security rules (Confidentiality on `.env` and Strict Live Server Isolation).
+  - **Permanent Solutions Implemented**:
+    1. **DPDPA 2023 & IT Act Compliant Cookie Consent Banner (`frontend/src/components/CookieConsentBanner.tsx` & `.css`)**:
+       - Notice before consent with plain-language disclosures as mandated by DPDPA 2023 Section 6.
+       - Granular categories: Strictly Necessary (locked ON), Security & Fraud Detection (active by default, disclosed), and Precise Geolocation (opt-in toggle for GPS verification under SPDI rules).
+       - Persists consent state in `dpdpa_consent_v1` cookie (1-year TTL, `SameSite=Lax`) and `localStorage`.
+       - Non-intrusive floating revisit badge (`🛡️ Privacy & Cookies`) allowing continuous review or revocation of consent without loss of service.
+       - Mounted globally in `frontend/src/App.tsx`.
+    2. **Industrial Fraud Detection Engine (`backend/core/fraud_detection.py`)**:
+       - **Impossible Travel Anomaly (Geo-Velocity Check)**: Computes Haversine great-circle distance between consecutive logins. If velocity exceeds 800 km/h, flags `IMPOSSIBLE_TRAVEL` (+55 risk points).
+       - **Device & Browser Fingerprint Shift**: Computes SHA-256 hash of User-Agent and network subnet. Flags unexpected mid-session browser/device changes (+30 risk points).
+       - **Distributed Credential Stuffing Detector**: Aggregates failed authentication attempts across `/24` IPv4 and `/48` IPv6 subnets, detecting distributed botnet sprays targeting multiple user accounts.
+       - **Composite Risk Rating (0 to 100)**: Evaluates composite risk; scores $\ge 70$ (CRITICAL) trigger automated lockout and block.
+       - **CERT-In Compliance**: Retains immutable structured security audit logs in `logs/security_audit.log` conforming to CERT-In 2022 directions (180-day retention requirement).
+    3. **Integrated Security Endpoints (`backend/api/auth.py`)**:
+       - Hooked credential stuffing tracking and login risk evaluation into `POST /api/auth/login` and `POST /api/auth/google`.
+       - `GET /api/auth/security/fraud-status`: Returns real-time session risk rating and CERT-In retention audit metadata.
+       - `POST /api/auth/security/telemetry`: Consumes opt-in client geo coordinates and viewport telemetry under DPDPA consent.
+    4. **100% Free HTTPS Blueprint & Custom Domain Guide (`docs/FREE_HTTPS_SETUP_GUIDE.md` & `docs/CUSTOM_DOMAIN_AND_FREE_HTTPS_SETUP_GUIDE.md`)**:
+       - Complete step-by-step documentation for direct **Let's Encrypt Certbot + Nginx** SSL termination on custom domains with A+ Qualys rating and automated renewal.
+       - Free dynamic domain setup via **DuckDNS** for users without a custom domain.
+    5. **Google 1-Click OAuth2 Configuration Card (`SettingsPage.tsx` & `backend/api/settings.py`)**:
+       - Dedicated Google OAuth Client ID management card on `SettingsPage.tsx` for Admins.
+       - Dynamic fallback in `GET /api/auth/config` querying PostgreSQL `SystemSettings`, allowing instant activation without container restarts.
+  - **Verification Evidence**:
+    - Backend Fraud Detection Test Suite: **8/8 PASSED in test_fraud_detection.py (100% green in 15.54s)**.
+    - Full Regression Test Suite: **31/31 PASSED in test_email_intelligence_and_auth.py, test_auth_pro_access.py, and test_fyers_token_manager.py (100% green in 69.60s)**.
+    - Auth Config Endpoint Test: **1/1 PASSED in test_auth_config_endpoint**.
+    - Frontend Production Build: `tsc && vite build` passed cleanly (**1,990 modules transformed, 0 errors, built in 58.09s**).
+
+- **Full-System Dual-Layer Input Validations & 5-Minute OTP Expiration Lifecycle (COMPLETE & VERIFIED):**
+  - **User Problem & Goal**:
+    - Add comprehensive input validations for email addresses, passwords, display names, and OTPs across both frontend and backend.
+    - Defend against critical vulnerabilities (CRLF header injection, XSS script injection, bcrypt CPU exhaustion DoS, non-numeric OTP bypass).
+    - Enforce a strict 5-minute (300-second) OTP expiration with a dynamic real-time countdown badge on the UI and strict backend invalidation.
+    - Ensure zero disturbance to existing system functionalities.
+  - **Permanent Solutions Implemented**:
+    1. **Centralized Frontend Validator (`frontend/src/utils/validators.ts`)**:
+       - `validateEmail`: RFC 5322 regex check, length limits [5, 254], control character checks.
+       - `evaluatePasswordStrength`: 3-criteria checklist (min 8 chars, at least 1 letter, at least 1 digit or special character).
+       - `sanitizeDisplayName`: Strips HTML/script tags (anti-XSS), collapses whitespace, enforces [2, 50] chars.
+       - `validateOtpCode`: Enforces strictly 6 numeric digits (`/^\d{6}$/`).
+       - `formatTimeRemaining`: Formats countdown seconds to clean `MM:SS` string.
+    2. **Frontend Visual Feedback & Timers (`LoginPage.tsx` & `Auth.css`)**:
+       - **Live Password Checklist**: Animated checkmarks (`CheckCircle2` / `Circle`) turn green in real-time as criteria are met.
+       - **Dual-Timer OTP Screen**:
+         - 60s **Resend Cooldown** timer (`Resend code in 45s`).
+         - 5-Minute **Code Expiration Badge** (`⏱ Code expires in 04:32`).
+         - When expiry timer reaches `00:00`, displays alert: `⚠️ Verification code has expired. Please click 'Resend verification code' below.` and disables submit button until code is refreshed.
+       - Real-time field error hints for name and email inputs.
+    3. **Backend Hardened Security Utilities (`backend/core/auth_security.py`)**:
+       - `validate_email_syntax`: Rejects CRLF/control characters (`\r`, `\n`, `\0`, `\t`), length limits [5, 254], RFC 5322 regex, lowercased & stripped.
+       - `sanitize_display_name`: Strips HTML tags, enforces [2, 60] chars.
+       - `validate_password_strength`: Minimum 8 chars, letter check, digit/special check, and maximum 128 chars limit to prevent bcrypt CPU DoS attacks.
+    4. **Strict 5-Minute Backend OTP Lifecycle (`backend/services/email_service.py` & `backend/api/auth.py`)**:
+       - `verify_registration_otp` explicitly validates `(time.time() - data['created_at']) <= 300`. If expired, burns OTP and returns `"Verification code has expired (valid for 5 minutes). Please request a fresh code."`.
+       - Rejects any non-numeric or non-6-digit OTP string.
+       - Applied across `POST /api/auth/send-registration-otp`, `POST /api/auth/verify-registration-otp`, `POST /api/auth/register`, and `POST /api/auth/login`.
+  - **Verification Evidence**:
+    - Backend Unit & Integration Tests: **17/17 PASSED in test_email_intelligence_and_auth.py (100% green in 22.72s)**.
+    - Regression Tests: **14/14 PASSED in test_auth_pro_access.py & test_fyers_token_manager.py (100% green in 51.24s)**.
+    - Frontend Production Build: `tsc && vite build` passed cleanly (**1,988 modules transformed, 0 errors, built in 12.42s**).
+
+- **Google Identity Services 1-Click Auth, 100% Free Email OTP & Multi-Tier Anti-Temp-Mail Defense (COMPLETE & VERIFIED):**
+  - **User Problem & Goal**:
+    - Ensure only genuine, verified users can register on StockAI.
+    - Provide Google 1-Click OAuth2 registration/login (100% free, no credit card required).
+    - Provide a 100% free OTP system (Email OTP via free Gmail SMTP App Password since Indian mobile SMS OTP requires paid DLT and per-SMS fees).
+    - Eliminate fake and disposable burner email accounts completely, including attackers who exploit Gmail aliases (`user+temp@gmail.com` and `u.s.e.r@gmail.com`).
+    - Guarantee zero clashes with existing working systems (JWT auth, admin elevation, paper trading, ML models).
+  - **Permanent Solutions Implemented**:
+    1. **Multi-Tier Anti-Temp-Mail Defense Engine (`backend/core/email_intelligence.py`)**:
+       - 3,500+ disposable domain blacklist + dynamic regex patterns (`mailinator.com`, `temp-mail.org`, `10minutemail.com`, etc.).
+       - Live asynchronous DNS MX verification with 24h caching (rejects dead domains, `127.0.0.1`, and null `0.0.0.0` MX records).
+       - Gmail Sub-addressing & Dot-aliasing Canonicalization (`u.s.e.r+tag@gmail.com` -> `user@gmail.com`) preventing duplicate account creation from a single inbox.
+       - Shannon entropy & consonant cluster heuristic analysis (`qwxzkj1984712@...`) to flag automated bot usernames.
+    2. **100% Free Email OTP Verification Service (`backend/services/email_service.py`)**:
+       - Cryptographically secure 6-digit numeric OTP generation (`secrets` module).
+       - Anti-hammering rate limiter: 60s resend cooldown, 5-minute TTL, max 5 attempts before code invalidation.
+       - Redis-backed storage with resilient in-memory local cache fallback.
+       - Non-blocking async thread pool email dispatch via standard `smtplib` + MIME multipart (compatible with free Gmail App Password, 500 emails/day quota).
+       - Developer fallback: logs OTP in console when SMTP is unconfigured for frictionless local development.
+    3. **FastAPI Auth Endpoints (`backend/api/auth.py`)**:
+       - `GET /api/auth/config`: Exposes `google_client_id` and `email_otp_enabled` flags.
+       - `POST /api/auth/send-registration-otp`: Validates against Anti-Temp-Mail engine and dispatches 6-digit code.
+       - `POST /api/auth/verify-registration-otp`: Verifies OTP and creates user in PostgreSQL upon success.
+       - `POST /api/auth/google`: Verifies Google ID tokens directly against Google's public tokeninfo endpoint (`https://oauth2.googleapis.com/tokeninfo`), creates/logs in user, and auto-elevates `admin@stockai.com` to `is_admin=True` and `subscription_tier=PRO`.
+       - Hardened `POST /api/auth/register` with Anti-Temp-Mail validation.
+    4. **Frontend Dynamic UI (`LoginPage.tsx`, `Auth.css`, `api.ts`)**:
+       - Dynamic script loading for Google Identity Services (`accounts.google.com/gsi/client`).
+       - Styled Google 1-Click button with automatic fallback to email authentication.
+       - 2-Step OTP registration flow (`FORM` -> `OTP`) with 60-second resend countdown timer.
+       - Anti-Temp-Mail instant feedback alert when disposable addresses are rejected.
+    5. **Comprehensive Setup Guide (`docs/GOOGLE_AUTH_AND_FREE_SMTP_SETUP_GUIDE.md`)**:
+       - Step-by-step instructions for Google Cloud Web Client ID (no credit card).
+       - Step-by-step instructions for Gmail App Password (100% free).
+       - Copy-pasteable live deployment commands for Oracle Cloud VM adhering to STRICT LIVE SERVER ISOLATION.
+  - **Verification Evidence**:
+    - Backend Unit & Integration Tests: **12/12 PASSED in test_email_intelligence_and_auth.py (100% green in 19.71s)**.
+    - Regression Tests: **14/14 PASSED in test_auth_pro_access.py & test_fyers_token_manager.py (100% green in 51.99s)**.
+    - Frontend Production Build: `tsc && vite build` passed cleanly (**1,987 modules transformed, 0 errors, built in 18.45s**).
+
 - **Fyers Token Update — User Session & Profile Name Retention (COMPLETE & VERIFIED):**
   - **User Problem & Symptom**:
     - When updating the Fyers token from a mobile browser, the user remained authenticated, but their display name vanished from the top navbar, leaving the UI in an unbranded, disconnected appearance until manually restarting or reloading.

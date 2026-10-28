@@ -34,7 +34,8 @@ DEFAULT_SETTINGS = [
     {"key": "enable_trading", "value": "true", "value_type": "boolean", "description": "Global kill switch for trading"},
     {"key": "enable_auto_trader", "value": "false", "value_type": "boolean", "description": "Master toggle switch for AI Auto-Trader daemon"},
     {"key": "fyers_client_id", "value": "", "value_type": "string", "description": "Fyers App Client ID"},
-    {"key": "fyers_access_token", "value": "", "value_type": "string", "description": "Fyers Access Token (Update Daily)"}
+    {"key": "fyers_access_token", "value": "", "value_type": "string", "description": "Fyers Access Token (Update Daily)"},
+    {"key": "google_client_id", "value": "", "value_type": "string", "description": "Google OAuth2 Web Client ID"}
 ]
 
 @router.get("/")
@@ -87,9 +88,19 @@ async def update_settings(
     Strictly restricted to Platform Administrators.
     """
     existing = {item.key: item for item in (await db.execute(select(SystemSettings))).scalars().all()}
-    unknown = set(request.values) - set(existing)
-    if unknown:
-        raise HTTPException(status_code=400, detail=f"Unknown settings: {', '.join(sorted(unknown))}")
+    
+    # Auto-seed any missing defaults
+    default_map = {d["key"]: d for d in DEFAULT_SETTINGS}
+    missing_keys = set(request.values) - set(existing)
+    for mk in list(missing_keys):
+        if mk in default_map:
+            new_item = SystemSettings(**default_map[mk])
+            db.add(new_item)
+            existing[mk] = new_item
+            missing_keys.remove(mk)
+
+    if missing_keys:
+        raise HTTPException(status_code=400, detail=f"Unknown settings: {', '.join(sorted(missing_keys))}")
 
     for key, value in request.values.items():
         item = existing[key]

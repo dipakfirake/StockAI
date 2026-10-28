@@ -91,6 +91,22 @@ When an algorithmic stock trading and research system is hosted on the public in
   ```
   Guarantees internal database connection strings, paths, and library versions are never disclosed to clients.
 
+### 2.8 Indian Government Compliance & Industrial Fraud Detection Engine (`backend/core/fraud_detection.py`)
+- **DPDPA 2023 & IT Act 2000 (SPDI Rules 2011) Compliance:**
+  - Mandatory transparent notice before data collection.
+  - Granular consent banner (`frontend/src/components/CookieConsentBanner.tsx`) providing separate toggles for Essential, Security/Fraud Detection, and Precise Geolocation (GPS).
+  - Ongoing right to modify or revoke consent without disabling core features.
+  - 1-year persistent consent cookie `dpdpa_consent_v1` with `SameSite=Lax`.
+- **CERT-In Cyber Security Directions (April 2022):**
+  - Direction 70B mandate: 180-day retention of all ICT audit trails within Indian jurisdiction.
+  - Structured audit trail (`logs/security_audit.log`) with UTC/IST timestamps, IPv4/IPv6 addresses, trace IDs, and security event categorization.
+- **Big-Fintech Industrial Fraud Detection Models:**
+  - **Impossible Travel Anomaly (Haversine Geo-Velocity):** Calculates great-circle distance between consecutive logins. Velocity exceeding 800 km/h is flagged as an account takeover / proxy bot anomaly (+55 risk points).
+  - **Device Fingerprint Shift:** Computes cryptographic SHA-256 hash of User-Agent and network subnet; flags unauthorized mid-session browser or device mutations (+30 risk points).
+  - **Distributed Credential Stuffing:** Aggregates failed authentication attempts across IP subnets (`/24` IPv4 and `/48` IPv6). If $\ge 4$ unique accounts are targeted from the same subnet within 10 minutes, triggers a distributed stuffing alert.
+  - **Composite Risk Rating (0 to 100):** Requests scoring $\ge 70$ (CRITICAL) are automatically blocked with a CERT-In incident log emitted.
+
+
 ---
 
 ## 3. Verification & Test Evidence

@@ -2012,28 +2012,146 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - Auth Ping unit test (`test_auth_ping_lightweight_jwt_validation`): **PASSED**.
 - **System Response:** Complete walkthrough of diagnosed root causes, code remediations applied across frontend and backend, verified test evidence, and copy-pasteable commands for live server deployment.
 
+---
 
+### Session Entry 72: Google 1-Click Auth, 100% Free Email OTP & Multi-Tier Anti-Temp-Mail Defense
+- **Timestamp:** 2026-10-27 23:45:00 IST (18:15:00 UTC)
+- **User Prompt:**  
+  `"niw i want a system in which google auth also want to be used for registering users it is because of that i ant only real isers to use this system not any other and also ii ant otp system to be sent on mobile or on mail id all for free and if mobile otp is not free then go with mail otp mased system and also one thing that i dont want that any temo mail sites mail want to be used to be as users so find one good solution and tell me and we will inplement for it that temo mail also has gmail mails so how you can find it make a intelligent system for it . /goal /plan and guide me how to make keys and all or it and i want all 100% free. nd it will not want to clash with other working systems and models."`
+- **Agent Technical Actions:**
+  1. **Root Cause Analysis & Architecture**:
+     - Evaluated SMS vs Email OTP costs: Under Indian TRAI regulations, transactional SMS requires mandatory commercial DLT entity/header registration and per-SMS gateways. In contrast, standard SMTP via personal Gmail App Password provides 500 emails/day completely free with zero credit card requirements.
+     - Uncovered the "Gmail Temp Mail" mechanism: Disposable burner services exploit Gmail through sub-addressing (`user+temp1@gmail.com`) and dot-aliasing (`u.s.e.r@gmail.com`). Built canonical normalization mapping all aliases to the root address `user@gmail.com`.
+     - Architected multi-tier anti-temp-mail intelligence combining static blacklist, dynamic regex, live DNS MX validation, Gmail canonicalization, and Shannon entropy heuristics.
+  2. **Technical Solutions Implemented**:
+     - **`backend/core/email_intelligence.py`**:
+       - 3,500+ disposable domain blacklist + dynamic regex patterns (`mailinator.com`, `temp-mail.org`, `10minutemail.com`, etc.).
+       - Asynchronous DNS MX resolver with 24-hour in-memory caching rejecting dead/null/localhost MX servers.
+       - Canonical email normalizer stripping Gmail `+tags` and dots (`u.s.e.r+1@gmail.com` -> `user@gmail.com`).
+       - Shannon entropy and consonant cluster analysis (`analyze_entropy_and_heuristics`) flagging bot patterns (`qwxzkj1984712@...`).
+     - **`backend/services/email_service.py`**:
+       - Cryptographically secure 6-digit numeric OTP generator (`secrets` module).
+       - Anti-hammering rate limiter: 60s resend cooldown, 5-minute TTL, max 5 attempts before burn.
+       - Redis-backed storage with resilient in-memory local cache fallback.
+       - Non-blocking async thread pool email dispatch via `smtplib` + MIME multipart (compatible with free Gmail App Password).
+       - Dev console fallback logging OTP for frictionless local development when SMTP is unconfigured.
+     - **`backend/core/config.py` & `backend/api/settings.py`**:
+       - Added `GOOGLE_CLIENT_ID` configuration with dynamic DB settings override and non-admin redaction.
+     - **`backend/api/auth.py`**:
+       - `GET /api/auth/config`: Returns `google_client_id` and `email_otp_enabled` flags.
+       - `POST /api/auth/send-registration-otp`: Validates against Anti-Temp-Mail engine and dispatches 6-digit code.
+       - `POST /api/auth/verify-registration-otp`: Verifies OTP and creates user in PostgreSQL upon success.
+       - `POST /api/auth/google`: Verifies Google ID tokens directly against Google's public tokeninfo endpoint (`https://oauth2.googleapis.com/tokeninfo`), creates/logs in user, and auto-elevates `admin@stockai.com` to `is_admin=True` and `subscription_tier=PRO`.
+       - Hardened `POST /api/auth/register` with Anti-Temp-Mail validation.
+     - **`frontend/src/services/api.ts`**:
+       - Added `authApi.getConfig()`, `sendRegistrationOtp()`, `verifyRegistrationOtp()`, and `googleAuth()`.
+     - **`frontend/src/pages/Auth.css` & `frontend/src/pages/LoginPage.tsx`**:
+       - Dynamic script loading for Google Identity Services (`accounts.google.com/gsi/client`).
+       - Styled Google 1-Click button with automatic fallback to email authentication.
+       - 2-Step OTP registration flow (`FORM` -> `OTP`) with 60-second resend countdown timer.
+       - Anti-Temp-Mail instant feedback alert when disposable addresses are rejected.
+     - **`backend/tests/test_email_intelligence_and_auth.py`**:
+       - Built 12 comprehensive unit and integration tests covering temp mail blocking, Gmail normalization, bot entropy detection, OTP lifecycle, and Google auth.
+     - **`docs/GOOGLE_AUTH_AND_FREE_SMTP_SETUP_GUIDE.md`**:
+       - Authored comprehensive step-by-step setup guide for Google Cloud Web Client ID (no credit card) and Gmail App Password (100% free), including copy-pasteable commands for live Oracle Cloud VM deployment.
+  3. **Verification Evidence**:
+     - Backend Unit & Integration Tests: **12/12 PASSED in test_email_intelligence_and_auth.py (100% green in 19.71s)**.
+     - Regression Tests: **14/14 PASSED in test_auth_pro_access.py & test_fyers_token_manager.py (100% green in 51.99s)**.
+     - Frontend Production Build: `tsc && vite build` passed cleanly (**1,987 modules transformed, 0 errors, built in 18.45s**).
+- **System Response:** Complete architecture explanation, walkthrough of code changes, verified test evidence, comprehensive setup guide for free keys, and live server deployment instructions. Concluded with `<!-- GOAL_COMPLETE -->`.
 
+---
 
+### Session Entry 73: Full-System Dual-Layer Input Validations & 5-Minute OTP Expiration Lifecycle
+- **Timestamp:** 2026-10-28 00:05:00 IST (18:35:00 UTC)
+- **User Prompt:**  
+  `"and also add validations to mail ids and passwords and also in our full system where validations are required and at both ends at frontend and also at backends and also whereever needed for avoiding vulnerabilities from one side . and o this all without disturhing the lthe system working. and also otp has expiry time also like next 5 minutes and aviid higs related to this system making by you. /goal /plan"`
+- **Agent Technical Actions:**
+  1. **Architecture & Vulnerability Analysis**:
+     - Analyzed vulnerability threat vectors:
+       - Email Header/CRLF Injection: Carriage returns/newlines in email fields exploiting MTA mail headers.
+       - Password Bcrypt CPU Exhaustion (DoS): Attacker submitting megabyte-long password strings to stall bcrypt workers.
+       - XSS Script Injection: Script tags or unescaped HTML characters in display names.
+       - Non-Numeric OTP Bypass: Submitting alphanumeric or malformed strings.
+       - Indefinite OTP Lifespan: Stale OTPs residing in cache without explicit timestamp invalidation.
+  2. **Technical Solutions Implemented**:
+     - **`frontend/src/utils/validators.ts`**:
+       - Centralized validator utility for `validateEmail`, `evaluatePasswordStrength`, `sanitizeDisplayName`, `validateOtpCode`, and `formatTimeRemaining`.
+     - **`frontend/src/pages/LoginPage.tsx` & `frontend/src/pages/Auth.css`**:
+       - Real-time password criteria checklist with live animated checkmarks (8+ chars, letter, number/symbol).
+       - Dual-Timer OTP Screen: 60-second resend cooldown timer + dynamic 5-minute (300s) expiry countdown badge (`⏱ Code expires in 04:32`).
+       - Expiry lockout: When `otpExpiresIn <= 0`, displays `⚠️ Verification code expired` and disables verification submit button until refreshed.
+       - Real-time field error hints for name and email inputs.
+     - **`backend/core/auth_security.py`**:
+       - `validate_email_syntax`: Length [5, 254], RFC 5322 regex, rejects control characters (`\r`, `\n`, `\0`, `\t`), lowercased & stripped.
+       - `sanitize_display_name`: Strips HTML tags, collapses whitespace, enforces [2, 60] chars.
+       - `validate_password_strength`: Minimum 8 chars, letter requirement, digit/symbol requirement, and capped at 128 chars to eliminate bcrypt CPU DoS attacks.
+     - **`backend/services/email_service.py` & `backend/api/auth.py`**:
+       - Explicitly checks `(time.time() - data['created_at']) <= 300` in `verify_registration_otp`. If expired, burns OTP and returns `"Verification code has expired (valid for 5 minutes). Please request a fresh code."`.
+       - Rejects non-numeric or non-6-digit OTP codes.
+       - Hardened endpoints: `POST /api/auth/send-registration-otp`, `POST /api/auth/verify-registration-otp`, `POST /api/auth/register`, and `POST /api/auth/login`.
+     - **`backend/tests/test_email_intelligence_and_auth.py`**:
+       - Added 5 new unit tests covering email syntax, name sanitization, password DoS protection, strict 5-minute OTP expiry, and non-numeric OTP rejection. Total 17 tests.
+  3. **Verification Evidence**:
+     - Backend Unit & Integration Tests: **17/17 PASSED in test_email_intelligence_and_auth.py (100% green in 22.72s)**.
+     - Regression Tests: **14/14 PASSED in test_auth_pro_access.py & test_fyers_token_manager.py (100% green in 51.24s)**.
+     - Frontend Production Build: `tsc && vite build` passed cleanly (**1,988 modules transformed, 0 errors, built in 12.42s**).
+- **System Response:** Complete walkthrough of dual-layer validation architecture, real-time visual checklist, 5-minute OTP countdown badge, and vulnerability defenses with verified test logs. Concluded with `<!-- GOAL_COMPLETE -->`.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+### Session Entry 34
+- **Timestamp:** 2026-10-28 00:35:00 IST (19:05:00 UTC)
+- **User Prompt:**
+  `"you an go for it but stay in all the rukes as per india  government  old also and new also and updated also till now . make a cookie and can is there any free way that we can make our website work in https instead of http. /goal /plan and also make fraud detection system like these frauds nit come in our system and also  check ll fraud tyoes from big websites that can haplen and add that in fraud detection system."`
+- **Agent Technical Actions:**
+  1. **Legal & Regulatory Research & Synthesis**:
+     - *DPDPA 2023 (Digital Personal Data Protection Act)*: Mandates transparent notice, purpose specification, granular opt-in consent for non-essential tracking, and accessible consent revocation.
+     - *IT Act 2000 & SPDI Rules 2011*: Categorizes passwords, financial information, and precise GPS location as Sensitive Personal Data or Information (SPDI) requiring explicit prior consent.
+     - *CERT-In Cyber Security Directions (April 2022)*: Mandates 180-day retention of ICT system logs, IPv4/IPv6 records, user IDs, and timestamps synchronized to NTP within Indian jurisdiction.
+     - *SEBI CSCRF 2024*: Financial platforms must monitor for anomalous logins, impossible travel, and unauthorized sessions.
+  2. **Architectural Design & Planning**:
+     - Created detailed plan artifact `india_compliance_cookie_consent_free_https_and_fraud_detection_plan.md`.
+  3. **Frontend Implementation**:
+     - Created `frontend/src/components/CookieConsentBanner.css`: Responsive, dark-mode glassmorphic banner with toggles, badges, and mobile styling.
+     - Created `frontend/src/components/CookieConsentBanner.tsx`:
+       - Granular toggles: Strictly Necessary (locked ON), Security & Fraud Detection (active by default, disclosed), and Precise Geolocation (opt-in toggle).
+       - Persists consent in `dpdpa_consent_v1` cookie (1-year TTL, `SameSite=Lax`) and `localStorage`.
+       - Non-intrusive floating revisit badge (`🛡️ Privacy & Cookies`) for DPDPA ongoing consent modification.
+     - Mounted in `frontend/src/App.tsx`.
+  4. **Backend Implementation**:
+     - Created `backend/core/fraud_detection.py`:
+       - *Impossible Travel (Haversine Geo-Velocity)*: Great-circle distance / time delta. Velocity > 800 km/h triggers `IMPOSSIBLE_TRAVEL` anomaly (+55 risk points).
+       - *Device & Browser Fingerprint Shift*: SHA-256 hash of User-Agent and subnet. Flags mid-session device mutation (+30 risk points).
+       - *Distributed Subnet Credential Stuffing*: Aggregates failed authentication attempts across `/24` IPv4 and `/48` IPv6 subnets; flags distributed botnet sprays.
+       - *Composite Risk Rating (0 to 100)*: Scores $\ge 70$ (CRITICAL) trigger automated lockout and CERT-In compliant audit log.
+     - Updated `backend/api/auth.py`:
+       - Integrated credential stuffing and login risk evaluation into `POST /api/auth/login` and `POST /api/auth/google`.
+       - Added `GET /api/auth/security/fraud-status` returning session risk and CERT-In 180-day retention metadata.
+       - Added `POST /api/auth/security/telemetry` for opt-in continuous calibration.
+     - Added synchronous helper `check_email_registration_risk` in `backend/core/email_intelligence.py`.
+  5. **100% Free HTTPS Blueprint**:
+     - Created `docs/FREE_HTTPS_SETUP_GUIDE.md`:
+       - Option 1 (Recommended): Cloudflare Tunnel (zero open ports, automated wildcard SSL, DDoS protection).
+       - Option 2: Let's Encrypt Certbot + Nginx reverse proxy (100% free automated 90-day certificates).
+       - Option 3: Free Dynamic DNS (DuckDNS) for users without a domain.
+  6. **Verification Evidence**:
+     - Backend Fraud Detection Unit & Integration Tests: **8/8 PASSED in test_fraud_detection.py (100% green in 15.54s)**.
+     - Full Regression Test Suite: **31/31 PASSED in test_email_intelligence_and_auth.py, test_auth_pro_access.py, and test_fyers_token_manager.py (100% green in 69.60s)**.
+     - Frontend Production Build: `tsc && vite build` passed cleanly (**1,990 modules transformed, 0 errors, built in 19.08s**).
+### Session Entry 35: DuckDNS Custom Domain, Nginx Free HTTPS Setup & Server Synchronization
+- **Timestamp:** 2026-10-28 16:30:00 IST (11:00:00 UTC)
+- **User Prompt:**
+  `"first give me commands for push to github and ten pull to server"`
+- **Agent Technical Actions:**
+  1. **Evaluated Git Status & Local Working Tree**:
+     - Verified working tree changes across backend, frontend, documentation, and tests (`backend/api/auth.py`, `backend/core/fraud_detection.py`, `frontend/src/components/CookieConsentBanner.tsx`, `docs/CUSTOM_DOMAIN_AND_FREE_HTTPS_SETUP_GUIDE.md`).
+     - Confirmed `.env` is strictly excluded from version control under `.gitignore`.
+  2. **Domain & SSL Architecture**:
+     - Domain configured: `stockai-live.duckdns.org` pointing to Oracle Cloud VM IP `92.4.71.210`.
+     - Solved Google OAuth restriction: Google requires a public TLD for Authorized JavaScript Origins (e.g. `https://stockai-live.duckdns.org`).
+     - Prepared Oracle Linux compatible package commands for Nginx and Certbot (using EPEL repository `oracle-epel-release-el8`/`el9`).
+  3. **Prepared Deployment Commands**:
+     - Generated local PowerShell commands to stage, commit, and push to GitHub `origin main`.
+     - Generated Oracle Cloud VM commands to pull updates and restart backend container.
+- **System Response:** Provided precise, copy-pasteable Git push commands for local PowerShell and Git pull/restart commands for the Oracle Cloud server console.
 
 
