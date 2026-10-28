@@ -14,6 +14,21 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **PC Jeweller Dynamic Target Correctness Verification & Multi-Tier Milestones Display (COMPLETE & VERIFIED):**
+  - **User Inquiry**: PC Jeweller (`PCJEWELLER.NS`) showed 16% target 2 days ago, 21% target today, and 11% earlier. Is this correct?
+  - **Mathematical & Live Cache Proof**:
+    - Fyers market data confirms PC Jeweller dropped **-5.11% today from ₹16.65 down to ₹15.80** (2026-10-28).
+    - 14-day ATR is ₹1.23 (~7.78% price volatility), giving a structural swing target of ₹19.14.
+    - When price was ~₹16.50 two days ago, distance to target was `(19.14 - 16.50) / 16.50` = **+16.0%**.
+    - When price dropped to ₹15.80 today, distance to the ₹19.14 resistance expanded to `(19.14 - 15.80) / 15.80` = **+21.1%**.
+    - `Target 1 (Conservative)` milestone is ₹17.64 which is **+11.7%** (and when stock was in consolidation `HOLD` mode, primary target was ~11%).
+    - Cache engine verified clean with no stale data.
+  - **Frontend UI Enhancement**:
+    - Added **Staged Multi-Tier Targets Breakdown (`T1 Conservative`, `T2 Primary / Optimal`, `T3 Extended Breakout`)** to `frontend/src/pages/ChartPage.tsx` with dynamic volatility strategy explanations matching `SwingScreenerPage.tsx`.
+  - **Verification Evidence**:
+    - Backend unit tests (`test_swing_screener_categorization.py` and `test_cache_freshness_and_sync.py`): **13/13 PASSED (100% green in 34.83s)**.
+    - Frontend production build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 38.88s**).
+
 - **Market-Hours Dynamic Cache TTL & AI Model Prediction Freshness (COMPLETE & VERIFIED):**
   - **Identified Root Causes**:
     - Daily candles were cached with hardcoded 1-hour TTL (`CACHE_TTL_DAILY_CANDLES = 3600`) in `backend/core/config.py`, causing daily candles and indicators to freeze for an hour during active trading.

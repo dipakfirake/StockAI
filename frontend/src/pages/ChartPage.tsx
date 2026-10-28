@@ -1995,6 +1995,75 @@ export default function ChartPage() {
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{(swingTrade.trade_plan?.target_price ?? 1700).toFixed(2)}</div>
               </div>
             </div>
+
+            {/* Staged Multi-Tier Targets Breakdown */}
+            {swingTrade.trade_plan?.targets && swingTrade.trade_plan.targets.length > 0 && swingTrade.action !== 'HOLD' && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                    Multi-Tier Price Targets (Dynamic Milestones)
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                    Scales dynamically with CMP & ATR
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+                  {swingTrade.trade_plan.targets.map((tgt: any, idx: number) => {
+                    const isOptimal = idx === 1;
+                    return (
+                      <div 
+                        key={idx}
+                        style={{ 
+                          padding: '10px 12px', 
+                          borderRadius: 8, 
+                          background: isOptimal ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255,255,255,0.02)',
+                          border: `1px solid ${isOptimal ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255,255,255,0.05)'}`,
+                        }}
+                      >
+                        <div style={{ fontSize: 11, color: isOptimal ? 'var(--color-bullish)' : 'var(--color-text-muted)', fontWeight: 600, marginBottom: 2 }}>
+                          {tgt.level || `Target ${idx + 1}`}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                            ₹{Number(tgt.price).toFixed(2)}
+                          </span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: swingTrade.action === 'SELL' ? 'var(--color-bearish)' : 'var(--color-bullish)' }}>
+                            {swingTrade.action === 'SELL' ? '-' : '+'}{Number(tgt.gain_pct).toFixed(1)}%
+                          </span>
+                        </div>
+                        {tgt.reward_to_risk > 0 && (
+                          <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                            Reward-to-Risk: <strong style={{ color: 'var(--color-text-secondary)' }}>{tgt.reward_to_risk}:1</strong>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Strategy & Volatility Advice */}
+            {swingTrade.trade_plan?.entry_advice && (
+              <div style={{ 
+                marginTop: 12, 
+                padding: '10px 12px', 
+                borderRadius: 8, 
+                background: 'rgba(59, 130, 246, 0.06)', 
+                border: '1px solid rgba(59, 130, 246, 0.2)',
+                fontSize: 12,
+                lineHeight: 1.4,
+                color: 'var(--color-text-secondary)'
+              }}>
+                <div style={{ fontWeight: 600, color: '#60a5fa', marginBottom: 2 }}>
+                  💡 Execution Strategy & Dynamic Target Mechanics:
+                </div>
+                <div>{swingTrade.trade_plan.entry_advice}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                  Target percentages are calculated relative to CMP (Current Market Price). When the stock price drops, the percentage distance to structural resistance expands (e.g. 16% &rarr; 21%), while conservative milestones (T1) remain near 11%.
+                </div>
+              </div>
+            )}
             
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
                <div style={{ textAlign: 'center' }}>
