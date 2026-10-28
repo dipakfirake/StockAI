@@ -364,12 +364,12 @@ async def test_send_and_verify_registration_otp_flow(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_google_auth_new_user_and_admin_elevation(mock_db):
-    """Verify Google OAuth registers new user and auto-elevates admin@stockai.com."""
+async def test_google_auth_registers_secure_default_user(mock_db):
+    """Verify Google OAuth registers new user with default FREE tier and is_admin=False."""
     mock_google_user_payload = {
-        "email": "admin@stockai.com",
+        "email": "new.trader@gmail.com",
         "email_verified": "true",
-        "name": "Super Admin",
+        "name": "New Trader",
         "picture": "https://lh3.googleusercontent.com/photo.jpg",
         "sub": "google-user-id-12345",
     }
@@ -385,9 +385,10 @@ async def test_google_auth_new_user_and_admin_elevation(mock_db):
             data = resp.json()
             assert "access_token" in data
             assert data["token_type"] == "bearer"
-            assert data["user"]["email"] == "admin@stockai.com"
-            assert data["user"]["is_admin"] is True
-            assert data["user"]["subscription_tier"] == "PRO"
+            assert data["user"]["email"] == "new.trader@gmail.com"
+            assert data["user"]["is_admin"] is False
+            assert data["user"]["subscription_tier"] == "FREE"
+
 
 
 @pytest.mark.asyncio

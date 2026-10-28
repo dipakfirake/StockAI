@@ -203,7 +203,7 @@ async def verify_registration_otp(request: VerifyOtpRequest, req: Request, db: A
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Account already registered. Please login.")
 
-    is_admin = (email == "admin@stockai.com")
+    is_admin = False
     new_user = User(
         id=uuid.uuid4(),
         email=email,
@@ -289,7 +289,7 @@ async def google_auth(request: GoogleAuthRequest, req: Request, db: AsyncSession
     result = await db.execute(select(User).where((User.email == email) | (User.email == canonical)))
     user = result.scalar_one_or_none()
 
-    is_admin = (email == "admin@stockai.com")
+    is_admin = False
 
     if not user:
         # Auto-provision new user with secure unguessable internal password hash
@@ -325,7 +325,7 @@ async def google_auth(request: GoogleAuthRequest, req: Request, db: AsyncSession
         )
 
     token = create_access_token({"sub": str(user.id)})
-    user_is_admin = bool(user.is_admin or user.email.lower().strip() == "admin@stockai.com")
+    user_is_admin = bool(user.is_admin)
 
     return {
         "access_token": token,
@@ -389,7 +389,7 @@ async def register(request: RegisterRequest, req: Request, db: AsyncSession = De
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="An account with this email address already exists. Please login.")
 
-    is_admin = raw == "admin@stockai.com"
+    is_admin = False
     user = User(
         id=uuid.uuid4(),
         email=raw,
@@ -519,7 +519,7 @@ async def login(
         details={"email": username, "risk_level": fraud_eval.risk_level},
     )
 
-    is_admin = bool(user.is_admin or user.email.lower().strip() == "admin@stockai.com")
+    is_admin = bool(user.is_admin)
     user_payload = {
         "id": str(user.id),
         "email": user.email,
@@ -541,7 +541,7 @@ async def login(
 @router.get("/me")
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current user profile with role and pro status."""
-    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
+    is_admin = bool(current_user.is_admin)
     return {
         "id": str(current_user.id),
         "email": current_user.email,

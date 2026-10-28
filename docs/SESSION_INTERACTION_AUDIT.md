@@ -2241,3 +2241,31 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - Frontend production build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 41.22s**).
 - **System Response:** Committed changes, pushed to GitHub `origin main`, and provided instructions to pull updates and restart containers on the server.
 
+---
+
+### Session Entry 40: Hardening Admin Privilege Verification & Eradicating Demo Fallbacks
+- **Timestamp:** 2026-10-28 18:55:00 IST (13:25:00 UTC)
+- **User Prompt:**
+  `"are you removed that demo credentials too for avoiding future vulnerabilities."`
+- **Agent Technical Actions:**
+  1. **Audited Hardcoded Email Fallbacks**:
+     - Discovered hardcoded bypasses granting automatic admin privileges to `admin@stockai.com` in:
+       - `backend/api/auth.py`: Registration OTP, manual registration, Google OAuth, login, and `/me`.
+       - `backend/api/admin.py`: `require_admin` dependency and user serialization.
+       - `backend/api/settings.py`: Sensitive broker credential masking.
+       - `backend/api/sentinel.py`: 24/7 health diagnostics visibility.
+       - `backend/api/subscription.py`: Subscription status response.
+       - `backend/api/backtesting.py`: IDOR ownership validation.
+       - `frontend/src/components/NavBar.tsx`, `frontend/src/pages/AdminPage.tsx`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/hooks/usePresence.ts`: Navigation and UI role rendering.
+       - Root scratch file `test_bt.py`: Contained hardcoded demo password.
+  2. **Architectural Hardening**:
+     - Removed every instance of `|| user.email === 'admin@stockai.com'`.
+     - Admin access is now strictly enforced by the database boolean `user.is_admin`.
+     - All public registrations (email/password, OTP, Google OAuth) default strictly to `is_admin = False` and `FREE` tier.
+     - Removed `test_bt.py`.
+     - Updated tests (`test_public_registration_never_grants_admin` and `test_google_auth_registers_secure_default_user`).
+  3. **Verification Evidence**:
+     - Backend tests: **23/23 PASSED in test_auth_pro_access.py and test_email_intelligence_and_auth.py (100% green in 65.80s)**.
+     - Frontend production build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 40.91s**).
+- **System Response:** Committed changes, pushed to GitHub `origin main`, provided server instructions to delete/deactivate any existing `admin@stockai.com` account from PostgreSQL, and confirmed that only `headadmin@stockai.com` retains Super Admin rights.
+

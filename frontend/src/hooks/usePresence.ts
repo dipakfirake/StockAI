@@ -41,7 +41,7 @@ export function usePresence(user: any) {
     const sessionId = sessionIdRef.current
     if (!sessionId || document.visibilityState === 'hidden') return
 
-    const isAdmin = Boolean(user?.is_admin || user?.email?.toLowerCase() === 'admin@stockai.com')
+    const isAdmin = Boolean(user?.is_admin)
     const role: 'ADMIN' | 'PRO' | 'FREE' | 'GUEST' = isAdmin
       ? 'ADMIN'
       : user?.subscription_tier === 'PRO'

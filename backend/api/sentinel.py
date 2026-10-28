@@ -23,7 +23,7 @@ async def get_sentinel_status(
     Get 24/7 surveillance health status.
     Admins receive full diagnostic breakdown; standard users receive sanitized summary.
     """
-    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
+    is_admin = bool(current_user.is_admin)
     summary = sentinel_service.get_health_summary()
     if is_admin:
         return summary

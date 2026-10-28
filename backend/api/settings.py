@@ -60,7 +60,7 @@ async def get_all_settings(
         await db.commit()
         settings = (await db.execute(select(SystemSettings))).scalars().all()
     
-    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
+    is_admin = bool(current_user.is_admin)
 
     out: Dict[str, Any] = {}
     for s in settings:

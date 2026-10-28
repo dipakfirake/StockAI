@@ -14,6 +14,11 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **Hardcoded Demo Admin Fallback Eradication (COMPLETE & VERIFIED):**
+  - **Vulnerability Closed**: Removed all hardcoded `admin@stockai.com` admin-elevation checks across backend routes (`auth.py`, `admin.py`, `settings.py`, `sentinel.py`, `subscription.py`, `backtesting.py`) and frontend components (`NavBar.tsx`, `AdminPage.tsx`, `SettingsPage.tsx`, `usePresence.ts`).
+  - **Enforcement**: Admin status is now strictly governed by the database boolean column `is_admin == True`. Public registrations (email, OTP, Google OAuth) strictly produce `is_admin = False` and `subscription_tier = 'FREE'`.
+  - **Verification**: Backend tests (23/23 passed) and frontend build (0 errors) passed cleanly.
+
 - **Demo Login Decommissioning & Production Hardening (COMPLETE & VERIFIED):**
   - **Action**: Completely removed the temporary `1-Click Demo Login (Admin)` button, `demoLogin()` API helper, and `POST /api/auth/demo-login` backend endpoint.
   - **Status**: Production authentication is now strictly enforced via credentials (`POST /api/auth/login`) and Google OAuth. `headadmin@stockai.com` is verified active as Super Admin with Pro tier.

@@ -62,7 +62,7 @@ interface FyersStatus {
 
 export default function AdminPage() {
   const { user } = useAuth();
-  const isAdmin = Boolean(user?.is_admin || user?.email?.toLowerCase() === 'admin@stockai.com');
+  const isAdmin = Boolean(user?.is_admin);
 
   // Navigation tab: 'live' | 'fyers' | 'users' (defaults to 'fyers' so live surveillance only starts when clicked)
   const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users'>('fyers');

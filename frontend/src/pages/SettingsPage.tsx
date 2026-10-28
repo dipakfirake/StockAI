@@ -13,7 +13,7 @@ import { useAuth } from '../AuthContext'
 
 export default function SettingsPage() {
   const { user } = useAuth()
-  const isAdmin = Boolean(user?.is_admin || user?.email?.toLowerCase() === 'admin@stockai.com')
+  const isAdmin = Boolean(user?.is_admin)
 
   const [settings, setSettings] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(false)

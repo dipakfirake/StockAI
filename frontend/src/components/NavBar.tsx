@@ -36,7 +36,7 @@ export default function NavBar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [watchlistOpen, setWatchlistOpen] = useState(false)
 
-  const isAdmin = Boolean(user?.is_admin || user?.email?.toLowerCase() === 'admin@stockai.com')
+  const isAdmin = Boolean(user?.is_admin)
 
   const links = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },

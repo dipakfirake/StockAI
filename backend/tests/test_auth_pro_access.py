@@ -243,28 +243,29 @@ async def test_pro_payment_checkout_flow(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_admin_registration_persists_is_admin(mock_db):
-    """Verify that registering admin@stockai.com explicitly sets is_admin=True and PRO tier."""
+async def test_public_registration_never_grants_admin(mock_db):
+    """Verify that public registration never grants is_admin=True, preventing privilege escalation."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.post(
             "/api/auth/register",
             json={
-                "email": "admin@stockai.com",
-                "name": "Super Administrator",
+                "email": "user@stockai.com",
+                "name": "Standard User",
                 "password": "SecurePassword123!",
             },
         )
         assert res.status_code == 200
         reg_data = res.json()
         token = reg_data["token"]
-        assert reg_data["email"] == "admin@stockai.com"
+        assert reg_data["email"] == "user@stockai.com"
 
         me_res = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert me_res.status_code == 200
         me_data = me_res.json()
-        assert me_data["is_admin"] is True
-        assert me_data["subscription_tier"] == "PRO"
+        assert me_data["is_admin"] is False
+        assert me_data["subscription_tier"] == "FREE"
+
 
 
 @pytest.mark.asyncio

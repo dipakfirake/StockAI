@@ -18,7 +18,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 async def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """Validate that the requesting user has administrative privileges."""
-    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
+    is_admin = bool(current_user.is_admin)
     if not is_admin:
         log_security_event(
             event_type="UNAUTHORIZED_ADMIN_ACCESS_ATTEMPT",
@@ -48,7 +48,7 @@ async def list_users(
             "id": str(u.id),
             "name": u.name,
             "email": u.email,
-            "is_admin": bool(u.is_admin or u.email.lower().strip() == "admin@stockai.com"),
+            "is_admin": bool(u.is_admin),
             "subscription_tier": u.subscription_tier,
             "pro_status": u.pro_status or "NONE",
             "pro_requested_at": u.pro_requested_at.isoformat() if u.pro_requested_at else None,

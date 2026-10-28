@@ -77,7 +77,7 @@ async def get_backtest_results(
         raise HTTPException(status_code=404, detail="Backtest not found")
 
     # Prevent IDOR: ensure requesting user owns the backtest run (or is admin)
-    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
+    is_admin = bool(current_user.is_admin)
     if result.get("user_id") and result["user_id"] != str(current_user.id) and not is_admin:
         raise HTTPException(status_code=404, detail="Backtest not found")
 

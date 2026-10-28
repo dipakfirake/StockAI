@@ -29,7 +29,7 @@ class CheckoutSchema(BaseModel):
 @router.get("/status")
 async def get_subscription_status(current_user: User = Depends(get_current_user)):
     """Get current user's subscription details and pending request status."""
-    is_admin = bool(current_user.is_admin or current_user.email.lower().strip() == "admin@stockai.com")
+    is_admin = bool(current_user.is_admin)
     tier = "PRO" if is_admin else current_user.subscription_tier
     pro_status = "APPROVED" if is_admin else (current_user.pro_status or "NONE")
 
