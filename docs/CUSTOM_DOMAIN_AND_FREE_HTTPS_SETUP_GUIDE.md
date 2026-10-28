@@ -118,7 +118,7 @@ server {
     # Maximum payload limit (matches StockAI 1MB body limit guard)
     client_max_body_size 10M;
 
-    # Frontend React App (Vite Dev / Prod)
+    # 1. Frontend React App (Vite Dev / Prod)
     location / {
         proxy_pass http://127.0.0.1:5173;
         proxy_http_version 1.1;
@@ -128,7 +128,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Backend FastAPI REST Endpoints
+    # 2. Backend FastAPI REST Endpoints
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
@@ -140,7 +140,7 @@ server {
         proxy_connect_timeout 60s;
     }
 
-    # Real-Time WebSocket Connections (Live Ticker & Presence)
+    # 3. Real-Time WebSocket Connections (Live Ticker & Presence)
     location /ws {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
@@ -150,6 +150,52 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
+    }
+
+    # 4. Backend Health Probes (/health, /health/live, /health/liv)
+    location ~ ^/health(/.*)?$ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 5. FastAPI Interactive Documentation (/docs, /redoc, /openapi.json, /swagger)
+    location ~ ^/(docs|redoc|openapi\.json|swagger) {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 6. Celery Flower Monitoring Dashboard
+    location /flower/ {
+        proxy_pass http://127.0.0.1:5555;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location = /flower {
+        return 301 /flower/;
+    }
+
+    # 7. Prometheus Telemetry (/metrics)
+    location /metrics {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```

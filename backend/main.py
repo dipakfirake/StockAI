@@ -197,12 +197,15 @@ async def root():
 
 
 @app.get("/health", tags=["Health"])
+@app.get("/api/health", include_in_schema=False)
 async def health():
     return {"status": "healthy"}
 
 
 @app.get("/health/live", tags=["Health"])
 @app.get("/health/liv", include_in_schema=False)
+@app.get("/api/health/live", include_in_schema=False)
+@app.get("/api/health/liv", include_in_schema=False)
 async def health_live_root():
     import time
     from datetime import datetime, timezone
@@ -212,4 +215,12 @@ async def health_live_root():
         "uptime_seconds": round(time.time() - START_TIME, 2),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/swagger", include_in_schema=False)
+@app.get("/api/docs", include_in_schema=False)
+@app.get("/api/swagger", include_in_schema=False)
+async def swagger_redirect():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/docs")
 

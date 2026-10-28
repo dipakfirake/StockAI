@@ -126,7 +126,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: stockflower
-    command: celery -A backend.celery_app flower --port=5555
+    command: celery -A backend.celery_app flower --port=5555 --url_prefix=flower
     environment:
       CELERY_BROKER_URL: redis://redis:6379/1
       PYTHONPATH: /app
@@ -139,7 +139,7 @@ services:
       - celery_worker
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:5555/ >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5555/flower/ >/dev/null || curl -fsS http://localhost:5555/ >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3

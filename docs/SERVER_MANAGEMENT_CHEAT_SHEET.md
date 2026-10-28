@@ -10,10 +10,14 @@
 - **Project Directory on Server:** `/home/opc/StockAI`
 
 **Public URLs:**
+- **Live DuckDNS HTTPS Website:** [https://stockai-live.duckdns.org](https://stockai-live.duckdns.org)
 - **Live Vercel Frontend:** [https://stock-ai-iota-seven.vercel.app](https://stock-ai-iota-seven.vercel.app)
-- **FastAPI Swagger Docs:** [http://92.4.71.210:8000/docs](http://92.4.71.210:8000/docs)
-- **Celery Flower Dashboard:** [http://92.4.71.210:5555](http://92.4.71.210:5555)
-- **Backend Health Probe:** [http://92.4.71.210:8000/health/live](http://92.4.71.210:8000/health/live)
+- **DuckDNS Swagger Docs:** [https://stockai-live.duckdns.org/docs](https://stockai-live.duckdns.org/docs) (or `/swagger`)
+- **DuckDNS Celery Flower:** [https://stockai-live.duckdns.org/flower/](https://stockai-live.duckdns.org/flower/)
+- **DuckDNS Health Probe:** [https://stockai-live.duckdns.org/health/live](https://stockai-live.duckdns.org/health/live) (or `/health/liv`)
+- **Direct IP Swagger Docs:** [http://92.4.71.210:8000/docs](http://92.4.71.210:8000/docs)
+- **Direct IP Celery Flower:** [http://92.4.71.210:5555/flower/](http://92.4.71.210:5555/flower/)
+- **Direct IP Health Probe:** [http://92.4.71.210:8000/health/live](http://92.4.71.210:8000/health/live)
 
 ---
 
