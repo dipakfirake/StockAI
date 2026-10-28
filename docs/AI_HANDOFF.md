@@ -14,6 +14,12 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **Dedicated 1-Click Demo Login Endpoint (COMPLETE & VERIFIED):**
+  - **Issue**: Legacy demo login invoked standard `POST /api/auth/login` with hardcoded password `admin`, which failed with `401 (Unauthorized)` due to strict password hashing or pre-existing admin credentials.
+  - **Fix**: Added dedicated `POST /api/auth/demo-login` in `backend/api/auth.py` that automatically finds or creates `admin@stockai.com`, sets `is_admin=True` and `subscription_tier='PRO'`, and issues a signed JWT token.
+  - **Frontend**: Updated `LoginPage.tsx` and `api.ts` to call `authApi.demoLogin()`.
+  - **Verification**: Backend tests (`test_demo_login_endpoint` in `test_auth_pro_access.py`) passed (7/7). Frontend build (`tsc && vite build`) passed with 0 errors.
+
 - **Institutional Route Protection, 401 Resolution & 1-Click Demo Login (COMPLETE & VERIFIED):**
   - **User Problem & Goal**:
     - Visiting `https://stockai-live.duckdns.org/dashboard` resulted in empty dashboard widgets and flooded the developer console with repeated `401 (Unauthorized)` errors.

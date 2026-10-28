@@ -122,7 +122,7 @@ export default function LoginPage() {
     setSuccessMsg('')
     setLoading(true)
     try {
-      const res = await authApi.login('admin@stockai.com', 'admin')
+      const res = await authApi.demoLogin()
       await login(res.data.access_token, res.data.user)
       navigate(redirectTarget)
     } catch (err: any) {

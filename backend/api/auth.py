@@ -537,6 +537,72 @@ async def login(
     }
 
 
+@router.post("/demo-login")
+async def demo_login(
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    1-Click Demo Login: Seeds or loads the development Admin user (admin@stockai.com)
+    and returns a valid JWT session token with full PRO and Admin privileges.
+    """
+    client_ip = _get_client_ip(req)
+    admin_email = "admin@stockai.com"
+
+    result = await db.execute(select(User).where(User.email == admin_email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        # Auto-seed the demo admin user if not already present
+        user = User(
+            email=admin_email,
+            name="Administrator",
+            hashed_password=hash_password("Admin@StockAI!2026"),
+            subscription_tier="PRO",
+            is_active=True,
+            is_admin=True,
+            pro_status="APPROVED",
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    else:
+        # Ensure admin privileges and active status
+        if not user.is_admin or user.subscription_tier != "PRO" or not user.is_active:
+            user.is_admin = True
+            user.subscription_tier = "PRO"
+            user.is_active = True
+            user.pro_status = "APPROVED"
+            await db.commit()
+            await db.refresh(user)
+
+    token = create_access_token({"sub": str(user.id)})
+
+    log_security_event(
+        event_type="AUTH_DEMO_LOGIN_SUCCESS",
+        severity="INFO",
+        ip_address=client_ip,
+        user_id=str(user.id),
+        details={"email": admin_email},
+    )
+
+    user_payload = {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name or "Administrator",
+        "subscription_tier": "PRO",
+        "is_admin": True,
+        "pro_status": "APPROVED",
+        "pro_requested_at": user.pro_requested_at.isoformat() if user.pro_requested_at else None,
+    }
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user_payload,
+    }
+
+
 @router.get("/me")
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current user profile with role and pro status."""

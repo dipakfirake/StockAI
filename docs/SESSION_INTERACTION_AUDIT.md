@@ -2177,5 +2177,27 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - Frontend Production Build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 33.68s**).
 - **System Response:** Completed all deliverables, created walkthrough artifact, pushed updates to GitHub, and documented server pull/restart workflow.
 
+---
 
+### Session Entry 37: Dedicated 1-Click Demo Login Endpoint & Passwordless Admin Session
+- **Timestamp:** 2026-10-28 17:35:00 IST (12:05:00 UTC)
+- **User Prompt:**
+  `"wen clicked on demo login then: /api/auth/login:1 Failed to load resource: the server responded with a status of 401 (Unauthorized) api.ts:172 POST https://stockai-live.duckdns.org/api/auth/login 401 (Unauthorized) ... LoginPage.tsx:125"`
+- **Agent Technical Actions:**
+  1. **Root-Cause Diagnostics**:
+     - Identified that the legacy demo login invoked standard `POST /api/auth/login` passing password `'admin'`.
+     - In production databases with password complexity constraints (min 8 chars) or pre-existing admin hashes, the login failed with `401 (Unauthorized)`.
+     - On the live server, the client was running the legacy bundle prior to pulling recent route-guard updates.
+  2. **Architectural Implementation**:
+     - Built dedicated `POST /api/auth/demo-login` in `backend/api/auth.py`:
+       - Loads or automatically creates the demo administrator account (`admin@stockai.com`).
+       - Enforces `is_admin = True`, `subscription_tier = 'PRO'`, `is_active = True`, and `pro_status = 'APPROVED'`.
+       - Issues a valid JWT access token and logs a security audit event (`AUTH_DEMO_LOGIN_SUCCESS`).
+     - Added `demoLogin: () => api.post('/auth/demo-login')` in `frontend/src/services/api.ts`.
+     - Updated `handleQuickDemoLogin` in `frontend/src/pages/LoginPage.tsx` to invoke `authApi.demoLogin()`, directly setting auth state and redirecting to the target page.
+     - Added unit test `test_demo_login_endpoint` in `backend/tests/test_auth_pro_access.py` covering initial auto-seeding, elevation, token validation against `/api/auth/me`, and idempotency.
+  3. **Verification Evidence**:
+     - Backend Test Suite: **7/7 PASSED in backend/tests/test_auth_pro_access.py (100% green in 39.19s)**.
+     - Frontend Production Build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 26.95s**).
+- **System Response:** Verified local build and tests, updated audit records, committed and pushed changes to GitHub `origin main`, and provided the exact server pull/restart commands.
 

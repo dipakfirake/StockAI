@@ -182,6 +182,7 @@ export const authApi = {
     api.post('/auth/google', { credential }),
   me: () => api.get('/auth/me'),
   upgrade: () => api.post('/auth/upgrade'),
+  demoLogin: () => api.post('/auth/demo-login'),
 }
 
 // ===== User Preferences endpoints =====
