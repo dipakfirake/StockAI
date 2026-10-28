@@ -9,7 +9,7 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: true,
     hmr: {
-      clientPort: 5173, // Force HMR to use the exposed port
+      clientPort: process.env.VITE_HMR_PORT ? Number(process.env.VITE_HMR_PORT) : undefined,
     },
     proxy: {
       '/api': {
