@@ -244,4 +244,10 @@ export const presenceApi = {
   getUsers: () => api.get('/presence/users'),
 }
 
+// ===== Health & SRE Telemetry endpoints =====
+export const healthApi = {
+  getLive: () => api.get('/health/live'),
+  getReady: () => api.get('/health/ready'),
+}
+
 export default api

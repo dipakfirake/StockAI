@@ -3,7 +3,7 @@
 # StockAI — DuckDNS Nginx Routing Setup Script for:
 # 1. /health/live and /health/liv (FastAPI Liveness Probes)
 # 2. /docs, /redoc, /openapi.json, /swagger (FastAPI Interactive Swagger Docs)
-# 3. /flower/ (Celery Flower Monitoring Dashboard)
+# 3. /flower/ (Celery Flower Monitoring Dashboard with WebSocket Support)
 # 4. /metrics (Prometheus Observability Telemetry)
 # ==============================================================================
 
@@ -42,9 +42,9 @@ if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "_" ]; then
 fi
 echo "Using Domain: $DOMAIN"
 
-# Inject or update location blocks in Nginx config
-# We write an updated snippet that preserves existing SSL certificates
+# Write location snippet
 cat << 'EOF' | sudo tee /tmp/stockai_locations.conf > /dev/null
+
     # --- Health and Liveness Probes ---
     location ~ ^/health(/.*)?$ {
         proxy_pass http://127.0.0.1:8000;
@@ -75,6 +75,7 @@ cat << 'EOF' | sudo tee /tmp/stockai_locations.conf > /dev/null
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400s;
     }
 
     location = /flower {
@@ -92,14 +93,7 @@ cat << 'EOF' | sudo tee /tmp/stockai_locations.conf > /dev/null
     }
 EOF
 
-# If the file already has SSL configured by certbot, insert locations before the closing brace
-if grep -q "location /flower/" "$CONF_FILE" 2>/dev/null; then
-    echo "Flower and Swagger locations already detected in $CONF_FILE. Updating..."
-    # Remove existing custom blocks and re-insert
-    sudo sed -i '/# --- Health and Liveness Probes ---/,/# --- End Custom Locations ---/d' "$CONF_FILE" 2>/dev/null || true
-fi
-
-# Insert into the server block before the last closing brace
+# Intelligent Python script: specifically targets the SSL (port 443) server block!
 python3 -c "
 import re
 
@@ -107,20 +101,63 @@ with open('$CONF_FILE', 'r') as f:
     content = f.read()
 
 with open('/tmp/stockai_locations.conf', 'r') as f:
-    snippet = '\n' + f.read() + '\n'
+    snippet = f.read().strip() + '\n'
 
-if 'location ~ ^/(docs|redoc|openapi\.json|swagger)' not in content:
-    # Find last closing brace of the main server block
-    pos = content.rfind('}')
-    if pos != -1:
-        new_content = content[:pos] + snippet + content[pos:]
-        with open('$CONF_FILE', 'w') as f:
-            f.write(new_content)
-        print('Successfully injected /health/live, /docs, and /flower/ into $CONF_FILE')
-    else:
-        print('Could not find closing brace in $CONF_FILE')
+# Find all server { blocks with accurate brace depth tracking
+server_matches = list(re.finditer(r'\bserver\s*\{', content))
+if not server_matches:
+    print('No server blocks found in $CONF_FILE')
+    exit(0)
+
+blocks = []
+for m in server_matches:
+    start_pos = m.end() - 1  # points to '{'
+    depth = 0
+    end_pos = -1
+    for i in range(start_pos, len(content)):
+        if content[i] == '{':
+            depth += 1
+        elif content[i] == '}':
+            depth -= 1
+            if depth == 0:
+                end_pos = i
+                break
+    if end_pos != -1:
+        blocks.append((start_pos, end_pos, content[m.start():end_pos + 1]))
+
+# Find the SSL block (contains 443 or ssl_certificate)
+ssl_block = None
+for s_pos, e_pos, b_text in blocks:
+    if '443' in b_text or 'ssl_certificate' in b_text:
+        ssl_block = (s_pos, e_pos, b_text)
+        break
+
+# If no SSL block, use the block that has proxy_pass
+if not ssl_block:
+    for s_pos, e_pos, b_text in blocks:
+        if 'proxy_pass' in b_text:
+            ssl_block = (s_pos, e_pos, b_text)
+            break
+
+if not ssl_block:
+    ssl_block = blocks[0]
+
+s_pos, e_pos, b_text = ssl_block
+
+# Clean up any existing snippet in this block if present
+cleaned_block = b_text
+cleaned_block = re.sub(r'# --- Health and Liveness Probes ---.*?# --- Prometheus Telemetry ---.*?location /metrics\s*\{.*?\}', '', cleaned_block, flags=re.DOTALL)
+
+# Insert snippet before closing brace of the SSL server block
+last_brace = cleaned_block.rfind('}')
+if last_brace != -1:
+    new_block = cleaned_block[:last_brace] + '\n' + snippet + cleaned_block[last_brace:]
+    new_content = content[:content.find(b_text)] + new_block + content[content.find(b_text) + len(b_text):]
+    with open('$CONF_FILE', 'w') as f:
+        f.write(new_content)
+    print('🎉 Successfully injected routes into the SSL (443) server block in $CONF_FILE!')
 else:
-    print('Locations already present in $CONF_FILE')
+    print('Failed to locate closing brace in target server block')
 "
 
 echo "=== [4/4] Validating & Reloading Nginx ==="
@@ -128,8 +165,11 @@ sudo nginx -t
 sudo systemctl reload nginx
 
 echo ""
-echo "🎉 SUCCESS! All DuckDNS routes are now active:"
-echo "👉 Health Liveness Probe: https://${DOMAIN}/health/live (also /health/liv)"
-echo "👉 Swagger Documentation: https://${DOMAIN}/docs (also /swagger)"
-echo "👉 Celery Flower:        https://${DOMAIN}/flower/"
+echo "🎉 SUCCESS! All DuckDNS routes are now active over HTTPS:"
+echo "👉 Celery Flower Dashboard: https://${DOMAIN}/flower/ (Basic Auth: headadmin / Admin Pass)"
+echo "👉 FastAPI Swagger Docs:   https://${DOMAIN}/docs (Admin Protected)"
+echo "👉 FastAPI ReDoc Docs:     https://${DOMAIN}/redoc"
+echo "👉 FastAPI OpenAPI Schema: https://${DOMAIN}/openapi.json"
+echo "👉 Health Liveness Probe:  https://${DOMAIN}/health/live"
+echo "👉 Health Readiness Probe: https://${DOMAIN}/health/ready"
 echo ""

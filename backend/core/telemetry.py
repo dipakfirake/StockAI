@@ -13,7 +13,7 @@ import time
 import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Response, status, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -21,6 +21,7 @@ from backend.core.database import engine
 from backend.core.cache import get_redis
 from backend.core.circuit_breaker import circuit_breakers
 from backend.core.logging_config import get_logger
+from backend.core.auth import verify_admin_or_local
 
 logger = get_logger(__name__)
 
@@ -102,7 +103,7 @@ metrics = MetricsRegistry()
 
 @router.get("/live")
 @router.get("/liv", include_in_schema=False)
-async def liveness_probe():
+async def liveness_probe(guard=Depends(verify_admin_or_local)):
     """Shallow liveness probe: returns 200 if the process and event loop are responsive."""
     return {
         "status": "alive",
@@ -112,7 +113,7 @@ async def liveness_probe():
 
 
 @router.get("/ready")
-async def readiness_probe():
+async def readiness_probe(guard=Depends(verify_admin_or_local)):
     """
     Deep readiness probe: verifies connection pool health to Neon Postgres and Redis.
     Returns 200 when ready to receive traffic, 503 if primary dependencies are unreachable.
@@ -171,7 +172,7 @@ async def readiness_probe():
 
 
 @router.get("/metrics")
-async def prometheus_metrics():
+async def prometheus_metrics(guard=Depends(verify_admin_or_local)):
     """Exposes Prometheus text formatted metrics."""
     data = metrics.generate_prometheus_text()
     return Response(content=data, media_type="text/plain; version=0.0.4; charset=utf-8")

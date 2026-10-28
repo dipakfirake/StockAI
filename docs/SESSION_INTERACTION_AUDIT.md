@@ -2316,3 +2316,41 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
 - **System Response:** Authored technical design plan in `pcjeweller_target_and_cache_correctness_plan.md` and walkthrough in `walkthrough.md`, committed and pushed changes to GitHub `origin main`, and provided user with copy-pasteable deployment commands.
 
 ---
+
+
+### Session Entry 43: DuckDNS HTTPS Routing & Admin Security Shield for Celery Flower, Swagger & Live Health
+- **Timestamp:** 2026-10-28 23:12:00 IST (17:42:00 UTC)
+- **User Prompt:**
+  `"analyze rules and all first and  i want  that the celery flower and swagger , and /health/live want to see in the  website of https://stockai-live.duckdns.org/  with https which i ll setted and also i ant that not everyone can see swagger because of security reasons and also same for celery flower and live status  ,they all 3 are working on the vercel website but not here why ? /goal /plan /teamwork /boost"`
+- **Agent Technical Actions:**
+  1. **Ground-Truth Ledger & Rules Analysis**:
+     - Read and analyzed `AGENTS.md`, `GEMINI.md`, `docs/AI_HANDOFF.md`, `docs/SESSION_INTERACTION_AUDIT.md`, `docs/ENTERPRISE_MODULES_AND_ROLES_MATRIX.md`, `docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md`, and `docs/SYSTEM_DESIGN_ARCHITECTURE.md`.
+     - Confirmed clean `git status` baseline.
+  2. **Root Cause Analysis (Vercel vs DuckDNS Nginx)**:
+     - Diagnosed why Vercel worked: Vercel CDN proxies `/api/*` to the backend port 8000 (allowing `/api/health/live` to respond) and redirects all unmatched paths to `/index.html`.
+     - Diagnosed why DuckDNS failed: In `/etc/nginx/conf.d/stockai.conf`, the Certbot `server { listen 443 ssl ... }` block only routed `/`, `/api/`, and `/ws`. It was missing `/flower/`, `/docs`, and `/health/`. Requests matched `location /`, routing to Vite (`:5173`), where React Router redirected to `/dashboard`.
+     - Diagnosed Flower: Port 5555 was blocked by Oracle Cloud firewall rules and had zero authentication configured.
+  3. **Backend Security Implementation**:
+     - `backend/core/auth.py`: Created `verify_admin_docs_access` supporting dual-mode authentication (HTTP Basic Auth challenge prompting browser login + JWT Bearer/cookie).
+     - `backend/core/auth.py`: Created `verify_admin_or_local` allowing internal Docker/localhost probes while enforcing Admin authentication on external proxy requests.
+     - `backend/main.py`: Disabled default public docs (`docs_url=None`, `redoc_url=None`, `openapi_url=None`). Added custom endpoints `/docs`, `/redoc`, and `/openapi.json` protected by `verify_admin_docs_access`.
+     - `backend/core/telemetry.py`: Secured `/health/live`, `/health/ready`, and `/metrics` with `verify_admin_or_local`.
+  4. **Celery Flower Container Hardening (`docker-compose.yml`)**:
+     - Added `--basic_auth=${FLOWER_BASIC_AUTH:-headadmin:HeadAdmin@2003StockAI}`.
+     - Replaced public port binding with `127.0.0.1:5555:5555`.
+     - Calibrated Docker container healthcheck with `-u` authentication flag.
+  5. **In-Website Admin UI Implementation (`frontend/src/pages/AdminPage.tsx`)**:
+     - Added dedicated tab **"⚡ Ops, Flower & Swagger"** (`activeTab === 'ops'`).
+     - Added Celery Flower card (1 worker status, direct HTTPS launch, copyable credentials, embed toggle).
+     - Added FastAPI Swagger card (direct HTTPS launch, ReDoc link, copyable OpenAPI spec URL, embed toggle).
+     - Added Live Health SRE card (polling `/health/live` and `/health/ready`, showing uptime, DB/Redis latencies, circuit breakers, 1-click refresh).
+     - Added `healthApi` in `frontend/src/services/api.ts`.
+  6. **Automated Nginx Route Setup Script (`scripts/setup_duckdns_routes.sh`)**:
+     - Overhauled script to parse Nginx server block braces and cleanly inject `/flower/` (with WebSocket upgrade headers), `/docs`, and `/health/` directly into the active `listen 443 ssl` block.
+  7. **Verification Evidence**:
+     - Dedicated Security Tests (`test_admin_docs_and_health_security.py`): **8/8 PASSED in 36.48s (100% green)**.
+     - Full Regression Suite (`test_auth_pro_access.py`, `test_cybersecurity.py`, `test_system_design.py`): **30/30 PASSED in 97.30s (100% green)**.
+     - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 45.14s**.
+- **System Response:** Completed all deliverables, created technical plan and walkthrough artifacts, updated handoff and session audit ledgers, and provided copy-pasteable server deployment commands complying with STRICT LIVE SERVER ISOLATION. Concluded with `<!-- GOAL_COMPLETE -->`.
+
+---

@@ -14,6 +14,32 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **Celery Flower, Swagger OpenAPI & Health Probe Secure HTTPS Integration on DuckDNS (COMPLETE & VERIFIED):**
+  - **User Inquiry & Root Causes Identified**:
+    - *Why did they work on Vercel but fail on DuckDNS?*
+      - Vercel's `vercel.json` rewrote `/api/*` to backend port 8000 (making `/api/health/live` respond) and caught all other paths with `/* -> /index.html`.
+      - On DuckDNS, Certbot configured an active `server { listen 443 ssl ... }` block in Nginx that only routed `/`, `/api/`, and `/ws`. It omitted `/flower/`, `/docs`, and `/health/`. Requests fell through to `location /` (Vite dev server :5173), where React Router redirected to `/dashboard`.
+      - Flower runs on port 5555, which is blocked by Oracle Cloud's security list firewall and had zero authentication configured.
+  - **Permanent Security & Architectural Solutions Implemented**:
+    1. **FastAPI Swagger & OpenAPI Security Shield (`backend/main.py` & `backend/core/auth.py`)**:
+       - Disabled default unauthenticated docs (`docs_url=None`, `redoc_url=None`, `openapi_url=None`).
+       - Custom endpoints (`/docs`, `/redoc`, `/openapi.json`) guarded by `verify_admin_docs_access`. Unauthenticated requests receive `HTTP 401 Unauthorized` with `WWW-Authenticate: Basic` header.
+       - Browser directly prompts HTTP Basic Auth (accepting `headadmin@stockai.com` and admin password), or automatically authenticates via Admin JWT Bearer/cookie. Non-admins cannot inspect API schemas.
+    2. **Celery Flower HTTP Basic Auth & Host Isolation (`docker-compose.yml`)**:
+       - Added `--basic_auth=${FLOWER_BASIC_AUTH:-headadmin:HeadAdmin@2003StockAI}`.
+       - Bound port strictly to `127.0.0.1:5555:5555` to eliminate raw, unencrypted public port exposure.
+    3. **Health Probes Internal/External Tiering (`backend/main.py` & `backend/core/telemetry.py`)**:
+       - `verify_admin_or_local`: Localhost/Docker probes (`127.0.0.1` without proxy headers) succeed with 200 OK. External requests require Admin credentials.
+    4. **In-Website Admin UI Experience (`frontend/src/pages/AdminPage.tsx`)**:
+       - Added dedicated tab **"⚡ Ops, Flower & Swagger"** (`activeTab === 'ops'`).
+       - Features live Celery Flower card (1 worker status, direct HTTPS launch, copyable credentials, embed toggle), Swagger card (interactive UI, copyable spec URL, embed toggle), and Live Health SRE card (polling `/health/live` & `/health/ready`, showing uptime, DB/Redis latencies, circuit breakers).
+    5. **Intelligent Nginx SSL Block Injection Script (`scripts/setup_duckdns_routes.sh`)**:
+       - Overhauled script to specifically parse server block braces and inject `/flower/` (with WebSocket upgrade headers), `/docs`, and `/health/` directly into the active `listen 443 ssl` block.
+  - **Verification Evidence**:
+    - Dedicated Backend Security Tests (`backend/tests/test_admin_docs_and_health_security.py`): **8/8 PASSED (100% green in 36.48s)**.
+    - Full Regression Suite (`test_auth_pro_access.py`, `test_cybersecurity.py`, `test_system_design.py`): **30/30 PASSED (100% green in 97.30s)**.
+    - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 45.14s**.
+
 - **PC Jeweller Dynamic Target Correctness Verification & Multi-Tier Milestones Display (COMPLETE & VERIFIED):**
   - **User Inquiry**: PC Jeweller (`PCJEWELLER.NS`) showed 16% target 2 days ago, 21% target today, and 11% earlier. Is this correct?
   - **Mathematical & Live Cache Proof**:

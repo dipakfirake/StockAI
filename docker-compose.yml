@@ -126,20 +126,21 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: stockflower
-    command: celery -A backend.celery_app flower --port=5555 --url_prefix=flower
+    command: celery -A backend.celery_app flower --port=5555 --url_prefix=flower --basic_auth=${FLOWER_BASIC_AUTH:-headadmin:HeadAdmin@2003StockAI}
     environment:
       CELERY_BROKER_URL: redis://redis:6379/1
       PYTHONPATH: /app
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:-headadmin:HeadAdmin@2003StockAI}
     volumes:
       - ./backend:/app/backend
       - ./.env:/app/.env
     ports:
-      - "5555:5555"
+      - "127.0.0.1:5555:5555"
     depends_on:
       - celery_worker
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:5555/flower/ >/dev/null || curl -fsS http://localhost:5555/ >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS -u ${FLOWER_BASIC_AUTH:-headadmin:HeadAdmin@2003StockAI} http://localhost:5555/flower/ >/dev/null || curl -fsS http://localhost:5555/flower/ >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3

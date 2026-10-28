@@ -11,6 +11,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.openapi.utils import get_openapi
 
 from backend.core.config import settings
 from backend.core.database import create_db_tables
@@ -18,7 +20,7 @@ from backend.core.logging_config import setup_logging, get_logger
 from backend.core.rate_limiter import RateLimitMiddleware
 from backend.core.security_middleware import SecurityHeadersMiddleware
 from backend.core.audit_logger import log_security_event
-from backend.core.auth import get_current_user
+from backend.core.auth import get_current_user, verify_admin_docs_access, verify_admin_or_local
 from backend.api import stocks, alerts, paper_trading, backtesting, ai_engine, portfolio, watchlist, auth, market, scanner, ml, settings as api_settings, notifications, preferences, subscription, admin, sentinel, validator, presence
 from backend.services.sentinel import sentinel_service
 from backend.services.system_validator import system_validator
@@ -71,9 +73,9 @@ app = FastAPI(
         "NOT a broker. No real trade execution."
     ),
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
     lifespan=lifespan,
 )
 
@@ -185,7 +187,7 @@ app.include_router(telemetry_router)
 
 
 @app.get("/metrics", tags=["Observability & Telemetry"])
-async def prometheus_metrics_root():
+async def prometheus_metrics_root(guard=Depends(verify_admin_or_local)):
     """Prometheus-compatible scraping endpoint."""
     from fastapi import Response
     return Response(content=metrics.generate_prometheus_text(), media_type="text/plain; version=0.0.4; charset=utf-8")
@@ -206,7 +208,7 @@ async def health():
 @app.get("/health/liv", include_in_schema=False)
 @app.get("/api/health/live", include_in_schema=False)
 @app.get("/api/health/liv", include_in_schema=False)
-async def health_live_root():
+async def health_live_root(guard=Depends(verify_admin_or_local)):
     import time
     from datetime import datetime, timezone
     from backend.core.telemetry import START_TIME
@@ -223,4 +225,28 @@ async def health_live_root():
 async def swagger_redirect():
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/docs")
+
+
+@app.get("/docs", include_in_schema=False)
+async def get_swagger_documentation(user=Depends(verify_admin_docs_access)):
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="StockAI — Admin API Documentation",
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+    )
+
+
+@app.get("/redoc", include_in_schema=False)
+async def get_redoc_documentation(user=Depends(verify_admin_docs_access)):
+    return get_redoc_html(
+        openapi_url="/openapi.json",
+        title="StockAI — Admin ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
+    )
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def get_openapi_endpoint(user=Depends(verify_admin_docs_access)):
+    return JSONResponse(get_openapi(title=app.title, version=app.version, routes=app.routes, description=app.description))
 
