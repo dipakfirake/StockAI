@@ -7,6 +7,7 @@ export default defineConfig({
     host: true, // Listen on all network interfaces (required for Docker)
     port: 5173,
     strictPort: true,
+    allowedHosts: true,
     hmr: {
       clientPort: 5173, // Force HMR to use the exposed port
     },

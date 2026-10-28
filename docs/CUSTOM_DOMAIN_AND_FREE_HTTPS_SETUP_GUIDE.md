@@ -62,32 +62,51 @@ Let's Encrypt requires **Port 80** to verify domain ownership and **Port 443** t
    - **Description**: `Allow HTTP and HTTPS`
 5. Click **Add Ingress Rules**.
 
-### 2.2 Server Operating System Firewall (iptables)
+### 2.2 Server Operating System Firewall
 SSH into your Oracle Cloud VM and run:
+
+**For Oracle Linux / RHEL (default on Oracle Cloud):**
 ```bash
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo netfilter-persistent save
+sudo firewall-cmd --permanent --add-service=http --add-service=https 2>/dev/null || true
+sudo firewall-cmd --reload 2>/dev/null || true
+sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+```
+
+**For Ubuntu / Debian:**
+```bash
+sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+sudo netfilter-persistent save 2>/dev/null || true
 ```
 
 ---
 
 ## Step 3: Install Nginx & Certbot on the Server
 
-Run on your server terminal:
+**For Oracle Linux (default on Oracle Cloud):**
+```bash
+# Enable EPEL (Extra Packages for Enterprise Linux)
+sudo dnf install -y oracle-epel-release-el8 2>/dev/null || sudo dnf install -y oracle-epel-release-el9 2>/dev/null || sudo dnf install -y epel-release
+
+# Install Nginx and Certbot
+sudo dnf install -y nginx certbot python3-certbot-nginx
+sudo systemctl enable --now nginx
+```
+
+**For Ubuntu / Debian:**
 ```bash
 sudo apt update
 sudo apt install -y nginx certbot python3-certbot-nginx
+sudo systemctl enable --now nginx
 ```
 
 ---
 
 ## Step 4: Configure Hardened Nginx Reverse Proxy
 
-Create a clean Nginx site configuration:
-```bash
-sudo nano /etc/nginx/sites-available/stockai.conf
-```
+Create an Nginx configuration file in `/etc/nginx/conf.d/stockai.conf` (or `/etc/nginx/sites-available/stockai.conf` on Ubuntu):
+
 
 Paste the following configuration into the file (**Replace `yourdomain.com` with your actual domain**):
 
