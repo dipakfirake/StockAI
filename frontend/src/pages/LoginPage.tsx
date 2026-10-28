@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { authApi } from '../services/api'
-import { Mail, ShieldCheck, ArrowLeft, RefreshCw, Clock, CheckCircle2, Circle, Zap } from 'lucide-react'
+import { Mail, ShieldCheck, ArrowLeft, RefreshCw, Clock, CheckCircle2, Circle } from 'lucide-react'
 import {
   validateEmail,
   evaluatePasswordStrength,
@@ -111,22 +111,6 @@ export default function LoginPage() {
       navigate(redirectTarget)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Google sign-in failed. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 1-Click Demo Login for instant development, testing, and recovery
-  const handleQuickDemoLogin = async () => {
-    setError('')
-    setSuccessMsg('')
-    setLoading(true)
-    try {
-      const res = await authApi.demoLogin()
-      await login(res.data.access_token, res.data.user)
-      navigate(redirectTarget)
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Demo login failed. Please ensure the backend is running.')
     } finally {
       setLoading(false)
     }
@@ -454,33 +438,6 @@ export default function LoginPage() {
                   ? 'Sign In'
                   : 'Send Verification Code'}
               </button>
-
-              {isLogin && (
-                <button
-                  type="button"
-                  onClick={handleQuickDemoLogin}
-                  disabled={loading}
-                  style={{
-                    marginTop: '10px',
-                    width: '100%',
-                    padding: '10px',
-                    background: 'rgba(59, 130, 246, 0.1)',
-                    border: '1px solid rgba(59, 130, 246, 0.3)',
-                    color: '#60a5fa',
-                    borderRadius: '8px',
-                    fontSize: '0.86rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <Zap size={15} /> ⚡ 1-Click Demo Login (Admin)
-                </button>
-              )}
             </form>
           </>
         )}

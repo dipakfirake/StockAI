@@ -2222,3 +2222,22 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - Backend unit tests in `backend/tests/test_auth_pro_access.py`: **7/7 PASSED (100% green in 37.55s)**.
 - **System Response:** Documented root causes, pushed code fixes to GitHub, provided server Nginx fix command, and provided database account verification commands.
 
+---
+
+### Session Entry 39: Decommissioning Demo Login & Hardening Production Authentication
+- **Timestamp:** 2026-10-28 18:40:00 IST (13:10:00 UTC)
+- **User Prompt:**
+  `"remove that demo login now"`
+- **Agent Technical Actions:**
+  1. **Demo Login Decommissioning**:
+     - Removed `handleQuickDemoLogin` and the `1-Click Demo Login (Admin)` button JSX from `frontend/src/pages/LoginPage.tsx`. Cleaned up unused `Zap` icon import.
+     - Removed `demoLogin` helper from `frontend/src/services/api.ts`.
+     - Removed `@router.post("/demo-login")` endpoint from `backend/api/auth.py` to prevent unauthorized admin token generation.
+     - Removed `test_demo_login_endpoint` from `backend/tests/test_auth_pro_access.py`.
+  2. **HeadAdmin Elevation Confirmed**:
+     - User successfully executed `backend.seed_admin` inside Docker on the live server, updating and promoting `headadmin@stockai.com` to `SUPER_ADMIN` with password `HeadAdmin@2003StockAI` and active `PRO` status.
+  3. **Verification Evidence**:
+     - Backend unit tests in `backend/tests/test_auth_pro_access.py`: **6/6 PASSED (100% green in 80.43s)**.
+     - Frontend production build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 41.22s**).
+- **System Response:** Committed changes, pushed to GitHub `origin main`, and provided instructions to pull updates and restart containers on the server.
+

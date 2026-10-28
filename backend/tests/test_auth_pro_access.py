@@ -290,34 +290,6 @@ async def test_auth_ping_lightweight_jwt_validation(mock_db):
         assert res_missing.status_code == 401
 
 
-@pytest.mark.asyncio
-async def test_demo_login_endpoint(mock_db):
-    """Verify that POST /api/auth/demo-login creates/elevates admin@stockai.com and returns valid access token."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # First call: auto-seeds user
-        res = await client.post("/api/auth/demo-login")
-        assert res.status_code == 200
-        data = res.json()
-        assert "access_token" in data
-        assert data["token_type"] == "bearer"
-        assert data["user"]["email"] == "admin@stockai.com"
-        assert data["user"]["is_admin"] is True
-        assert data["user"]["subscription_tier"] == "PRO"
-        assert data["user"]["pro_status"] == "APPROVED"
-
-        token = data["access_token"]
-        # Verify authenticated access with this token
-        me_res = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
-        assert me_res.status_code == 200
-        assert me_res.json()["email"] == "admin@stockai.com"
-        assert me_res.json()["is_admin"] is True
-
-        # Second call: loads existing user and ensures privileges
-        res2 = await client.post("/api/auth/demo-login")
-        assert res2.status_code == 200
-        assert res2.json()["user"]["email"] == "admin@stockai.com"
-
 
 
 

@@ -14,6 +14,11 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **Demo Login Decommissioning & Production Hardening (COMPLETE & VERIFIED):**
+  - **Action**: Completely removed the temporary `1-Click Demo Login (Admin)` button, `demoLogin()` API helper, and `POST /api/auth/demo-login` backend endpoint.
+  - **Status**: Production authentication is now strictly enforced via credentials (`POST /api/auth/login`) and Google OAuth. `headadmin@stockai.com` is verified active as Super Admin with Pro tier.
+  - **Verification**: Backend tests (6/6 passed) and frontend build (0 errors) passed cleanly.
+
 - **WebSocket Handshake 301 Fix & HeadAdmin Database Sync (COMPLETE & VERIFIED):**
   - **WebSocket 301**: Nginx had `location /ws/ {` which sent 301 redirect for `/ws?token=...`. Browsers reject WebSocket redirects. Added `@ws_router.websocket("/ws/")` in `backend/api/websocket.py` and changed Nginx config to `location /ws {`.
   - **HeadAdmin 401**: Database on Oracle Cloud server (`stockdb`) holds independent user table. Provided verification and password reset scripts via `docker exec`.
