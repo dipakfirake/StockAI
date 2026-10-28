@@ -14,6 +14,29 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **Market-Hours Dynamic Cache TTL & AI Model Prediction Freshness (COMPLETE & VERIFIED):**
+  - **Identified Root Causes**:
+    - Daily candles were cached with hardcoded 1-hour TTL (`CACHE_TTL_DAILY_CANDLES = 3600`) in `backend/core/config.py`, causing daily candles and indicators to freeze for an hour during active trading.
+    - Fallback candle fetching in `backend/services/market_data.py` had hardcoded `ttl=300` and `ttl=1800` (30 min).
+    - Screener symbol analysis (`_analyze_symbol`) cached the entire swing setup and `"ml_score": ai_res` with hardcoded `ttl=900` (15 min).
+    - Missing tip-of-candle synchronization: `quote` held the live price (e.g. ₹2,550), while `candles` ended at the old cached close (e.g. ₹2,480). Indicators and deep learning models were evaluated on the stale candle array without updating the tip.
+  - **Permanent Solutions Implemented**:
+    1. **Dynamic Market-Hours Cache Engine (`backend/core/market_hours.py`)**:
+       - `is_indian_market_open(dt_utc)`: Accurately detects active NSE/BSE trading sessions (Mon-Fri 09:15 to 15:30 IST, excluding exchange holidays).
+       - `get_dynamic_candle_ttl(timeframe)`: 5s intraday and 30s daily during open market; 1,800s intraday and 43,200s (12h) when market is closed.
+       - `get_dynamic_screener_ttl()`: 60s when market is open; 3,600s (1h) when market is closed.
+    2. **Tip-of-Candle Real-Time Synchronization (`backend/services/market_data.py`)**:
+       - Implemented `MarketDataService.synchronize_candle_tip(candles, quote)`: synchronizes today's active forming candle (`close = live_price`, `high = max(high, live_price)`, `low = min(low, live_price)`, updates `volume`) or synthesizes/appends a forming candle when market is open.
+       - Replaced hardcoded candle cache writes in `fetch_candles` with dynamic TTLs.
+    3. **Model Prediction & Screener Integration**:
+       - Updated `backend/services/screener.py` to synchronize candle tip before computing indicators and scoring, and switched to `get_dynamic_screener_ttl()`.
+       - Updated `backend/api/stocks.py` to synchronize candle tip in `get_stock_insight` and `get_ai_score`, and passed `candles=candles` to enable the full Tri-Model ensemble in insights.
+       - Updated `backend/api/ai_engine.py` to fetch quote concurrently and synchronize candle tip in `/score/{symbol}`, `/scan`, and `/chat`.
+  - **Verification Evidence**:
+    - Dedicated test suite `backend/tests/test_cache_freshness_and_sync.py`: **10/10 PASSED (100% green)**.
+    - Full backend regression test suite: **174/174 PASSED (100% green in 154.85s)**.
+    - Frontend production build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 30.91s**).
+
 - **Hardcoded Demo Admin Fallback Eradication (COMPLETE & VERIFIED):**
   - **Vulnerability Closed**: Removed all hardcoded `admin@stockai.com` admin-elevation checks across backend routes (`auth.py`, `admin.py`, `settings.py`, `sentinel.py`, `subscription.py`, `backtesting.py`) and frontend components (`NavBar.tsx`, `AdminPage.tsx`, `SettingsPage.tsx`, `usePresence.ts`).
   - **Enforcement**: Admin status is now strictly governed by the database boolean column `is_admin == True`. Public registrations (email, OTP, Google OAuth) strictly produce `is_admin = False` and `subscription_tier = 'FREE'`.

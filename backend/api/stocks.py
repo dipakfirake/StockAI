@@ -51,6 +51,9 @@ async def get_stock_insight(
     if not quote or not isinstance(quote, dict):
         raise HTTPException(status_code=404, detail=f"No quote data found for {safe_symbol}")
 
+    # Synchronize candle tip with live quote to ensure latest bar and indicators reflect CMP
+    candles = market_data_service.synchronize_candle_tip(candles, quote)
+
     price = float(quote.get("price", 0.0))
 
     # Compute dynamic 52W High & Low from historical candles or preserved metadata
@@ -139,7 +142,7 @@ async def get_stock_insight(
         "risk": analyse_risk(series_candles),
         "indicators": indicators,
         "signals": signal_engine.evaluate(indicators, quote["symbol"], safe_tf) if indicators else [],
-        "ai_score": ai_engine_service.score(indicators, quote["symbol"]) if indicators else None,
+        "ai_score": ai_engine_service.score(indicators, quote["symbol"], candles=candles) if indicators else None,
         "patterns": patterns,
         "events": events,
         "news": news,
@@ -253,11 +256,15 @@ async def get_ai_score(
     """Get AI buy/hold/sell score with SHAP-style explanation."""
     safe_symbol = sanitize_symbol(symbol)
     safe_tf = validate_timeframe(timeframe)
-    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=250)
-    if len(candles) < 30:
+    quote_task = market_data_service.fetch_quote(safe_symbol)
+    candles_task = market_data_service.fetch_candles(safe_symbol, safe_tf, limit=250)
+    quote, candles = await asyncio.gather(quote_task, candles_task, return_exceptions=True)
+    if isinstance(candles, Exception) or len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data to compute AI score")
+    if not isinstance(quote, Exception) and quote:
+        candles = market_data_service.synchronize_candle_tip(candles, quote)
     indicators = indicator_service.compute_all(candles)
-    score = ai_engine_service.score(indicators, safe_symbol)
+    score = ai_engine_service.score(indicators, safe_symbol, candles=candles)
     return score
 
 

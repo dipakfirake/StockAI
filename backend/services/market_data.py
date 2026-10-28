@@ -13,6 +13,7 @@ import yfinance as yf
 from backend.core.config import settings
 from backend.core.logging_config import get_logger
 from backend.core.cache import cache_get, cache_set
+from backend.core.market_hours import get_dynamic_candle_ttl, is_indian_market_open, get_current_ist_time
 from fyers_apiv3 import fyersModel
 
 logger = get_logger(__name__)
@@ -30,6 +31,62 @@ class MarketDataService:
     Fetches and caches OHLCV market data from yfinance.
     Supports NSE symbols (e.g., RELIANCE.NS) and BSE symbols (e.g., RELIANCE.BO).
     """
+
+    @staticmethod
+    def synchronize_candle_tip(candles: list[dict], quote: Optional[dict]) -> list[dict]:
+        """
+        Synchronize the tip (most recent forming candle) with live quote data.
+        
+        Ensures that downstream technical indicator calculations and AI model inference
+        (LightGBM, BiLSTM, Transformer) immediately reflect real-time live market ticks
+        instead of lagging behind delayed candle aggregations.
+        """
+        if not candles or not isinstance(candles, list):
+            return candles
+        if not quote or not isinstance(quote, dict):
+            return candles
+
+        try:
+            live_price = float(quote.get("price") or 0.0)
+            if not math.isfinite(live_price) or live_price <= 0:
+                return candles
+
+            synced_candles = [dict(c) for c in candles]
+            last_c = dict(synced_candles[-1])
+
+            quote_high = float(quote.get("high") or live_price)
+            quote_low = float(quote.get("low") or live_price)
+            quote_vol = int(quote.get("volume") or 0)
+
+            last_ts_str = str(last_c.get("timestamp", ""))
+            now_ist = get_current_ist_time()
+            today_date_str = now_ist.strftime("%Y-%m-%d")
+
+            # If last candle is from today (or market is open and it's the current session):
+            if today_date_str in last_ts_str or (last_ts_str and last_ts_str[:10] == today_date_str):
+                last_c["close"] = live_price
+                last_c["high"] = max(float(last_c.get("high", live_price)), live_price, quote_high)
+                last_c["low"] = min(float(last_c.get("low", live_price)), live_price, quote_low)
+                if quote_vol > int(last_c.get("volume", 0)):
+                    last_c["volume"] = quote_vol
+                synced_candles[-1] = last_c
+            elif is_indian_market_open():
+                # Form new active session candle if market is live and candle series hasn't incorporated today
+                open_p = float(quote.get("open") or live_price)
+                new_candle = {
+                    "timestamp": now_ist.isoformat(),
+                    "open": open_p,
+                    "high": max(open_p, live_price, quote_high),
+                    "low": min(open_p, live_price, quote_low),
+                    "close": live_price,
+                    "volume": quote_vol,
+                }
+                synced_candles.append(new_candle)
+
+            return synced_candles
+        except Exception as e:
+            logger.debug(f"Error synchronizing candle tip: {e}")
+            return candles
 
     @staticmethod
     def _normalise_symbol(symbol: str) -> str:
@@ -910,7 +967,7 @@ class MarketDataService:
                             logger.warning(f"Fyers returned stale historical candles for {fyers_symbol} ending {latest_dt.date()}. Invoking fallback.")
                             raise ValueError(f"Fyers candles stale for {fyers_symbol}")
 
-                    ttl = settings.CACHE_TTL_INTRADAY if timeframe in ("1m", "5m", "15m", "30m") else settings.CACHE_TTL_DAILY_CANDLES
+                    ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
                     await cache_set(cache_key, formatted_candles, ttl=ttl)
                     return formatted_candles
                 else:
@@ -981,16 +1038,19 @@ class MarketDataService:
                 if len(fallback_candles) < 30 and original_symbol.endswith(".BO"):
                     nse_candles = await MarketDataService.fetch_candles(f"{clean_sym}.NS", timeframe, limit, start_date, end_date)
                     if len(nse_candles) > len(fallback_candles):
-                        await cache_set(cache_key, nse_candles, ttl=300)
+                        ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
+                        await cache_set(cache_key, nse_candles, ttl=ttl)
                         return nse_candles
 
                 if fallback_candles:
-                    await cache_set(cache_key, fallback_candles, ttl=300)
+                    ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
+                    await cache_set(cache_key, fallback_candles, ttl=ttl)
                     return fallback_candles
             elif original_symbol.endswith(".BO"):
                 nse_candles = await MarketDataService.fetch_candles(f"{clean_sym}.NS", timeframe, limit, start_date, end_date)
                 if nse_candles:
-                    await cache_set(cache_key, nse_candles, ttl=300)
+                    ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
+                    await cache_set(cache_key, nse_candles, ttl=ttl)
                     return nse_candles
         except Exception as e:
             logger.debug(f"yfinance candle fetch failed for {original_symbol}: {e}")
@@ -1053,7 +1113,7 @@ class MarketDataService:
                             direct_candles.sort(key=lambda x: x["timestamp"])
                             if limit and len(direct_candles) > limit:
                                 direct_candles = direct_candles[-limit:]
-                            ttl = settings.CACHE_TTL_INTRADAY if timeframe in ("1m", "5m", "15m", "30m") else settings.CACHE_TTL_DAILY_CANDLES
+                            ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
                             await cache_set(cache_key, direct_candles, ttl=ttl)
                             return direct_candles
         except Exception as e:

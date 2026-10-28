@@ -12,6 +12,7 @@ import numpy as np
 
 from backend.core.logging_config import get_logger
 from backend.core.cache import cache_get, cache_set
+from backend.core.market_hours import get_dynamic_screener_ttl
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service, candles_to_df
 from backend.services.signals import signal_engine
@@ -158,8 +159,8 @@ class ScreenerService:
             "all_results": all_results
         }
 
-        # Cache for 5 minutes (300 seconds)
-        await cache_set(cache_key, output, ttl=300)
+        # Dynamic market-hours cache (60s open, 1 hour closed)
+        await cache_set(cache_key, output, ttl=get_dynamic_screener_ttl())
         return output
 
     @staticmethod
@@ -191,7 +192,11 @@ class ScreenerService:
             if isinstance(info, Exception): info = {}
             if isinstance(events, Exception): events = {}
             if isinstance(news, Exception): news = []
-                
+
+            # Synchronize candle tip with live quote to ensure latest bar and indicators reflect CMP
+            if quote:
+                candles = market_data_service.synchronize_candle_tip(candles, quote)
+
             indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
             
             # 2.5 Market Relative Strength (Accuracy Upgrade)
@@ -429,8 +434,8 @@ class ScreenerService:
                 "ml_score": ai_res
             }
             
-            # Cache for 15 minutes
-            await cache_set(cache_key, result, ttl=900)
+            # Dynamic market-hours cache (60s open, 1 hour closed)
+            await cache_set(cache_key, result, ttl=get_dynamic_screener_ttl())
             return result
             
         except Exception as e:

@@ -23,9 +23,13 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_TTL_QUOTE: int = 3           # 3 seconds cache (WebSocket streams sub-second ticks in real-time)
-    CACHE_TTL_DAILY_CANDLES: int = 3600 # 1 hour
+    CACHE_TTL_DAILY_CANDLES: int = 3600 # 1 hour (legacy fallback)
+    CACHE_TTL_DAILY_MARKET_OPEN: int = 30       # 30 seconds for daily candles during active trading hours
+    CACHE_TTL_DAILY_MARKET_CLOSED: int = 43200  # 12 hours for daily candles when market is closed
     CACHE_TTL_INTRADAY: int = 5        # 5 seconds
     CACHE_TTL_INDEX_QUOTE: int = 3     # 3 seconds for index quotes
+    CACHE_TTL_SCREENER_OPEN: int = 60          # 1 minute screener analysis during active trading
+    CACHE_TTL_SCREENER_CLOSED: int = 3600      # 1 hour screener analysis when market is closed
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"

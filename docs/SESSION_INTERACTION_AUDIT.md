@@ -2267,5 +2267,29 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
   3. **Verification Evidence**:
      - Backend tests: **23/23 PASSED in test_auth_pro_access.py and test_email_intelligence_and_auth.py (100% green in 65.80s)**.
      - Frontend production build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 40.91s**).
-- **System Response:** Committed changes, pushed to GitHub `origin main`, provided server instructions to delete/deactivate any existing `admin@stockai.com` account from PostgreSQL, and confirmed that only `headadmin@stockai.com` retains Super Admin rights.
+### Session Entry 41: Dynamic Market-Hours Cache Engine & Model Prediction Freshness Synchronization
+- **Timestamp:** 2026-10-28 19:40:00 IST (14:10:00 UTC)
+- **User Prompt:**
+  `"check that is cache as its expiry because of i think it stores old data too for models predictions. check /goal /plan"`
+- **Agent Technical Actions:**
+  1. **Comprehensive Caching & Prediction Staleness Audit**:
+     - Identified root causes of prediction lag: `CACHE_TTL_DAILY_CANDLES = 3600` (1 hour) in `backend/core/config.py`, hardcoded `ttl=300` and `ttl=1800` in `backend/services/market_data.py`, and hardcoded `ttl=900` (15 min) in `backend/services/screener.py`.
+     - Identified missing tip synchronization: `quote` held live CMP while `candles` lagged, feeding sequential deep-learning models (BiLSTM, Transformer) and technical indicators outdated candle closes.
+  2. **Dynamic Market-Hours Cache Engine (`backend/core/market_hours.py`)**:
+     - Implemented `is_indian_market_open(dt_utc)` determining whether NSE/BSE equities are in an active trading session (Mon-Fri 09:15-15:30 IST, excluding exchange holidays).
+     - Implemented `get_dynamic_candle_ttl(timeframe)`: 5s intraday and 30s daily during open market; 1,800s intraday and 43,200s (12h) when market is closed.
+     - Implemented `get_dynamic_screener_ttl()`: 60s when market is open; 3,600s (1h) when market is closed.
+  3. **Tip-of-Candle Real-Time Synchronization (`backend/services/market_data.py`)**:
+     - Built `MarketDataService.synchronize_candle_tip(candles, quote)`: updates today's active forming candle (`close = live_price`, `high = max(high, live_price)`, `low = min(low, live_price)`, updates `volume`) or appends a forming candle during active market hours.
+     - Updated all candle cache writes in `fetch_candles` to use `get_dynamic_candle_ttl(timeframe)`.
+  4. **Full Prediction Pipeline Alignment**:
+     - `backend/services/screener.py`: Synchronized candle tip in `_analyze_symbol` before computing indicators and scoring, and switched to `get_dynamic_screener_ttl()`.
+     - `backend/api/stocks.py`: Synchronized candle tip in `get_stock_insight` and `get_ai_score`, and passed `candles=candles` to enable the full Tri-Model ensemble in insights.
+     - `backend/api/ai_engine.py`: Concurrently fetched live quote and synchronized candle tip in `/score/{symbol}`, `/scan`, and `/chat`.
+  5. **Automated Testing & Verification**:
+     - Created `backend/tests/test_cache_freshness_and_sync.py` with 10 unit tests covering market hours, holidays, dynamic TTLs, and candle tip sync: **10/10 PASSED (100% green)**.
+     - Executed full backend test suite: **174/174 PASSED (100% green in 154.85s)**.
+     - Executed frontend production build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 30.91s**).
+- **System Response:** Documented implementation in implementation plan and walkthrough artifacts, updated handoff and session audit ledgers, committed and pushed changes to GitHub `origin main`, and provided user with copy-pasteable server update commands.
 
+---

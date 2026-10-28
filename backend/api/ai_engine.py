@@ -1,5 +1,6 @@
 """AI Engine API router."""
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.core.auth import get_current_user, require_pro_tier
 from backend.services.market_data import market_data_service
@@ -16,9 +17,13 @@ async def get_ai_score(
     current_user=Depends(require_pro_tier),
 ):
     """Get AI buy/hold/sell score with SHAP-style explanation and Tri-Model Ensemble (LightGBM + BiLSTM + Transformer)."""
-    candles = await market_data_service.fetch_candles(symbol.upper(), timeframe, limit=250)
-    if len(candles) < 30:
+    quote_task = market_data_service.fetch_quote(symbol.upper())
+    candles_task = market_data_service.fetch_candles(symbol.upper(), timeframe, limit=250)
+    quote, candles = await asyncio.gather(quote_task, candles_task, return_exceptions=True)
+    if isinstance(candles, Exception) or len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data for AI scoring")
+    if not isinstance(quote, Exception) and quote:
+        candles = market_data_service.synchronize_candle_tip(candles, quote)
     indicators = indicator_service.compute_all(candles)
     return ai_engine_service.score(indicators, symbol.upper(), candles=candles)
 
@@ -37,8 +42,12 @@ async def scan_stocks(
     results = []
     for sym in symbol_list:
         try:
-            candles = await market_data_service.fetch_candles(sym, timeframe, limit=250)
-            if len(candles) >= 30:
+            quote_task = market_data_service.fetch_quote(sym)
+            candles_task = market_data_service.fetch_candles(sym, timeframe, limit=250)
+            quote, candles = await asyncio.gather(quote_task, candles_task, return_exceptions=True)
+            if not isinstance(candles, Exception) and len(candles) >= 30:
+                if not isinstance(quote, Exception) and quote:
+                    candles = market_data_service.synchronize_candle_tip(candles, quote)
                 indicators = indicator_service.compute_all(candles)
                 score = ai_engine_service.score(indicators, sym, candles=candles)
                 results.append(score)
@@ -97,10 +106,14 @@ async def ai_chat(
         
         if symbol:
             try:
-                candles = await market_data_service.fetch_candles(symbol, "1d", limit=250)
-                if len(candles) >= 30:
+                quote_task = market_data_service.fetch_quote(symbol)
+                candles_task = market_data_service.fetch_candles(symbol, "1d", limit=250)
+                quote, candles = await asyncio.gather(quote_task, candles_task, return_exceptions=True)
+                if not isinstance(candles, Exception) and len(candles) >= 30:
+                    if not isinstance(quote, Exception) and quote:
+                        candles = market_data_service.synchronize_candle_tip(candles, quote)
                     indicators = indicator_service.compute_all(candles)
-                    score = ai_engine_service.score(indicators, symbol)
+                    score = ai_engine_service.score(indicators, symbol, candles=candles)
                     
                     from backend.services.advanced_indicators import AdvancedIndicators
                     from backend.services.indicators import candles_to_df
