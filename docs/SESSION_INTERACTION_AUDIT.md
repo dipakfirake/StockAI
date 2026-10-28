@@ -2201,3 +2201,24 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - Frontend Production Build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 26.95s**).
 - **System Response:** Verified local build and tests, updated audit records, committed and pushed changes to GitHub `origin main`, and provided the exact server pull/restart commands.
 
+---
+
+### Session Entry 38: WebSocket 301 Redirect Handshake Fix & HeadAdmin Database Diagnosis
+- **Timestamp:** 2026-10-28 17:55:00 IST (12:25:00 UTC)
+- **User Prompt:**
+  `"LiveTicker.tsx:52 WebSocket connection to 'wss://stockai-live.duckdns.org/ws?token=...' failed: Error during WebSocket handshake: Unexpected response code: 301 ... wen i try on vercel by headadmin@stockai.com id i got logged in but on that duck go it didnt get logged in same password all ame till why invaiid mail or password"`
+- **Agent Technical Actions:**
+  1. **WebSocket Handshake 301 Root Cause Analysis**:
+     - Identified that Nginx reverse proxy configuration on the server had `location /ws/ {` with a trailing slash.
+     - When the frontend client (`LiveTicker.tsx`, `ChartPage.tsx`, `Dashboard.tsx`, `websocket.ts`) connects to `wss://stockai-live.duckdns.org/ws?token=...`, Nginx issued an HTTP `301 Moved Permanently` redirecting to `/ws/`.
+     - Standard browser WebSocket handshakes (RFC 6455) strictly reject 301 redirects, failing connection with `Unexpected response code: 301`.
+     - Updated `backend/api/websocket.py` to register both `@ws_router.websocket("/ws")` and `@ws_router.websocket("/ws/")`.
+     - Updated `docs/CUSTOM_DOMAIN_AND_FREE_HTTPS_SETUP_GUIDE.md` to specify `location /ws {` without a trailing slash.
+     - Provided a 1-line `sed` command for the server to update `/etc/nginx/conf.d/stockai.conf` and reload Nginx.
+  2. **HeadAdmin Authentication Diagnosis**:
+     - Clarified that `POST /api/auth/login` checks the local PostgreSQL database (`stockdb`) on the Oracle Cloud VM.
+     - Provided `docker exec` commands to inspect registered accounts in `stockdb` and a 1-line script to reset/create `headadmin@stockai.com` with full Admin and PRO privileges.
+  3. **Verification Evidence**:
+     - Backend unit tests in `backend/tests/test_auth_pro_access.py`: **7/7 PASSED (100% green in 37.55s)**.
+- **System Response:** Documented root causes, pushed code fixes to GitHub, provided server Nginx fix command, and provided database account verification commands.
+

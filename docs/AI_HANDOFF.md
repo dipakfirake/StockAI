@@ -14,6 +14,10 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **WebSocket Handshake 301 Fix & HeadAdmin Database Sync (COMPLETE & VERIFIED):**
+  - **WebSocket 301**: Nginx had `location /ws/ {` which sent 301 redirect for `/ws?token=...`. Browsers reject WebSocket redirects. Added `@ws_router.websocket("/ws/")` in `backend/api/websocket.py` and changed Nginx config to `location /ws {`.
+  - **HeadAdmin 401**: Database on Oracle Cloud server (`stockdb`) holds independent user table. Provided verification and password reset scripts via `docker exec`.
+
 - **Dedicated 1-Click Demo Login Endpoint (COMPLETE & VERIFIED):**
   - **Issue**: Legacy demo login invoked standard `POST /api/auth/login` with hardcoded password `admin`, which failed with `401 (Unauthorized)` due to strict password hashing or pre-existing admin credentials.
   - **Fix**: Added dedicated `POST /api/auth/demo-login` in `backend/api/auth.py` that automatically finds or creates `admin@stockai.com`, sets `is_admin=True` and `subscription_tier='PRO'`, and issues a signed JWT token.

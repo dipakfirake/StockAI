@@ -19,6 +19,7 @@ MAX_SUBSCRIPTIONS_PER_CONNECTION = 50
 
 
 @ws_router.websocket("/ws")
+@ws_router.websocket("/ws/")
 async def general_websocket(websocket: WebSocket, token: str = ""):
     """
     General WebSocket for market data and alerts.
