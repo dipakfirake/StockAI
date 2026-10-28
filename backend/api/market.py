@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from backend.core.logging_config import get_logger
 from backend.core.config import settings
 from backend.core.cache import cache_get, cache_set
-from backend.core.auth import get_current_user
+from backend.core.auth import get_current_user, get_current_user_optional
 from backend.core.param_validator import sanitize_symbol, validate_timeframe
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service
@@ -251,7 +251,7 @@ async def get_market_events(current_user=Depends(get_current_user)):
 
 
 @router.get("/indices")
-async def get_market_indices(current_user=Depends(get_current_user)):
+async def get_market_indices(current_user=Depends(get_current_user_optional)):
     """Get real-time quotes for major Indian indices directly via Fyers API."""
     cache_key = "market:indices:v4"
     cached = await cache_get(cache_key)

@@ -11,6 +11,7 @@ import {
   Search,
   Crown,
   LogOut,
+  LogIn,
   Menu,
   X,
   Sun,
@@ -78,7 +79,7 @@ export default function NavBar() {
           </div>
         )}
 
-        {user && (
+        {user ? (
           <div className="nav-actions" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <StockSearchBox width={220} placeholder="Search symbol or company..." />
             
@@ -160,6 +161,39 @@ export default function NavBar() {
             >
               <LogOut size={16} />
             </button>
+          </div>
+        ) : (
+          <div className="nav-actions" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button 
+              onClick={toggleTheme}
+              title="Toggle Theme"
+              style={{
+                flexShrink: 0,
+                background: 'transparent', border: 'none', color: 'var(--color-text-primary)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '50%'
+              }}
+            >
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <NavLink 
+              to="/login"
+              style={{
+                flexShrink: 0,
+                background: '#3b82f6',
+                color: 'white',
+                padding: '6px 16px',
+                borderRadius: '8px',
+                textDecoration: 'none',
+                fontSize: '0.84rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 8px rgba(59, 130, 246, 0.3)'
+              }}
+            >
+              <LogIn size={15} /> Sign In
+            </NavLink>
           </div>
         )}
       </div>
@@ -365,6 +399,30 @@ export default function NavBar() {
                 >
                   <LogOut size={14} /> Logout
                 </button>
+              </div>
+            )}
+
+            {!user && (
+              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <NavLink
+                  to="/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  style={{
+                    padding: '10px 14px',
+                    background: '#3b82f6',
+                    color: 'white',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    textAlign: 'center',
+                    textDecoration: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <LogIn size={16} /> Sign In / Create Account
+                </NavLink>
               </div>
             )}
           </div>

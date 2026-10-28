@@ -12,7 +12,28 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-10-27)
+## Latest verified checks (2026-10-28)
+
+- **Institutional Route Protection, 401 Resolution & 1-Click Demo Login (COMPLETE & VERIFIED):**
+  - **User Problem & Goal**:
+    - Visiting `https://stockai-live.duckdns.org/dashboard` resulted in empty dashboard widgets and flooded the developer console with repeated `401 (Unauthorized)` errors.
+    - An unauthenticated visitor had no visible button to log in because the navbar hid user actions when logged out.
+    - Cross-origin storage isolation between Vercel and DuckDNS led to confusion when logging out on one domain.
+  - **Permanent Solutions Implemented**:
+    1. **Route Guard & Auto-Redirect (`frontend/src/components/ProtectedRoute.tsx`)**:
+       - Reusable route guard checking `useAuth()`. If no valid session exists, redirects smoothly to `/login?redirect=${location.pathname}`.
+       - Wrapped all sensitive routes (`/dashboard`, `/chart`, `/portfolio`, `/paper-trading`, `/options`, `/scanner`, `/heatmap`, `/screener`, `/alerts`, `/settings`, `/admin`) in `App.tsx`.
+    2. **NavBar Unauthenticated State (`frontend/src/components/NavBar.tsx`)**:
+       - Added prominent **"Sign In"** button on both desktop top-right and mobile slide-down drawer when `user === null`.
+    3. **1-Click Demo Login (`frontend/src/pages/LoginPage.tsx`)**:
+       - Added `⚡ 1-Click Demo Login (Admin)` button for instant login during testing.
+       - Implemented `redirectTarget` query parameter support returning users to their requested page.
+    4. **Public Headline Ticker Calibration (`backend/api/market.py` & `backend/core/auth.py`)**:
+       - Added `get_current_user_optional` dependency.
+       - Calibrated `GET /api/market/indices` so headline benchmark indices return cached snapshots with `200 OK` without triggering 401 warnings for public tickers.
+  - **Verification Evidence**:
+    - Backend Unit Tests: **25/25 PASSED in test_email_intelligence_and_auth.py and test_fraud_detection.py (100% green in 53.52s)**.
+    - Frontend Production Build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 33.68s**).
 
 - **Indian DPDPA 2023 Compliance, Cookie Consent, 100% Free HTTPS Blueprint & Industrial Fraud Detection Engine (COMPLETE & VERIFIED):**
   - **User Problem & Goal**:

@@ -23,6 +23,7 @@ import { PresenceProvider } from './PresenceContext'
 import AIAssistantWidget from './components/AIAssistantWidget'
 import { ToastContainer, toast } from './components/Toast'
 import { ReconnectingBanner } from './components/ReconnectingBanner'
+import ProtectedRoute from './components/ProtectedRoute'
 import CookieConsentBanner from './components/CookieConsentBanner'
 import { alertWebSocket } from './services/websocket'
 import { useEffect } from 'react'
@@ -52,26 +53,26 @@ export default function App() {
           <main className="main-content">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/chart" element={<ChartPage />} />
-              <Route path="/screener" element={<SwingScreenerPage />} />
-              <Route path="/scanner" element={<ScannerPage />} />
-              <Route path="/heatmap" element={<HeatmapPage />} />
-              <Route path="/options" element={<OptionsChainPage />} />
-              <Route path="/smc-watchlist" element={<SMCWatchlist />} />
-              <Route path="/alerts" element={<AlertsPage />} />
-              <Route path="/paper-trading" element={<PaperTradingPage />} />
-              <Route path="/backtest" element={<BacktestPage />} />
-              <Route path="/portfolio" element={<PortfolioPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/chart" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+              <Route path="/screener" element={<ProtectedRoute><SwingScreenerPage /></ProtectedRoute>} />
+              <Route path="/scanner" element={<ProtectedRoute><ScannerPage /></ProtectedRoute>} />
+              <Route path="/heatmap" element={<ProtectedRoute><HeatmapPage /></ProtectedRoute>} />
+              <Route path="/options" element={<ProtectedRoute><OptionsChainPage /></ProtectedRoute>} />
+              <Route path="/smc-watchlist" element={<ProtectedRoute><SMCWatchlist /></ProtectedRoute>} />
+              <Route path="/alerts" element={<ProtectedRoute><AlertsPage /></ProtectedRoute>} />
+              <Route path="/paper-trading" element={<ProtectedRoute><PaperTradingPage /></ProtectedRoute>} />
+              <Route path="/backtest" element={<ProtectedRoute><BacktestPage /></ProtectedRoute>} />
+              <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
+              <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
               <Route path="/pricing" element={<PricingPage />} />
-              <Route path="/admin" element={<AdminPage />} />
-              <Route path="/admin/sentinel" element={<SentinelMonitorPage />} />
+              <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
+              <Route path="/admin/sentinel" element={<ProtectedRoute><SentinelMonitorPage /></ProtectedRoute>} />
               <Route path="/login" element={<LoginPage />} />
               {/* AI Forecast & Prediction Route Aliases */}
-              <Route path="/predictions" element={<ChartPage />} />
-              <Route path="/prediction" element={<ChartPage />} />
-              <Route path="/forecast" element={<ChartPage />} />
+              <Route path="/predictions" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+              <Route path="/prediction" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+              <Route path="/forecast" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
               {/* Catch-all fallback so unmatched routes never show a blank screen */}
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>

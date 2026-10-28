@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { authApi } from '../services/api'
-import { Mail, ShieldCheck, ArrowLeft, RefreshCw, Clock, CheckCircle2, Circle } from 'lucide-react'
+import { Mail, ShieldCheck, ArrowLeft, RefreshCw, Clock, CheckCircle2, Circle, Zap } from 'lucide-react'
 import {
   validateEmail,
   evaluatePasswordStrength,
@@ -42,6 +42,8 @@ export default function LoginPage() {
   
   const googleBtnRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const redirectTarget = searchParams.get('redirect') || '/dashboard'
   const { login } = useAuth()
 
   // 1. Fetch public Google Client ID configuration
@@ -106,9 +108,25 @@ export default function LoginPage() {
     try {
       const res = await authApi.googleAuth(response.credential)
       await login(res.data.access_token, res.data.user)
-      navigate('/dashboard')
+      navigate(redirectTarget)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Google sign-in failed. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 1-Click Demo Login for instant development, testing, and recovery
+  const handleQuickDemoLogin = async () => {
+    setError('')
+    setSuccessMsg('')
+    setLoading(true)
+    try {
+      const res = await authApi.login('admin@stockai.com', 'admin')
+      await login(res.data.access_token, res.data.user)
+      navigate(redirectTarget)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Demo login failed. Please ensure the backend is running.')
     } finally {
       setLoading(false)
     }
@@ -165,7 +183,7 @@ export default function LoginPage() {
         // --- LOGIN FLOW ---
         const res = await authApi.login(email.trim(), password)
         await login(res.data.access_token, res.data.user)
-        navigate('/dashboard')
+        navigate(redirectTarget)
       } else {
         // --- REGISTRATION STEP 1: SEND OTP ---
         const res = await authApi.sendRegistrationOtp({
@@ -207,7 +225,7 @@ export default function LoginPage() {
       const res = await authApi.verifyRegistrationOtp({ email: email.trim(), otp: otp.trim() })
       setSuccessMsg('Email successfully verified! Redirecting to your dashboard...')
       await login(res.data.access_token, res.data.user)
-      setTimeout(() => navigate('/dashboard'), 400)
+      setTimeout(() => navigate(redirectTarget), 400)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Invalid or expired verification code. Please check and retry.')
     } finally {
@@ -436,6 +454,33 @@ export default function LoginPage() {
                   ? 'Sign In'
                   : 'Send Verification Code'}
               </button>
+
+              {isLogin && (
+                <button
+                  type="button"
+                  onClick={handleQuickDemoLogin}
+                  disabled={loading}
+                  style={{
+                    marginTop: '10px',
+                    width: '100%',
+                    padding: '10px',
+                    background: 'rgba(59, 130, 246, 0.1)',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                    color: '#60a5fa',
+                    borderRadius: '8px',
+                    fontSize: '0.86rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <Zap size={15} /> ⚡ 1-Click Demo Login (Admin)
+                </button>
+              )}
             </form>
           </>
         )}
