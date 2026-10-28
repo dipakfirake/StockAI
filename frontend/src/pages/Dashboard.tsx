@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { marketApi, aiApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
 import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, Sparkles, RefreshCw, Target, ArrowRight } from 'lucide-react'
@@ -110,15 +110,21 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const navigate = useNavigate()
 
   useEffect(() => {
+    if (!localStorage.getItem('auth_token')) {
+      navigate('/login')
+      return
+    }
     loadDashboard()
     const interval = setInterval(loadDashboard, 60000) // refresh every 60s
     return () => clearInterval(interval)
-  }, [])
+  }, [navigate])
 
   // Load AI morning brief once
   useEffect(() => {
+    if (!localStorage.getItem('auth_token')) return
     async function fetchBrief() {
       try {
         const res = await aiApi.chat('Give me a 2-sentence market morning brief for Indian NSE markets today. Be concise, data-driven, and mention the key trend.', undefined)
@@ -131,6 +137,7 @@ export default function Dashboard() {
   }, [])
 
   async function loadDashboard(manual = false) {
+    if (!localStorage.getItem('auth_token')) return
     if (manual) setRefreshing(true)
     try {
       const [indicesRes, regimeRes, vixRes, eventsRes, sectorsRes] = await Promise.allSettled([
@@ -158,6 +165,7 @@ export default function Dashboard() {
   // Continuous polling fallback to guarantee live index prices update every second
   useEffect(() => {
     const pollTimer = setInterval(async () => {
+      if (!localStorage.getItem('auth_token')) return
       try {
         const res = await marketApi.getIndices()
         if (res.data?.indices) {
