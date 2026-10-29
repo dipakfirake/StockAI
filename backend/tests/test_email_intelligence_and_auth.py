@@ -465,6 +465,10 @@ def test_sanitize_display_name():
     with pytest.raises(ValueError, match="exceed 60 characters"):
         sanitize_display_name("A" * 65)
 
+    # Rejection of blatant keyboard-mashing (0 vowels in words 4+ chars)
+    with pytest.raises(ValueError, match="genuine"):
+        sanitize_display_name("rfjfdf fdytufcvmjvj")
+
 
 def test_validate_password_strength_and_dos_protection():
     """Verify password complexity requirements and 128-character bcrypt DoS defense."""

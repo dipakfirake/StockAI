@@ -148,4 +148,12 @@ def sanitize_display_name(name: str) -> str:
     if len(clean) > 60:
         raise ValueError("Name must not exceed 60 characters.")
 
+    # Reject blatant keyboard-mashing where words lack vowels (e.g. 'rfjfdf', 'fdytufcvmjvj')
+    words = clean.split()
+    vowels = set("aeiouyAEIOUY")
+    for w in words:
+        w_letters = [c for c in w if c.isalpha()]
+        if len(w_letters) >= 4 and not any(c in vowels for c in w_letters):
+            raise ValueError("Please provide a genuine full name.")
+
     return clean
