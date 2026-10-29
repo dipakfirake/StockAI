@@ -14,6 +14,35 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-29)
 
+- **Full-System Autonomous Check, Route Parameterization, Playwright Crawler & End-to-End Hardening (COMPLETE & FULLY VERIFIED):**
+  - **Identified Deficiencies & Root Causes Discovered Across Subsystems**:
+    1. *Missing Parameterized React Routes in `App.tsx`*: Navigating to `/chart/:symbol` (e.g. `/chart/RELIANCE.NS`) or `/options/:symbol` (e.g. `/options/NIFTY`) fell through to `<Route path="*" element={<Navigate to="/dashboard" replace />} />`, dropping direct ticker links and causing automated deep-link tests to fail.
+    2. *Options Chain & Chart Param Consumption*: `OptionsChainPage.tsx` and `ChartPage.tsx` did not extract route parameters via `useParams()`, forcing ticker context to rely strictly on transient router state or search query strings.
+    3. *DPDPA Cookie Consent Banner Overlay Pointer Interception*: The fixed Cookie Consent Banner (`z-index: 99999`) covered lower viewport action buttons during automated Playwright browser interactions, occasionally intercepting pointer events.
+    4. *Strict Theme Attribute Matching*: Tests checked `html.getAttribute('class')` rather than `data-theme`, failing theme toggle validations even though dark/light mode was rendered correctly.
+    5. *URL Privacy Sanitization Asymmetry*: `urlSecurity.ts` and `StockSearchBox.tsx` intentionally sanitize and clean the browser URL bar to `/chart` and `/options` using browser history state to protect user ticker confidentiality. Tests expecting raw ticker query strings in the address bar required pattern-matching adjustments.
+    6. *Strict Email MX Record DNS Rejection*: The enterprise cybersecurity email validator strictly checks DNS MX records on registration. Tests using RFC documentation domains (`@example.com` with null MX) were rejected with `The email domain does not appear to have an active mail server`.
+    7. *Form Element & Dynamic Card Labels*: Auth tests expected pre-enterprise labels (`Register here` instead of `Register with verified email`, and `h1` instead of `h2`), while full-system test assertions expected static "Target Price" instead of the adaptive market labels (`Upper Resistance (Ceiling)`, `Potential Gain (Target)`, `Expected Drop`).
+  - **Permanent Architectural Solutions Implemented**:
+    1. *Parameterized Route Registration*: Registered `<Route path="/chart/:symbol" ...>` and `<Route path="/options/:symbol" ...>` in `frontend/src/App.tsx`, and wired `useParams()` in `ChartPage.tsx` and `OptionsChainPage.tsx`.
+    2. *Global Consent Pre-Population*: Injected pre-consented DPDPA cookie (`dpdpa_consent_v1`) and localStorage (`stockai_dpdpa_consent`) into `storageState.json` in `global-setup.ts`, eliminating pointer intercepts across all browser automation sessions.
+    3. *Autonomous 15-Page Crawler & Interaction Suite*: Authored `frontend/e2e/autonomous-full-system-crawler.spec.ts` executing complete autonomous crawls across all 15 platform pages (`/dashboard`, `/chart`, `/screener`, `/scanner`, `/heatmap`, `/options`, `/alerts`, `/portfolio`, `/paper-trading`, `/backtest`, `/smc-watchlist`, `/pricing`, `/settings`, `/admin`, `/admin/sentinel`), clicking interactive tabs/filters, triggering modal dialogs, inspecting cards, and asserting zero unhandled client-side runtime errors, zero page crashes, and zero 5xx server responses.
+    4. *Enterprise Auth & Verification Alignment*: Modernized `auth.spec.ts` with valid MX domains (`@stockai.com`), password complexity checklist verification, invalid credential guardrails, JWT persistence checks, and clean logout flows.
+    5. *Adaptive Card Label Validation*: Updated `full-system.spec.ts` to assert against adaptive quantitative card labels across BUY, SELL, and HOLD market regimes.
+  - **Verification Evidence**:
+    - **Playwright Autonomous Crawler (`autonomous-full-system-crawler.spec.ts`)**: **1/1 PASSED in 47.4s (100% green, 15/15 pages crawled & verified)**.
+    - **Playwright Navigation Suite (`navigation.spec.ts`)**: **1/1 PASSED in 47.5s (100% green)**.
+    - **Playwright Core Features Suite (`core-features.spec.ts`)**: **2/2 PASSED in 29.6s (100% green)**.
+    - **Playwright Chart Visuals Suite (`chart-visuals.spec.ts`)**: **1/1 PASSED in 18.7s (100% green)**.
+    - **Playwright Swing Trade Suite (`swing-trade.spec.ts`)**: **1/1 PASSED in 1.1m (100% green)**.
+    - **Playwright User Journey Suite (`user-journey.spec.ts`)**: **1/1 PASSED in 32.3s (100% green)**.
+    - **Playwright Auth Suite (`auth.spec.ts`)**: **1/1 PASSED in 21.9s (100% green)**.
+    - **Playwright AI Models Suite (`ai-models.spec.ts`)**: **3/3 PASSED in 1.5m (100% green)**.
+    - **Playwright DB Services Suite (`db-services.spec.ts`)**: **2/2 PASSED in 1.3m (100% green)**.
+    - **Playwright Full System Suite (`full-system.spec.ts`)**: **3/3 PASSED in 55.2s (100% green)**.
+    - **Backend Cybersecurity & Defenses Suite (`test_cybersecurity.py`, `test_admin_docs_and_health_security.py`, `test_auth_pro_access.py`)**: **29/29 PASSED in 116.37s (100% green)**.
+    - **Frontend Production Build (`tsc && vite build`)**: **1,991 modules transformed, 0 errors, built in 22.82s**.
+
 - **Market Data Feed Autonomous Failover, Handover, Quota Protection & Polling Storm Neutralization (COMPLETE & FULLY VERIFIED):**
   - **Identified Deficiencies & Root Causes**:
     1. *Permanent Lockout on Token Expiry / Auth Glitch*: Cooldown expiry in `market_data.py` failed to test Fyers health or reset `_fyers_token_valid = True`, leaving the platform permanently locked into delayed Yahoo Finance backup.

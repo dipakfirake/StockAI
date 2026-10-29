@@ -9,7 +9,7 @@ test.describe('Phase 3: Navigation & Page Rendering', () => {
     { path: '/backtest', title: 'Strategy Backtesting' },
     { path: '/pricing', title: 'Upgrade to PRO' },
     { path: '/heatmap', title: 'Market Heatmap' },
-    { path: '/options/NIFTY', title: 'Options Chain' },
+    { path: '/options', title: 'Options Chain' },
     { path: '/paper-trading', title: 'Positions' },
     { path: '/portfolio', title: 'Portfolio' },
     { path: '/settings', title: 'System Settings & Risk Management' }

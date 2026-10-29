@@ -55,10 +55,12 @@ export default function App() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/chart" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+              <Route path="/chart/:symbol" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
               <Route path="/screener" element={<ProtectedRoute><SwingScreenerPage /></ProtectedRoute>} />
               <Route path="/scanner" element={<ProtectedRoute><ScannerPage /></ProtectedRoute>} />
               <Route path="/heatmap" element={<ProtectedRoute><HeatmapPage /></ProtectedRoute>} />
               <Route path="/options" element={<ProtectedRoute><OptionsChainPage /></ProtectedRoute>} />
+              <Route path="/options/:symbol" element={<ProtectedRoute><OptionsChainPage /></ProtectedRoute>} />
               <Route path="/smc-watchlist" element={<ProtectedRoute><SMCWatchlist /></ProtectedRoute>} />
               <Route path="/alerts" element={<ProtectedRoute><AlertsPage /></ProtectedRoute>} />
               <Route path="/paper-trading" element={<ProtectedRoute><PaperTradingPage /></ProtectedRoute>} />

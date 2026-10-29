@@ -6,9 +6,16 @@ test.describe('Full User-Journey Functional Testing', () => {
     await page.goto('/dashboard');
     await expect(page.locator('text=Market Dashboard')).toBeVisible({ timeout: 120000 });
     
+    // Dismiss cookie banner if visible
+    const acceptCookiesBtn = page.getByRole('button', { name: /accept all|accept/i }).first();
+    if (await acceptCookiesBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await acceptCookiesBtn.click();
+      await page.waitForTimeout(300);
+    }
+    
     // 2. Test the Theme Toggle Button
     const htmlElement = page.locator('html');
-    const initialTheme = await htmlElement.getAttribute('class');
+    const initialTheme = await htmlElement.getAttribute('data-theme') || await htmlElement.getAttribute('class');
     
     // Find theme toggle button (usually an icon button in the navbar, we'll look for sun/moon or theme toggle aria label)
     // Looking for the button that switches theme
@@ -16,7 +23,7 @@ test.describe('Full User-Journey Functional Testing', () => {
     if (await themeBtn.count() > 0) {
       await themeBtn.click();
       await page.waitForTimeout(500);
-      const newTheme = await htmlElement.getAttribute('class');
+      const newTheme = await htmlElement.getAttribute('data-theme') || await htmlElement.getAttribute('class');
       expect(newTheme).not.toBe(initialTheme);
       // Click again to revert
       await themeBtn.click();
@@ -34,7 +41,7 @@ test.describe('Full User-Journey Functional Testing', () => {
     await suggestion.click();
     
     // Verify it navigates to the chart
-    await page.waitForURL(/\/chart\/TCS\.NS/, { timeout: 120000 });
+    await page.waitForURL(/\/chart/, { timeout: 120000 });
     await expect(page.locator('text=Chart Analysis')).toBeVisible({ timeout: 120000 });
     
     // 4. Test Paper Trading Execution

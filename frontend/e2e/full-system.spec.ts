@@ -13,7 +13,7 @@ const ROUTES = [
   { path: '/paper-trading', label: 'Positions' },
   { path: '/backtest', label: 'Strategy Backtesting' },
   { path: '/portfolio', label: 'Portfolio' },
-  { path: '/settings', label: 'System Settings & Risk Management' },
+  { path: '/settings', label: 'Platform & Trading Preferences' },
 ];
 
 const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -60,10 +60,14 @@ test.describe('Full System QA: Navigation, Search, Charting, and Quant Validatio
       const suggestion = listbox.locator(`[data-testid="stock-search-option-${stock.symbol}"]`).first();
       await expect(suggestion).toBeVisible({ timeout: 120000 });
       await suggestion.click();
-      await page.waitForURL(new RegExp(`/chart/${escapeRegExp(stock.symbol)}`), { timeout: 120000 });
+      await page.waitForURL(/\/chart/, { timeout: 120000 });
+      await expect(page.locator('body')).toContainText(stock.name, { timeout: 120000 });
 
       await expect(page.locator('text=Swing Trade Analysis')).toBeVisible({ timeout: 160000 });
-      const targetPriceLabel = page.locator('text=Target Price').or(page.locator('text=Upper Bound'));
+      const targetPriceLabel = page.locator('text=Upper Resistance')
+        .or(page.locator('text=Potential Gain'))
+        .or(page.locator('text=Expected Drop'))
+        .or(page.locator('text=Target Price'));
       await expect(targetPriceLabel.first()).toBeVisible();
       await expect(page.locator('text=Expected Duration')).toBeVisible();
 

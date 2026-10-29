@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useNavigate, useLocation, useParams, Link } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, HistogramData, LineData } from 'lightweight-charts'
 import { stocksApi, aiApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
@@ -73,7 +73,8 @@ export default function ChartPage() {
 
   // ─── Persisted chart state (localStorage → instant restore, no flicker) ─────
   const queryParamSym = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('symbol') : null
-  const locationSymbol = (location.state as any)?.symbol || queryParamSym
+  const { symbol: routeSymbol } = useParams()
+  const locationSymbol = routeSymbol || (location.state as any)?.symbol || queryParamSym
   const [symbol, setSymbol] = useLocalStorage('chart_symbol', locationSymbol || '^NSEI')
   const [timeframe, setTimeframe] = useLocalStorage<string>('chart_timeframe', '1d')
   const [isHeikinAshi, setIsHeikinAshi] = useLocalStorage('chart_is_heikin_ashi', false)

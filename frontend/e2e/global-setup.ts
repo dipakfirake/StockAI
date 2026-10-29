@@ -17,10 +17,18 @@ async function globalSetup() {
       throw new Error(`Backend health check returned ${healthResponse.status}`);
     }
   } catch (error) {
-    throw new Error(
-      'Playwright global setup failed: backend is not reachable at http://127.0.0.1:8000. ' +
-      'Start the FastAPI backend before running frontend E2E tests.'
-    );
+    console.error('Initial health check failed, retrying on localhost...', error);
+    try {
+      const retryContext = await request.newContext({ baseURL: 'http://localhost:8000', timeout: 15000 });
+      const retryResp = await retryContext.get('/health');
+      if (!retryResp.ok()) {
+        throw new Error(`Backend health check returned ${retryResp.status}`);
+      }
+    } catch (retryErr) {
+      throw new Error(
+        `Playwright global setup failed: backend is not reachable. Error: ${error} | Retry error: ${retryErr}`
+      );
+    }
   }
 
   // 1. Register the test user
@@ -57,9 +65,28 @@ async function globalSetup() {
     }
   });
 
-  // 4. Save the token into the storageState format expected by Playwright for localStorage
+  // 4. Save the token and cookie consent into the storageState format expected by Playwright for localStorage
+  const consentObj = {
+    essential: true,
+    security: true,
+    location: false,
+    timestamp: new Date().toISOString(),
+    version: '2023.1'
+  };
+
   const storageState = {
-    cookies: [],
+    cookies: [
+      {
+        name: 'dpdpa_consent_v1',
+        value: encodeURIComponent(JSON.stringify(consentObj)),
+        domain: 'localhost',
+        path: '/',
+        expires: Math.floor(Date.now() / 1000) + 31536000,
+        httpOnly: false,
+        secure: false,
+        sameSite: 'Lax' as const
+      }
+    ],
     origins: [
       {
         origin: 'http://localhost:5173',
@@ -67,6 +94,10 @@ async function globalSetup() {
           {
             name: 'auth_token',
             value: token
+          },
+          {
+            name: 'stockai_dpdpa_consent',
+            value: JSON.stringify(consentObj)
           }
         ]
       }

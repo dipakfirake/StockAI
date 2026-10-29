@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { marketApi } from '../services/api'
 import { Activity, Target, ShieldAlert, Zap } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
@@ -7,8 +7,9 @@ import { deobfuscateTicker, sanitizeBrowserUrl } from '../utils/urlSecurity'
 
 export default function OptionsChainPage() {
   const location = useLocation()
-  // Symbol is passed via navigate state — never shown in the URL bar
-  const initialSymbol = (location.state as any)?.symbol || 'NIFTY.NS'
+  const { symbol: routeSymbol } = useParams()
+  // Symbol is passed via route param or navigate state
+  const initialSymbol = routeSymbol || (location.state as any)?.symbol || 'NIFTY.NS'
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
