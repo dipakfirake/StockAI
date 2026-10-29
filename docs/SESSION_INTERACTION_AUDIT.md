@@ -2354,3 +2354,22 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
 - **System Response:** Completed all deliverables, created technical plan and walkthrough artifacts, updated handoff and session audit ledgers, and provided copy-pasteable server deployment commands complying with STRICT LIVE SERVER ISOLATION. Concluded with `<!-- GOAL_COMPLETE -->`.
 
 ---
+
+
+### Session Entry 44: ReDoc UMD Standalone Fix & Celery Flower Authentication Portal Guidance
+- **Timestamp:** 2026-10-29 10:14:00 IST (04:44:00 UTC)
+- **User Prompt:**
+  `"redoc.standalone.js:13180 Uncaught SyntaxError: Cannot use 'import.meta' outside a module and how to open celery flower"`
+- **Agent Technical Actions:**
+  1. **Diagnosed ReDoc Standalone SyntaxError**:
+     - The CDN URL `https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js` was serving an unbundled ES module that uses `import.meta`, which browsers reject inside classic `<script>` tags.
+     - Fixed `backend/main.py`: Switched ReDoc bundle to the official stable Redocly UMD bundle `https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js`.
+  2. **Diagnosed Celery Flower Access & Browser Iframe Suppression**:
+     - Identified that modern web browsers (Chrome, Edge, Firefox) suppress HTTP Basic Auth dialogs inside iframes for security (anti-phishing).
+     - Enhanced `frontend/src/pages/AdminPage.tsx`: Added explicit step-by-step instructions and credential display for signing in to Celery Flower (`headadmin` / `HeadAdmin@2003StockAI`) in a new browser tab before using the in-page viewer.
+  3. **Verification Evidence**:
+     - Backend Security Tests (`backend/tests/test_admin_docs_and_health_security.py`): **8/8 PASSED in 32.83s (100% green)**.
+     - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 20.46s**.
+- **System Response:** Resolved the ReDoc syntax error, explained how to authenticate and open Celery Flower via browser and Admin portal, and provided Git commit/push and server pull instructions.
+
+---

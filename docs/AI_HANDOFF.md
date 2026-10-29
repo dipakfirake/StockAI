@@ -14,6 +14,12 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **ReDoc Standalone UMD Script & Celery Flower Portal Guidance (COMPLETE & VERIFIED):**
+  - **Issue**: `redoc.standalone.js:13180 Uncaught SyntaxError: Cannot use 'import.meta' outside a module`.
+  - **Fix**: Replaced unstable `redoc@next` bundle with official Redocly standalone UMD bundle `https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js` in `backend/main.py`.
+  - **Flower Access**: Documented HTTP Basic Auth authentication flow (`headadmin` / `HeadAdmin@2003StockAI`) and clarified why opening in a new browser tab is necessary before using embedded iframes.
+  - **Verification**: Backend security tests (8/8 passed in 32.83s), Frontend build (0 errors in 20.46s).
+
 - **Celery Flower, Swagger OpenAPI & Health Probe Secure HTTPS Integration on DuckDNS (COMPLETE & VERIFIED):**
   - **User Inquiry & Root Causes Identified**:
     - *Why did they work on Vercel but fail on DuckDNS?*

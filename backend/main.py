@@ -242,7 +242,7 @@ async def get_redoc_documentation(user=Depends(verify_admin_docs_access)):
     return get_redoc_html(
         openapi_url="/openapi.json",
         title="StockAI — Admin ReDoc",
-        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
+        redoc_js_url="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js",
     )
 
 

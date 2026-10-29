@@ -1863,12 +1863,22 @@ export default function AdminPage() {
               </p>
 
               {/* Security & Access Info Box */}
-              <div style={{ padding: 12, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)', fontSize: '0.8rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#f472b6', fontWeight: 600, marginBottom: 4 }}>
-                  <Lock size={13} /> Security: HTTP Basic Auth Protected
+              <div style={{ padding: 14, borderRadius: 8, background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(236, 72, 153, 0.2)', fontSize: '0.82rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#f472b6', fontWeight: 700, marginBottom: 6 }}>
+                  <Lock size={14} /> How to Open &amp; Sign In to Flower:
                 </div>
-                <div style={{ color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                  Protected by Docker &amp; Nginx. Enter your Administrator credentials (or default <code style={{ color: '#f472b6' }}>headadmin</code>) when prompted by the browser.
+                <div style={{ color: '#e2e8f0', lineHeight: 1.5, marginBottom: 8 }}>
+                  1. Click <strong>"Open Flower in New Tab"</strong> below.<br />
+                  2. When your browser pops up the sign-in prompt, enter:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 10px', background: 'rgba(0, 0, 0, 0.4)', padding: '8px 12px', borderRadius: 6, fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                  <span style={{ color: '#94a3b8' }}>Username:</span>
+                  <strong style={{ color: '#f472b6' }}>headadmin</strong>
+                  <span style={{ color: '#94a3b8' }}>Password:</span>
+                  <strong style={{ color: '#f472b6' }}>HeadAdmin@2003StockAI</strong>
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginTop: 8, fontStyle: 'italic' }}>
+                  💡 Browsers suppress login dialogs inside embedded iframes for security, so always authenticate in a separate tab first!
                 </div>
               </div>
 
