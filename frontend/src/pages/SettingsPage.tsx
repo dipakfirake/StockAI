@@ -5,7 +5,6 @@ import {
   Shield,
   ArrowRight,
   Sliders,
-  KeyRound,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { settingsApi } from '../services/api'
@@ -193,71 +192,6 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
-
-      {/* =========================================================================
-          🔐 Google OAuth 2.0 Web Client ID (Admin Only)
-         ========================================================================= */}
-      {isAdmin && (
-        <div className="card" style={{ marginTop: 24, border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <KeyRound size={20} style={{ color: '#60a5fa' }} />
-              </div>
-              <div>
-                <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0, color: '#f8fafc' }}>
-                  Google 1-Click OAuth2 Configuration
-                </h2>
-                <p style={{ margin: '2px 0 0', fontSize: 12, color: '#94a3b8' }}>
-                  Enables 1-click Google Sign-In and instant registration on the login screen
-                </p>
-              </div>
-            </div>
-            {settings['google_client_id'] ? (
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-                ✓ GOOGLE SIGN-IN ACTIVE
-              </span>
-            ) : (
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24', background: 'rgba(245, 158, 11, 0.15)', padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(245, 158, 11, 0.3)' }}>
-                ⚠️ UNCONFIGURED
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>
-              Google OAuth Client ID
-            </label>
-            <input
-              type="text"
-              className="input"
-              placeholder="e.g. 123456789012-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com"
-              value={settings['google_client_id'] || ''}
-              onChange={(e) => setSettings({ ...settings, google_client_id: e.target.value.trim() })}
-              style={{ width: '100%', fontFamily: 'monospace', fontSize: 13, padding: '10px 14px' }}
-            />
-            <p style={{ fontSize: 12, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
-              Paste the <strong>Client ID</strong> generated from Google Cloud Console. Click <strong>Save Google Client ID</strong> to activate it across all devices immediately without restarting any containers.
-            </p>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
-              <button
-                onClick={saveSettings}
-                className="btn btn-primary"
-                disabled={loading}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', fontWeight: 600 }}
-              >
-                <Save size={16} /> Save Google Client ID
-              </button>
-              {saveSuccess && (
-                <span style={{ color: '#4ade80', fontSize: 13, fontWeight: 600 }}>
-                  ✓ Google Client ID saved successfully!
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

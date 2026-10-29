@@ -2716,4 +2716,23 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
      - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 22.82s**.
 - **System Response:** Formulated comprehensive full-system audit plan, parameterized missing routes in `App.tsx`, resolved cookie consent overlay interference, authored and executed autonomous 15-page browser crawler, verified 100% pass rate across all 16 Playwright E2E tests and 29 Pytest cybersecurity defense tests, confirmed clean production build, and provided copy-pasteable server deployment commands.
 
+---
+
+### Session Entry 57: Google OAuth Frontend Card Removal & Strict .env Hardening
+- **Timestamp:** 2026-10-29 20:20:00 IST (14:50:00 UTC)
+- **User Prompt:**
+  `"yes.for security purpose"`
+- **Agent Technical Actions:**
+  1. **Frontend Attack Surface Elimination**:
+     - Removed the "Google 1-Click OAuth2 Configuration" input card from `frontend/src/pages/SettingsPage.tsx` and removed the unused `KeyRound` icon import.
+     - Confirmed that `isBrokerOrSensitiveKey` already blocks `client_id` from appearing in the generic settings key-value table.
+  2. **Native Environment Variable Configuration**:
+     - Documented `GOOGLE_CLIENT_ID=` in `.env.example`.
+     - Confirmed `backend/api/auth.py:get_auth_config` natively reads `GOOGLE_CLIENT_ID` from the backend environment (`settings.GOOGLE_CLIENT_ID` or `os.getenv("GOOGLE_CLIENT_ID")`), activating the Google Sign-In button on the login screen securely without exposing any editable configuration in the frontend UI.
+  3. **Verification Evidence**:
+     - Backend Email Intelligence & Auth Suite (`test_email_intelligence_and_auth.py`): **17/17 PASSED in 45.53s (100% green)**.
+     - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 31.39s**.
+- **System Response:** Removed Google OAuth configuration card from frontend UI, preserved native backend `.env` configuration, validated 100% test pass rate and clean production build, updated audit ledgers, and provided copy-pasteable server deployment commands.
+
+
 

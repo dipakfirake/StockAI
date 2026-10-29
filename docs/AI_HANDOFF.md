@@ -14,6 +14,18 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-29)
 
+- **Google OAuth Frontend Card Removal & Strict .env Configuration Hardening (COMPLETE & VERIFIED):**
+  - **Identified Deficiencies & Attack Surface**:
+    - `SettingsPage.tsx` previously rendered an administrative card allowing users/admins to view and paste the `Google OAuth Client ID` through an in-browser form field.
+    - Having infrastructure credentials or OAuth identifiers editable in the frontend web UI introduced unnecessary attack surface (UI tampering, session hijacking, or accidental misconfiguration).
+  - **Permanent Architectural Solutions Implemented**:
+    1. *Frontend Card Removal*: Excised the "Google 1-Click OAuth2 Configuration" input card and unused `KeyRound` icon from `frontend/src/pages/SettingsPage.tsx`.
+    2. *Native Backend .env Ingestion*: The backend (`backend/api/auth.py:get_auth_config`) continues to ingest `GOOGLE_CLIENT_ID` directly from `.env` via `settings.GOOGLE_CLIENT_ID` or `os.getenv("GOOGLE_CLIENT_ID")`, returning it securely to the login screen for Google Sign-In without exposing any editable fields in the frontend.
+    3. *Template Documentation*: Documented `GOOGLE_CLIENT_ID=` in `.env.example`.
+  - **Verification Evidence**:
+    - Backend Auth & OTP Suite (`test_email_intelligence_and_auth.py`): **17/17 PASSED in 45.53s (100% green)**.
+    - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 31.39s**.
+
 - **Full-System Autonomous Check, Route Parameterization, Playwright Crawler & End-to-End Hardening (COMPLETE & FULLY VERIFIED):**
   - **Identified Deficiencies & Root Causes Discovered Across Subsystems**:
     1. *Missing Parameterized React Routes in `App.tsx`*: Navigating to `/chart/:symbol` (e.g. `/chart/RELIANCE.NS`) or `/options/:symbol` (e.g. `/options/NIFTY`) fell through to `<Route path="*" element={<Navigate to="/dashboard" replace />} />`, dropping direct ticker links and causing automated deep-link tests to fail.
