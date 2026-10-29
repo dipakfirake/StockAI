@@ -200,6 +200,10 @@ class PresenceService:
                             item["device"] = "Desktop"
                         if not item.get("path"):
                             item["path"] = "/dashboard"
+                        if not item.get("ip"):
+                            item["ip"] = "127.0.0.1"
+                        if not item.get("location"):
+                            item["location"] = "Localhost / Internal Network"
 
                         users_list.append(item)
 
@@ -234,6 +238,10 @@ class PresenceService:
                     u_item["device"] = "Desktop"
                 if not u_item.get("path"):
                     u_item["path"] = "/dashboard"
+                if not u_item.get("ip"):
+                    u_item["ip"] = "127.0.0.1"
+                if not u_item.get("location"):
+                    u_item["location"] = "Localhost / Internal Network"
                 users_list.append(u_item)
 
             users_list.sort(key=lambda u: u.get("last_seen_seconds_ago", 999))

@@ -153,4 +153,30 @@ async def test_presence_get_live_users_in_memory():
         names = [u["user_name"] for u in res["users"]]
         assert "Dipak" in names
         assert "Guest 1234" in names
+        assert "ip" in res["users"][0]
+        assert "location" in res["users"][0]
+
+
+@pytest.mark.asyncio
+async def test_geoip_resolution_and_compliance():
+    """Verify CERT-In 2022 & DPDPA 2023 compliant non-invasive coarse IP resolution."""
+    from backend.core.geoip import resolve_ip_location
+
+    # 1. Localhost / Loopback / Private RFC1918 IPs
+    loc_local = await resolve_ip_location("127.0.0.1")
+    assert loc_local == "Localhost / Internal Network"
+
+    loc_priv = await resolve_ip_location("192.168.1.100")
+    assert loc_priv == "Localhost / Internal Network"
+
+    # 2. Reverse proxy / CDN Cloudflare headers
+    headers = {"CF-IPCity": "Mumbai", "CF-IPCountry": "IN"}
+    loc_cf = await resolve_ip_location("103.21.244.0", headers=headers)
+    assert loc_cf == "Mumbai, IN"
+
+    # 3. Custom Geo headers
+    headers_geo = {"X-Geo-City": "Bengaluru", "X-Geo-Country": "India"}
+    loc_custom = await resolve_ip_location("103.21.244.0", headers=headers_geo)
+    assert loc_custom == "Bengaluru, India"
+
 

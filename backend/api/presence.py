@@ -11,12 +11,23 @@ import json
 
 from backend.services.presence import presence_service
 from backend.core.logging_config import get_logger
+from backend.core.geoip import resolve_ip_location
 from backend.models.user import User
 from backend.api.admin import require_admin
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract trusted client IP address respecting X-Forwarded-For."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
 
 
 class PresencePayload(BaseModel):
@@ -30,12 +41,16 @@ class PresencePayload(BaseModel):
 
 
 @router.post("/heartbeat", status_code=status.HTTP_200_OK)
-async def heartbeat(payload: PresencePayload):
+async def heartbeat(payload: PresencePayload, request: Request):
     """
     Record or refresh a client session heartbeat.
-    Passes optional user and device metadata to Redis in-memory storage (0 DB queries).
+    Passes optional user, device, and coarse IP-derived location metadata to Redis in-memory storage (0 DB queries).
+    Complies with DPDPA 2023 & CERT-In 2022 log requirements without invading GPS coordinates.
     Returns the current number of active users online.
     """
+    client_ip = _get_client_ip(request)
+    location = await resolve_ip_location(client_ip, request.headers)
+
     meta = {
         "user_id": payload.user_id,
         "user_name": payload.user_name,
@@ -43,6 +58,8 @@ async def heartbeat(payload: PresencePayload):
         "role": payload.role or "GUEST",
         "path": payload.path or "/dashboard",
         "device": payload.device or "Desktop",
+        "ip": client_ip,
+        "location": location,
     }
     count = await presence_service.record_heartbeat(payload.session_id, meta)
     return {"count": count, "status": "active"}

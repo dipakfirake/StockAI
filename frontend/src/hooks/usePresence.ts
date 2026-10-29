@@ -10,6 +10,8 @@ export interface LiveUserSession {
   path: string
   device: string
   last_seen_seconds_ago: number
+  ip?: string
+  location?: string
 }
 
 /**

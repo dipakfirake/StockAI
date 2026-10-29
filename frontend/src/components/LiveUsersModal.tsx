@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { usePresenceContext } from '../PresenceContext'
-import { X, RefreshCw, Smartphone, Monitor, Shield, Crown, User, Globe, Activity } from 'lucide-react'
+import { X, RefreshCw, Smartphone, Monitor, Shield, Crown, User, Globe, Activity, MapPin } from 'lucide-react'
 
 export default function LiveUsersModal() {
   const { isModalOpen, setIsModalOpen, liveUsers, fetchLiveUsers, loadingUsers, liveCount } = usePresenceContext()
@@ -120,7 +120,7 @@ export default function LiveUsersModal() {
                 </span>
               </h2>
               <p style={{ margin: '3px 0 0 0', fontSize: '0.8rem', color: 'var(--color-text-secondary, #9ca3af)' }}>
-                Pure in-memory Redis session tracking • 0 Database Queries • Updates every 3–4s
+                Pure in-memory Redis session tracking • CERT-In 2022 & DPDPA Compliant Coarse IP Geolocation
               </p>
             </div>
           </div>
@@ -300,6 +300,19 @@ export default function LiveUsersModal() {
                       >
                         {u.path || '/dashboard'}
                       </span>
+                    </div>
+
+                    {/* Location & IP (CERT-In / DPDPA Coarse GeoIP) */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '150px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem', fontWeight: 600, color: '#f1f5f9' }}>
+                        <MapPin size={13} color="#f43f5e" style={{ flexShrink: 0 }} />
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }} title={u.location || 'Localhost / Internal Network'}>
+                          {u.location || 'Localhost / Internal Network'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.72rem', fontFamily: 'monospace', color: 'var(--color-text-secondary, #9ca3af)', paddingLeft: '18px' }} title={`Client IP: ${u.ip || '127.0.0.1'}`}>
+                        {u.ip || '127.0.0.1'}
+                      </div>
                     </div>
 
                     {/* Device Icon & Label */}

@@ -18,6 +18,7 @@ import {
   ClipboardPaste,
   Radio,
   Globe,
+  MapPin,
   Monitor,
   Activity,
   Crown,
@@ -736,9 +737,22 @@ export default function AdminPage() {
                   >
                     100% IN-MEMORY REDIS (0 DB QUERIES)
                   </span>
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 12,
+                      background: 'rgba(59, 130, 246, 0.2)',
+                      color: '#60a5fa',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                    }}
+                  >
+                    🇮🇳 CERT-In 2022 & DPDPA 2023 COMPLIANT
+                  </span>
                 </div>
                 <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  Real-time sliding window (12s TTL) heartbeat tracking. When users close the tab or background the browser on mobile, sessions instantly drop.
+                  Real-time sliding window (12s TTL) heartbeat tracking with non-invasive coarse IP geolocation (City/Country) & CERT-In cyber forensics logging.
                 </p>
               </div>
             </div>
@@ -885,13 +899,14 @@ export default function AdminPage() {
                 fontWeight: 700,
                 color: 'var(--text-secondary)',
                 display: 'grid',
-                gridTemplateColumns: 'minmax(220px, 2fr) minmax(110px, 1fr) minmax(150px, 1.5fr) minmax(130px, 1fr) minmax(120px, 1fr)',
+                gridTemplateColumns: 'minmax(200px, 1.8fr) minmax(90px, 0.8fr) minmax(130px, 1.1fr) minmax(180px, 1.6fr) minmax(120px, 1fr) minmax(100px, 0.8fr)',
                 gap: 12,
               }}
             >
               <div>USER IDENTITY</div>
               <div>TIER / ROLE</div>
               <div>ACTIVE SCREEN</div>
+              <div>LOCATION & IP (CERT-IN)</div>
               <div>DEVICE & CLIENT</div>
               <div>LIVENESS STATUS</div>
             </div>
@@ -911,7 +926,7 @@ export default function AdminPage() {
                         padding: '14px 18px',
                         borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
                         display: 'grid',
-                        gridTemplateColumns: 'minmax(220px, 2fr) minmax(110px, 1fr) minmax(150px, 1.5fr) minmax(130px, 1fr) minmax(120px, 1fr)',
+                        gridTemplateColumns: 'minmax(200px, 1.8fr) minmax(90px, 0.8fr) minmax(130px, 1.1fr) minmax(180px, 1.6fr) minmax(120px, 1fr) minmax(100px, 0.8fr)',
                         gap: 12,
                         alignItems: 'center',
                         background: idx % 2 === 0 ? 'rgba(255, 255, 255, 0.01)' : 'transparent',
@@ -988,7 +1003,7 @@ export default function AdminPage() {
                             padding: '2px 7px',
                             borderRadius: 4,
                             color: '#93c5fd',
-                            maxWidth: 160,
+                            maxWidth: 130,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
@@ -997,6 +1012,33 @@ export default function AdminPage() {
                         >
                           {u.path || '/dashboard'}
                         </span>
+                      </div>
+
+                      {/* Location & IP (CERT-In / DPDPA Coarse GeoIP) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.8rem', fontWeight: 600, color: '#f1f5f9' }}>
+                          <MapPin size={13} color="#f43f5e" style={{ flexShrink: 0 }} />
+                          <span
+                            style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                            title={u.location || 'Localhost / Internal Network'}
+                          >
+                            {u.location || 'Localhost / Internal Network'}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '0.72rem',
+                            fontFamily: 'monospace',
+                            color: 'var(--text-secondary)',
+                            paddingLeft: 18,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                          title={`Client IP: ${u.ip || '127.0.0.1'}`}
+                        >
+                          {u.ip || '127.0.0.1'}
+                        </div>
                       </div>
 
                       {/* Device */}

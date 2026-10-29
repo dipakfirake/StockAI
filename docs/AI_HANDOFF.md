@@ -14,6 +14,32 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-29)
 
+- **User Location Visibility & Indian Regulatory Compliance (CERT-In 2022 & DPDPA 2023) (COMPLETE & VERIFIED):**
+  - **Identified Regulatory Requirements & Privacy Constraints**:
+    - *Indian Government Regulations*:
+      1. **Digital Personal Data Protection Act, 2023 (DPDPA 2023)**: Sections 4–7 strictly regulate personal data collection, requiring Data Minimization and Purpose Limitation. Precise device GPS (`navigator.geolocation`) querying hardware latitude/longitude without granular, explicit separate consent is prohibited.
+      2. **CERT-In Directions (April 28, 2022 under Section 70B of IT Act, 2000)**: Explicitly mandates system and service intermediaries to maintain and log client IP addresses, user identities, and timestamps for cyber incidents, unauthorized access, and forensic tracking.
+      3. **SEBI CSCRF 2024**: Mandates real-time session monitoring and geo-velocity anomaly detection for trading and market intelligence systems.
+  - **Permanent Architectural Solutions Implemented**:
+    1. *Non-Invasive Server-Side IP Geolocation Resolver (`backend/core/geoip.py`)*:
+       - Detects loopback, link-local, and RFC 1918 private IPs via standard `ipaddress`, immediately classifying them as `"Localhost / Internal Network"`.
+       - Inspects reverse-proxy / CDN GeoIP headers (`CF-IPCity`, `CF-IPCountry`, `X-Geo-City`, `X-Geo-Country`) with case-insensitive normalization.
+       - Caches resolved geolocation in Redis under `presence:geoip:{clean_ip}` with a 24-hour TTL (`GEOIP_CACHE_TTL = 86400s`), ensuring 0ms latency on repeated heartbeats and zero external API spam.
+       - Asynchronously resolves coarse City/Country for public IPs via lightweight IP-API with non-blocking 1.5s timeout.
+    2. *Presence Ingestion (`backend/api/presence.py` & `backend/services/presence.py`)*:
+       - Extracts client IP in `POST /api/presence/heartbeat` with `X-Forwarded-For` priority.
+       - Injects coarse `location` and `ip` into Redis hash `presence:sessions_meta`.
+       - Returns `ip` and `location` in live users payload across both Redis pipeline and in-memory local fallback.
+    3. *Admin Surveillance UI Hardening (`AdminPage.tsx` & `LiveUsersModal.tsx`)*:
+       - Added `LOCATION & IP (CERT-IN)` column to Active Sessions Live Table (`/admin?tab=live`).
+       - Renders coarse City, Country with `MapPin` icon and monospace client IP address.
+       - Displayed compliance badge: `🇮🇳 CERT-In 2022 & DPDPA 2023 COMPLIANT`.
+       - Updated global `LiveUsersModal.tsx` popup with location and IP forensic metadata.
+  - **Verification Evidence**:
+    - Presence & GeoIP Unit Suite (`backend/tests/test_presence.py`): **6/6 PASSED in 37.97s (100% green)**.
+    - Frontend Production Build (`npm --prefix frontend run build`): **1,991 modules transformed, 0 errors, built in 45.82s**.
+    - Playwright Autonomous 15-Page Crawler (`autonomous-full-system-crawler.spec.ts`): **1/1 PASSED in 56.9s (100% green across all 15 platform pages)**.
+
 - **Google OAuth Frontend Card Removal & Strict .env Configuration Hardening (COMPLETE & VERIFIED):**
   - **Identified Deficiencies & Attack Surface**:
     - `SettingsPage.tsx` previously rendered an administrative card allowing users/admins to view and paste the `Google OAuth Client ID` through an in-browser form field.
