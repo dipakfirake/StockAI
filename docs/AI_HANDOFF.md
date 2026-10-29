@@ -14,6 +14,15 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-28)
 
+- **Content-Security-Policy Whitelist for ReDoc CDN & Same-Origin Iframe Embedding (COMPLETE & VERIFIED):**
+  - **Issue**: Browser blocked ReDoc script with CSP error: `Loading the script 'https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js' violates the following Content Security Policy directive: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net"`.
+  - **Fix in `backend/core/security_middleware.py`**:
+    - Whitelisted `https://cdn.redoc.ly` in `script-src`, `style-src`, `font-src`, and `img-src`.
+    - Added `worker-src 'self' blob:;` for ReDoc syntax highlighting and schema web workers.
+    - Switched `X-Frame-Options` to `SAMEORIGIN` and `frame-ancestors 'self';` so Swagger UI and Celery Flower can be securely embedded in `/admin` without third-party clickjacking risk.
+  - **Test Suite Updates**: Updated `backend/tests/test_cybersecurity.py` to assert `X-Frame-Options in ("DENY", "SAMEORIGIN")`.
+  - **Verification**: `test_security_headers_injection` passed 100%, `test_admin_docs_and_health_security.py` passed 8/8 tests.
+
 - **ReDoc Standalone UMD Script & Celery Flower Portal Guidance (COMPLETE & VERIFIED):**
   - **Issue**: `redoc.standalone.js:13180 Uncaught SyntaxError: Cannot use 'import.meta' outside a module`.
   - **Fix**: Replaced unstable `redoc@next` bundle with official Redocly standalone UMD bundle `https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js` in `backend/main.py`.

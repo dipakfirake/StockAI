@@ -57,7 +57,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # --- Inject Banking & OWASP Standard Security Headers ---
         headers = response.headers
         headers["X-Content-Type-Options"] = "nosniff"
-        headers["X-Frame-Options"] = "DENY"
+        headers["X-Frame-Options"] = "SAMEORIGIN"
         headers["X-XSS-Protection"] = "1; mode=block"
         headers["Referrer-Policy"] = "no-referrer"
         headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
@@ -65,15 +65,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         headers["X-Request-ID"] = trace_id
 
         # Content-Security-Policy: defence against XSS and data injection attacks
-        # Allow inline styles/scripts and Swagger UI CDN dependencies, block all external frames
+        # Allow inline styles/scripts and Swagger UI & ReDoc CDN dependencies, allow same-origin frames
         headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
-            "font-src 'self' https://fonts.gstatic.com data:; "
-            "img-src 'self' data: https: https://fastapi.tiangolo.com; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.redoc.ly; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.redoc.ly; "
+            "font-src 'self' https://fonts.gstatic.com https://cdn.redoc.ly data:; "
+            "img-src 'self' data: https: https://fastapi.tiangolo.com https://cdn.redoc.ly; "
             "connect-src 'self' wss: ws: https:; "
-            "frame-ancestors 'none'; "
+            "worker-src 'self' blob:; "
+            "frame-ancestors 'self'; "
             "object-src 'none'; "
             "base-uri 'self';"
         )

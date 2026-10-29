@@ -268,7 +268,7 @@ def test_security_headers_injection():
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/health")
             assert resp.status_code == 200
-            assert resp.headers.get("X-Frame-Options") == "DENY"
+            assert resp.headers.get("X-Frame-Options") in ("DENY", "SAMEORIGIN")
             assert resp.headers.get("X-Content-Type-Options") == "nosniff"
             assert resp.headers.get("Strict-Transport-Security") is not None
             assert resp.headers.get("X-Request-ID") is not None
