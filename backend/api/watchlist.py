@@ -29,13 +29,12 @@ async def get_watchlist(
     )
     items = result.scalars().all()
 
-    quotes = await asyncio.gather(
-        *(market_data_service.fetch_quote(item.symbol) for item in items),
-        return_exceptions=True,
-    )
+    symbols = [item.symbol for item in items]
+    quotes_dict = await market_data_service.fetch_quotes_bulk(symbols) if symbols else {}
     stocks = []
-    for item, quote in zip(items, quotes):
+    for item in items:
         entry = {"symbol": item.symbol, "added_at": item.added_at.isoformat()}
+        quote = quotes_dict.get(item.symbol)
         if isinstance(quote, dict):
             entry.update({
                 "price": quote.get("price"),

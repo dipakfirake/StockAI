@@ -354,9 +354,9 @@ async def get_fyers_status(
             # Strict genuine auth error check: only mark expired on verified auth rejection
             err_lower = err.lower()
             is_auth_error = (
-                code in (-15, -17, -300, 401, 403)
+                code in (-15, -17, 401, 403)
                 or "expired" in err_lower
-                or "invalid" in err_lower
+                or ("invalid" in err_lower and "token" in err_lower)
                 or "unauthorized" in err_lower
             )
             if is_auth_error:

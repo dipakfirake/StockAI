@@ -33,7 +33,7 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
     if (!isOpen) return;
     setLoading(true);
     fetchWatchlist();
-    const interval = setInterval(fetchWatchlist, 2000); // 2s active refresh
+    const interval = setInterval(fetchWatchlist, 10000); // 10s active refresh to respect broker rate limits
     return () => clearInterval(interval);
   }, [isOpen]);
 

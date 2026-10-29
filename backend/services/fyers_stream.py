@@ -97,6 +97,11 @@ class FyersStreamService:
         except Exception:
             return self._is_connected
 
+    @property
+    def is_running(self) -> bool:
+        """Returns True if the Fyers WebSocket stream runner is active."""
+        return self._is_running
+
     async def start(self) -> bool:
         """
         Initializes credentials and establishes the background WebSocket connection.
@@ -121,13 +126,16 @@ class FyersStreamService:
             from backend.models.settings import SystemSettings
             from sqlalchemy import select
 
-            async with AsyncSessionLocal() as db:
+            db = AsyncSessionLocal()
+            try:
                 fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
                 fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
                 if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
                     client_id = fyers_client_obj.value.strip()
                 if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10:
                     access_token = fyers_token_obj.value.strip()
+            finally:
+                await asyncio.shield(db.close())
         except Exception as e:
             logger.debug(f"Database settings query skipped: {e}")
 
@@ -186,7 +194,13 @@ class FyersStreamService:
     def _on_open(self) -> None:
         """Callback when Fyers WebSocket handshake completes."""
         self._is_connected = True
-        logger.info("Fyers Data Socket CONNECTED successfully. Subscribing to active market symbols...")
+        logger.info("Fyers Data Socket CONNECTED successfully. Restoring primary feed status and subscribing to active market symbols...")
+        try:
+            from backend.services.market_data import MarketDataService
+            MarketDataService.reset_fyers_health()
+        except Exception as e:
+            logger.error(f"Error restoring primary feed health on Fyers open: {e}")
+
         try:
             # Prepare symbol mappings
             from backend.services.market_data import MarketDataService
@@ -371,6 +385,12 @@ class FyersStreamService:
                 logger.debug(f"Error closing FyersDataSocket: {e}")
             self._socket = None
         logger.info("Fyers Data Socket closed.")
+
+    async def restart(self) -> bool:
+        """Stops the existing socket and re-initiates connection with latest credentials."""
+        logger.info("Restarting Fyers Data Socket stream with updated credentials...")
+        await self.stop()
+        return await self.start()
 
 
 # Global singleton instance

@@ -146,41 +146,157 @@ class MarketDataService:
 
     @staticmethod
     def _normalise_yf_symbol(symbol: str) -> str:
-        """Convert any symbol (e.g. NSE:RELIANCE-EQ, NSE:NIFTY50-INDEX, RELIANCE.NS, ^NSEI) to yfinance format."""
-        s = symbol.strip().upper()
-        fyers_to_yf = {
-            "NSE:NIFTY50-INDEX": "^NSEI",
-            "BSE:SENSEX-INDEX": "^BSESN",
-            "NSE:NIFTYBANK-INDEX": "^NSEBANK",
-            "NSE:BANKNIFTY-INDEX": "^NSEBANK",
-            "NSE:NIFTYIT-INDEX": "^CNXIT",
-            "NSE:NIFTYAUTO-INDEX": "^CNXAUTO",
-            "NSE:NIFTYENERGY-INDEX": "^CNXENERGY",
-            "NSE:NIFTYREALTY-INDEX": "^CNXREALTY",
-            "NSE:NIFTYMETAL-INDEX": "^CNXMETAL",
-            "NSE:NIFTYFMCG-INDEX": "^CNXFMCG",
-            "NSE:NIFTYPHARMA-INDEX": "^CNXPHARMA",
-            "NSE:NIFTYMIDCAP50-INDEX": "^NSEMDCP50",
-            "NSE:INDIAVIX-INDEX": "^INDIAVIX",
-        }
-        if s in fyers_to_yf:
-            return fyers_to_yf[s]
+        """Convert any symbol (e.g. NSE:RELIANCE-EQ, NSE:NIFTY50-INDEX, RELIANCE.NS, ^NSEI, BANKNIFTY) to yfinance format."""
+        if not symbol:
+            return ""
+        s = str(symbol).strip().upper()
+        if not s:
+            return ""
         if s.startswith("^"):
             return s
-        clean = s.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-INDEX", "").replace(".BO", "").replace(".NS", "").strip()
+
+        # Comprehensive Indian Indices Mapping (Broker & Naked Formats -> Yahoo Tickers)
+        index_map = {
+            # Benchmark indices
+            "NSE:NIFTY50-INDEX": "^NSEI",
+            "NIFTY50": "^NSEI",
+            "NIFTY 50": "^NSEI",
+            "NIFTY-50": "^NSEI",
+            "NIFTY_50": "^NSEI",
+            "NIFTY": "^NSEI",
+            "BSE:SENSEX-INDEX": "^BSESN",
+            "SENSEX": "^BSESN",
+            "BSE:SENSEX": "^BSESN",
+            "NSE:NIFTYBANK-INDEX": "^NSEBANK",
+            "NSE:BANKNIFTY-INDEX": "^NSEBANK",
+            "BANKNIFTY": "^NSEBANK",
+            "BANK NIFTY": "^NSEBANK",
+            "BANK_NIFTY": "^NSEBANK",
+            "NIFTYBANK": "^NSEBANK",
+            "NIFTY BANK": "^NSEBANK",
+            "NIFTY_BANK": "^NSEBANK",
+            "NSE:INDIAVIX-INDEX": "^INDIAVIX",
+            "INDIAVIX": "^INDIAVIX",
+            "INDIA VIX": "^INDIAVIX",
+            "INDIA_VIX": "^INDIAVIX",
+            "VIX": "^INDIAVIX",
+            # Sectoral indices
+            "NSE:NIFTYIT-INDEX": "^CNXIT",
+            "NIFTYIT": "^CNXIT",
+            "NIFTY IT": "^CNXIT",
+            "NIFTY_IT": "^CNXIT",
+            "CNXIT": "^CNXIT",
+            "NSE:NIFTYAUTO-INDEX": "^CNXAUTO",
+            "NIFTYAUTO": "^CNXAUTO",
+            "NIFTY AUTO": "^CNXAUTO",
+            "NIFTY_AUTO": "^CNXAUTO",
+            "CNXAUTO": "^CNXAUTO",
+            "NSE:NIFTYENERGY-INDEX": "^CNXENERGY",
+            "NIFTYENERGY": "^CNXENERGY",
+            "NIFTY ENERGY": "^CNXENERGY",
+            "NIFTY_ENERGY": "^CNXENERGY",
+            "CNXENERGY": "^CNXENERGY",
+            "NSE:NIFTYREALTY-INDEX": "^CNXREALTY",
+            "NIFTYREALTY": "^CNXREALTY",
+            "NIFTY REALTY": "^CNXREALTY",
+            "NIFTY_REALTY": "^CNXREALTY",
+            "CNXREALTY": "^CNXREALTY",
+            "NSE:NIFTYMETAL-INDEX": "^CNXMETAL",
+            "NIFTYMETAL": "^CNXMETAL",
+            "NIFTY METAL": "^CNXMETAL",
+            "NIFTY_METAL": "^CNXMETAL",
+            "CNXMETAL": "^CNXMETAL",
+            "NSE:NIFTYFMCG-INDEX": "^CNXFMCG",
+            "NIFTYFMCG": "^CNXFMCG",
+            "NIFTY FMCG": "^CNXFMCG",
+            "NIFTY_FMCG": "^CNXFMCG",
+            "CNXFMCG": "^CNXFMCG",
+            "NSE:NIFTYPHARMA-INDEX": "^CNXPHARMA",
+            "NIFTYPHARMA": "^CNXPHARMA",
+            "NIFTY PHARMA": "^CNXPHARMA",
+            "NIFTY_PHARMA": "^CNXPHARMA",
+            "CNXPHARMA": "^CNXPHARMA",
+            "NSE:NIFTYMIDCAP50-INDEX": "^NSEMDCP50",
+            "NIFTYMIDCAP50": "^NSEMDCP50",
+            "NIFTY MIDCAP 50": "^NSEMDCP50",
+            "NIFTY_MIDCAP50": "^NSEMDCP50",
+            "NIFTY_MIDCAP_50": "^NSEMDCP50",
+            "NSEMDCP50": "^NSEMDCP50",
+            "NSE:NIFTYCOMMODITIES-INDEX": "^CNXCMDT",
+            "NIFTYCOMMODITIES": "^CNXCMDT",
+            "NIFTY COMMODITIES": "^CNXCMDT",
+            "NIFTY_COMMODITIES": "^CNXCMDT",
+            "CNXCMDT": "^CNXCMDT",
+            "NSE:NIFTYFINSERVICE-INDEX": "^CNXFIN",
+            "NIFTYFINSERVICE": "^CNXFIN",
+            "NIFTY FIN SERVICE": "^CNXFIN",
+            "NIFTY_FIN_SERVICE": "^CNXFIN",
+            "NIFTY_FINANCIAL_SERVICES": "^CNXFIN",
+            "CNXFIN": "^CNXFIN",
+            "NSE:NIFTYSMALLCAP50-INDEX": "^CNXSC",
+            "NIFTYSMALLCAP50": "^CNXSC",
+            "NIFTY SMALLCAP 50": "^CNXSC",
+            "NIFTY_SMALLCAP50": "^CNXSC",
+            "NIFTY_SMALLCAP_50": "^CNXSC",
+            "CNXSC": "^CNXSC",
+            "NSE:NIFTY100-INDEX": "^CNX100",
+            "NIFTY100": "^CNX100",
+            "NIFTY 100": "^CNX100",
+            "NIFTY_100": "^CNX100",
+            "CNX100": "^CNX100",
+            "NSE:NIFTY200-INDEX": "^CNX200",
+            "NIFTY200": "^CNX200",
+            "NIFTY 200": "^CNX200",
+            "NIFTY_200": "^CNX200",
+            "CNX200": "^CNX200",
+            "NSE:NIFTY500-INDEX": "^CNX500",
+            "NIFTY500": "^CNX500",
+            "NIFTY 500": "^CNX500",
+            "NIFTY_500": "^CNX500",
+            "CNX500": "^CNX500",
+        }
+        if s in index_map:
+            return index_map[s]
+
+        # Check clean representation before adding suffix
+        clean = (
+            s.replace("NSE:", "")
+            .replace("BSE:", "")
+            .replace("-EQ", "")
+            .replace("-INDEX", "")
+            .replace(".BO", "")
+            .replace(".NS", "")
+            .strip()
+        )
+        if not clean:
+            return ""
+
+        if clean in index_map:
+            return index_map[clean]
+
+        clean_norm = clean.replace("_", "").replace(" ", "").replace("-", "")
+        if clean_norm in index_map:
+            return index_map[clean_norm]
+
+        # Standard Equities
         if s.startswith("BSE:") or s.endswith(".BO"):
             return f"{clean}.BO"
         return f"{clean}.NS"
 
     _env_cache = None
-    _env_mtime = 0
+    _env_mtime: float = 0.0
     _fyers_cooldown_until: float = 0.0
     _fyers_token_valid: bool = True
     _fyers_token_error_reason: str = ""
     _active_engine: str = "PRIMARY_FYERS"  # "PRIMARY_FYERS" or "BACKUP_YAHOO"
+    _circuit_state: str = "CLOSED"  # "CLOSED", "OPEN", "HALF_OPEN"
     _last_fyers_tick_time: float = 0.0
     _last_yahoo_tick_time: float = 0.0
     _fyers_request_timestamps: list = []
+    _last_loaded_token: str = ""
+    _last_loaded_client_id: str = ""
+    _last_token_check_time: float = 0.0
+    _canary_in_progress: bool = False
 
     @classmethod
     def _check_and_record_fyers_rate_budget(cls) -> bool:
@@ -214,6 +330,16 @@ class MarketDataService:
         now = time.time()
         is_fyers_available = cls._fyers_token_valid and (now >= cls._fyers_cooldown_until)
         is_rate_limited = cls._fyers_token_valid and (now < cls._fyers_cooldown_until)
+
+        # Determine circuit breaker state
+        if not cls._fyers_token_valid and now >= cls._fyers_cooldown_until:
+            circuit_state = "HALF_OPEN"
+        elif not cls._fyers_token_valid or (now < cls._fyers_cooldown_until):
+            circuit_state = "OPEN"
+        else:
+            circuit_state = "CLOSED"
+        cls._circuit_state = circuit_state
+
         current_engine = "PRIMARY_FYERS" if is_fyers_available else "BACKUP_YAHOO"
         cooldown_remaining = max(0, int(cls._fyers_cooldown_until - now))
 
@@ -227,12 +353,15 @@ class MarketDataService:
         return {
             "active_engine": current_engine,
             "fyers_valid": cls._fyers_token_valid,
+            "fyers_token_valid": cls._fyers_token_valid,
             "fyers_status": "RATE_LIMITED" if is_rate_limited else ("ACTIVE" if cls._fyers_token_valid else "EXPIRED"),
             "fyers_cooldown_remaining": cooldown_remaining,
             "fyers_token_error": cls._fyers_token_error_reason,
             "fyers_expiry_schedule": "06:00 AM IST Daily",
             "source_label": source_label,
             "dual_connection_active": True,
+            "circuit_state": circuit_state,
+            "rate_budget_available": max(0, 4 - len([ts for ts in cls._fyers_request_timestamps if now - ts < 1.0])),
         }
 
     @classmethod
@@ -242,7 +371,9 @@ class MarketDataService:
         cls._fyers_token_valid = False
         cls._fyers_token_error_reason = reason
         cls._active_engine = "BACKUP_YAHOO"
+        cls._circuit_state = "OPEN"
         cls._fyers_cooldown_until = time.time() + cooldown_seconds
+        cls._canary_in_progress = False
         logger.warning(f"Dual-Engine Failover Engaged: Fyers marked expired ({reason}). Active feed switched to Yahoo Finance Backup.")
 
     @classmethod
@@ -251,6 +382,9 @@ class MarketDataService:
         import time
         cls._fyers_cooldown_until = max(cls._fyers_cooldown_until, time.time() + cooldown_seconds)
         cls._fyers_token_error_reason = reason
+        cls._active_engine = "BACKUP_YAHOO"
+        cls._circuit_state = "OPEN"
+        cls._canary_in_progress = False
         logger.warning(f"Dual-Engine: Fyers rate-limited ({reason}). Temporarily diverting to Yahoo Finance backup for {cooldown_seconds}s. Token remains VALID.")
 
     @classmethod
@@ -260,9 +394,150 @@ class MarketDataService:
         cls._fyers_token_error_reason = ""
         cls._fyers_cooldown_until = 0.0
         cls._fyers_request_timestamps.clear()
-        cls._env_mtime = 0.0
         cls._active_engine = "PRIMARY_FYERS"
+        cls._circuit_state = "CLOSED"
+        cls._canary_in_progress = False
         logger.info("Dual-Engine: Fyers token refreshed. Hot-swapping back to Primary Fyers Engine.")
+
+    @classmethod
+    async def probe_fyers_canary(cls, probe_symbol: str = "NSE:NIFTY50-INDEX") -> bool:
+        """
+        Executes a single canary probe to test if Fyers API has recovered.
+        Transitions state to HALF_OPEN during probe.
+        If probe succeeds: resets health to CLOSED (PRIMARY_FYERS) and returns True.
+        If probe fails: trips back to OPEN with cooldown and returns False.
+        """
+        import time
+        now = time.time()
+        cls._circuit_state = "HALF_OPEN"
+        cls._canary_in_progress = True
+        logger.info(f"Circuit Breaker: Entering HALF_OPEN. Dispatching canary probe to Fyers ({probe_symbol})...")
+        try:
+            fyers = await cls._get_fyers_client()
+            norm_sym = cls._normalise_symbol(probe_symbol)
+            response = await asyncio.to_thread(fyers.quotes, {"symbols": norm_sym})
+            if response.get("s") == "ok" and response.get("d"):
+                v = response["d"][0].get("v", {})
+                lp = float(v.get("lp", 0.0) or 0.0)
+                if lp > 0:
+                    logger.info("Circuit Breaker: Canary probe SUCCEEDED. Restoring PRIMARY_FYERS feed.")
+                    cls.reset_fyers_health()
+                    return True
+
+            # If response is not ok or lp <= 0
+            code = response.get("code")
+            logger.warning(f"Circuit Breaker: Canary probe FAILED (code {code}): {response}. Re-tripping to OPEN.")
+            cls.mark_fyers_token_expired(f"Canary probe failed (code {code})", cooldown_seconds=300.0)
+            return False
+        except Exception as e:
+            logger.warning(f"Circuit Breaker: Canary probe FAILED with exception: {e}. Re-tripping to OPEN.")
+            cls.mark_fyers_token_expired(f"Canary probe exception: {e}", cooldown_seconds=300.0)
+            return False
+        finally:
+            cls._canary_in_progress = False
+
+    @classmethod
+    async def check_credentials_changed(cls) -> bool:
+        """
+        Inspects if credentials in DB (SystemSettings), Redis, or .env file mtime
+        have been updated. If a newer/different token is detected, triggers reset_fyers_health(),
+        reloads the client, and notifies FyersStreamService to restart.
+        Returns True if credentials changed and were reloaded.
+        """
+        import os
+        import time
+        from dotenv import dotenv_values
+
+        now = time.time()
+        if now - cls._last_token_check_time < 2.0:
+            return False
+        cls._last_token_check_time = now
+
+        discovered_token = None
+        discovered_client_id = None
+
+        # 1. Check PostgreSQL SystemSettings (with timeout)
+        try:
+            from backend.core.database import AsyncSessionLocal
+            from backend.models.settings import SystemSettings
+            from sqlalchemy import select
+
+            async def _check_db():
+                db = AsyncSessionLocal()
+                try:
+                    fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
+                    fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
+                    cid = fyers_client_obj.value.strip() if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3 else None
+                    tok = fyers_token_obj.value.strip() if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10 else None
+                    return cid, tok
+                finally:
+                    await asyncio.shield(db.close())
+
+            db_cid, db_tok = await asyncio.wait_for(_check_db(), timeout=0.5)
+            if db_cid:
+                discovered_client_id = db_cid
+            if db_tok:
+                discovered_token = db_tok
+        except Exception:
+            pass
+
+        # 2. Check Redis cache ('fyers_creds') (with timeout)
+        if not discovered_token:
+            try:
+                from backend.core.cache import cache_get
+                cached_creds = await asyncio.wait_for(cache_get("fyers_creds"), timeout=0.5)
+                if cached_creds and isinstance(cached_creds, dict):
+                    if cached_creds.get("access_token"):
+                        discovered_token = str(cached_creds["access_token"]).strip()
+                    if cached_creds.get("client_id") and not discovered_client_id:
+                        discovered_client_id = str(cached_creds["client_id"]).strip()
+            except Exception:
+                pass
+
+        # 3. Check .env file mtime and content
+        env_paths = [
+            "/app/.env",
+            os.path.join(os.getcwd(), ".env"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
+        ]
+        found_path = None
+        for path in env_paths:
+            if os.path.exists(path):
+                found_path = path
+                break
+
+        if found_path:
+            try:
+                mtime = os.path.getmtime(found_path)
+                if cls._env_mtime > 0 and mtime > cls._env_mtime:
+                    cls._env_mtime = mtime
+                    cls._env_cache = dotenv_values(found_path)
+                    if cls._env_cache:
+                        env_tok = cls._env_cache.get("FYERS_ACCESS_TOKEN")
+                        if env_tok:
+                            discovered_token = str(env_tok).strip()
+                        env_cid = cls._env_cache.get("FYERS_CLIENT_ID")
+                        if env_cid and not discovered_client_id:
+                            discovered_client_id = str(env_cid).strip()
+            except Exception:
+                pass
+
+        if discovered_token and discovered_token != cls._last_loaded_token:
+            logger.info("Dynamic Credential Hot-Swap: Detected new Fyers access token. Resetting Fyers health and restoring primary feed.")
+            cls.reset_fyers_health()
+            cls._last_loaded_token = discovered_token
+            if discovered_client_id:
+                cls._last_loaded_client_id = discovered_client_id
+
+            try:
+                from backend.services.fyers_stream import fyers_stream_service
+                asyncio.create_task(fyers_stream_service.restart())
+            except Exception as ex:
+                logger.debug(f"Stream restart on credential hot-swap skipped: {ex}")
+
+            return True
+
+        return False
 
 
     @staticmethod
@@ -280,7 +555,8 @@ class MarketDataService:
             from backend.core.cache import cache_get, cache_set
             
             # Priority 1: Check PostgreSQL SystemSettings (authoritative user configuration)
-            async with AsyncSessionLocal() as db:
+            db = AsyncSessionLocal()
+            try:
                 fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
                 fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
                 
@@ -288,6 +564,8 @@ class MarketDataService:
                     client_id = fyers_client_obj.value.strip()
                 if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10:
                     access_token = fyers_token_obj.value.strip()
+            finally:
+                await asyncio.shield(db.close())
                     
             # Priority 2: Check Redis Cache ('fyers_creds') if DB did not provide credentials
             if not access_token or not client_id:
@@ -337,7 +615,10 @@ class MarketDataService:
 
         if not client_id or not access_token:
             raise ValueError("Fyers API credentials are not fully configured in .env")
-            
+
+        MarketDataService._last_loaded_client_id = client_id
+        MarketDataService._last_loaded_token = access_token
+
         return fyersModel.FyersModel(
             client_id=client_id,
             is_async=False,
@@ -444,6 +725,15 @@ class MarketDataService:
         except Exception:
             pass
 
+        # Check for dynamic credential updates in DB, Redis, or .env
+        await MarketDataService.check_credentials_changed()
+
+        # Circuit breaker canary recovery probe:
+        # If token was marked invalid, but cooldown has elapsed -> Probe Fyers (HALF_OPEN)
+        if not MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
+            if not MarketDataService._canary_in_progress:
+                await MarketDataService.probe_fyers_canary(probe_symbol=fyers_symbol)
+
         if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
@@ -493,8 +783,7 @@ class MarketDataService:
                     else:
                         logger.warning(f"Fyers returned zero price for {fyers_symbol}, falling through to backup")
                 elif response.get("code") in (429, -360):
-                    MarketDataService._fyers_cooldown_until = now + 30.0
-                    logger.warning(f"Fyers rate limit ({response.get('code')}) hit in single quote. Entering 30s cooldown (token remains valid).")
+                    MarketDataService.record_fyers_rate_limit(f"Fyers rate limit ({response.get('code')}) hit in single quote", cooldown_seconds=30.0)
                 elif fyers_symbol.startswith("BSE:"):
                     return await MarketDataService.fetch_quote(original_symbol.replace(".BO", ".NS"))
                 else:
@@ -504,18 +793,20 @@ class MarketDataService:
                         MarketDataService.mark_fyers_token_expired(f"Token expired/rejected (code {resp_code})", cooldown_seconds=300.0)
                     elif resp_code == -300:
                         logger.warning(f"Fyers reported invalid symbol for {fyers_symbol}: {response}")
+                    elif resp_code in (500, 502, 503, 504) or "502" in err_msg or "503" in err_msg or "bad gateway" in err_msg.lower() or "gateway timeout" in err_msg.lower():
+                        MarketDataService.record_fyers_rate_limit(f"Fyers server error (code {resp_code})", cooldown_seconds=60.0)
                     elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
-                        MarketDataService._fyers_cooldown_until = now + 30.0
-                        logger.warning("Fyers rate limit (-360/429) hit in single quote. Entering 30s cooldown (token remains valid).")
+                        MarketDataService.record_fyers_rate_limit("Fyers rate limit (-360/429) hit in single quote", cooldown_seconds=30.0)
                     logger.warning(f"Fyers quote returned non-ok for {fyers_symbol}: {response}")
 
             except Exception as e:
                 err_str = str(e).lower()
                 if "-360" in err_str or "429" in err_str or "rate limit" in err_str or "1015" in err_str or "plan limit" in err_str:
-                    MarketDataService._fyers_cooldown_until = now + 30.0
-                    logger.warning("Fyers rate limit exception in single quote. Entering 30s cooldown (token remains valid).")
+                    MarketDataService.record_fyers_rate_limit(f"Fyers rate limit exception: {e}", cooldown_seconds=30.0)
                 elif "-15" in err_str or "-16" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
                     MarketDataService.mark_fyers_token_expired(f"Fyers auth exception: {e}", cooldown_seconds=300.0)
+                elif any(k in err_str for k in ("timeout", "timed out", "connection refused", "connecterror", "connection error", "connection reset", "502", "503", "504", "bad gateway", "service unavailable", "gateway timeout")) or isinstance(e, (TimeoutError, ConnectionRefusedError, ConnectionError, OSError)):
+                    MarketDataService.record_fyers_rate_limit(f"Fyers server/network error: {e}", cooldown_seconds=60.0)
                 logger.error(f"Failed to fetch Fyers quote for {original_symbol}: {e}")
         else:
             remaining = int(MarketDataService._fyers_cooldown_until - now)
@@ -527,13 +818,7 @@ class MarketDataService:
             import requests
             session = requests.Session()
             session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-            clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-            if original_symbol.startswith("^"):
-                yf_sym = original_symbol
-            elif original_symbol.endswith(".BO"):
-                yf_sym = f"{clean_sym}.BO"
-            else:
-                yf_sym = f"{clean_sym}.NS"
+            yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
             ticker = yf.Ticker(yf_sym, session=session)
             hist = await asyncio.to_thread(ticker.history, period="5d")
             if not hist.empty:
@@ -563,13 +848,7 @@ class MarketDataService:
         # Tertiary fallback via direct Yahoo Chart API (resilient against crumb & 429 errors)
         try:
             import httpx
-            clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-            if original_symbol.startswith("^"):
-                yf_sym = original_symbol
-            elif original_symbol.endswith(".BO"):
-                yf_sym = f"{clean_sym}.BO"
-            else:
-                yf_sym = f"{clean_sym}.NS"
+            yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
 
             chart_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval=1d&range=5d"
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -635,12 +914,29 @@ class MarketDataService:
                 fyers_to_orig.setdefault(nse_norm, []).append(s)
 
         fyers_keys = list(fyers_to_orig.keys())
-        
+
+        # Check for dynamic credential updates in DB, Redis, or .env
+        await MarketDataService.check_credentials_changed()
+
+        # Circuit breaker canary recovery probe:
+        # If token was marked invalid, but cooldown has elapsed -> Probe Fyers (HALF_OPEN)
+        if not MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
+            if not MarketDataService._canary_in_progress:
+                probe_sym = fyers_keys[0] if fyers_keys else "NSE:NIFTY50-INDEX"
+                await MarketDataService.probe_fyers_canary(probe_symbol=probe_sym)
+
         if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 # Fyers quotes API accepts maximum 50 symbols per request
                 for i in range(0, len(fyers_keys), 50):
+                    if i > 0:
+                        # For subsequent chunks, verify budget and add a 200ms pacing delay to respect 5 req/sec burst limit
+                        await asyncio.sleep(0.2)
+                        now = time.time()
+                        if not MarketDataService._check_and_record_fyers_rate_budget():
+                            logger.warning("Fyers rate budget exhausted during bulk chunk query. Breaking to fallback for remaining.")
+                            break
                     chunk_keys = fyers_keys[i : i + 50]
                     fyers_symbols_str = ",".join(chunk_keys)
                     data = {"symbols": fyers_symbols_str}
@@ -687,8 +983,7 @@ class MarketDataService:
                                     except Exception:
                                         pass
                     elif response.get("code") in (429, -360):
-                        MarketDataService._fyers_cooldown_until = now + 30.0
-                        logger.warning(f"Fyers rate limit ({response.get('code')}) hit in bulk quotes. Entering 30s cooldown (token remains valid).")
+                        MarketDataService.record_fyers_rate_limit(f"Fyers rate limit ({response.get('code')}) hit in bulk quotes", cooldown_seconds=30.0)
                         break
                     else:
                         err_msg = str(response)
@@ -698,18 +993,21 @@ class MarketDataService:
                             break
                         elif resp_code == -300:
                             logger.warning(f"Fyers reported invalid symbol parameter in chunk: {chunk_keys[:5]}")
+                        elif resp_code in (500, 502, 503, 504) or "502" in err_msg or "503" in err_msg or "bad gateway" in err_msg.lower() or "gateway timeout" in err_msg.lower():
+                            MarketDataService.record_fyers_rate_limit(f"Fyers server error (code {resp_code}) in bulk quotes", cooldown_seconds=60.0)
+                            break
                         elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
-                            MarketDataService._fyers_cooldown_until = now + 30.0
-                            logger.warning("Fyers rate limit (-360/429) detected in bulk quotes. Entering 30s cooldown (token remains valid).")
+                            MarketDataService.record_fyers_rate_limit("Fyers rate limit (-360/429) detected in bulk quotes", cooldown_seconds=30.0)
                             break
                         logger.error(f"Fyers bulk quote returned non-ok: {response}")
             except Exception as e:
                 err_str = str(e).lower()
                 if "-360" in err_str or "429" in err_str or "rate limit" in err_str or "1015" in err_str or "plan limit" in err_str:
-                    MarketDataService._fyers_cooldown_until = now + 30.0
-                    logger.warning("Fyers rate limit exception in bulk quotes. Entering 30s cooldown (token remains valid).")
+                    MarketDataService.record_fyers_rate_limit(f"Bulk quote rate limit: {e}", cooldown_seconds=30.0)
                 elif "-15" in err_str or "-16" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
                     MarketDataService.mark_fyers_token_expired(f"Bulk quote auth exception: {e}", cooldown_seconds=300.0)
+                elif any(k in err_str for k in ("timeout", "timed out", "connection refused", "connecterror", "connection error", "connection reset", "502", "503", "504", "bad gateway", "service unavailable", "gateway timeout")) or isinstance(e, (TimeoutError, ConnectionRefusedError, ConnectionError, OSError)):
+                    MarketDataService.record_fyers_rate_limit(f"Fyers bulk quote server/network error: {e}", cooldown_seconds=60.0)
                 logger.error(f"Fyers bulk quote failed: {e}")
         else:
             remaining = int(MarketDataService._fyers_cooldown_until - now)
@@ -721,13 +1019,7 @@ class MarketDataService:
             import httpx
 
             async def _fetch_single_chart_quote(client: httpx.AsyncClient, sym: str):
-                clean = sym.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-                if sym.startswith("^"):
-                    yf_sym = sym
-                elif sym.endswith(".BO"):
-                    yf_sym = f"{clean}.BO"
-                else:
-                    yf_sym = f"{clean}.NS"
+                yf_sym = MarketDataService._normalise_yf_symbol(sym)
 
                 chart_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval=1d&range=5d"
                 try:
@@ -770,13 +1062,7 @@ class MarketDataService:
                     import requests
                     yf_map = {}
                     for s in still_missing:
-                        clean = s.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-                        if s.startswith("^"):
-                            yf_sym = s
-                        elif s.endswith(".BO"):
-                            yf_sym = f"{clean}.BO"
-                        else:
-                            yf_sym = f"{clean}.NS"
+                        yf_sym = MarketDataService._normalise_yf_symbol(s)
                         yf_map[yf_sym] = s
 
                     def _batch_yf():
@@ -871,6 +1157,14 @@ class MarketDataService:
 
         import time
         now = time.time()
+        # Check for dynamic credential updates in DB, Redis, or .env
+        await MarketDataService.check_credentials_changed()
+
+        # Circuit breaker canary recovery probe:
+        # If token was marked invalid, but cooldown has elapsed -> Probe Fyers (HALF_OPEN)
+        if not MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
+            if not MarketDataService._canary_in_progress:
+                await MarketDataService.probe_fyers_canary(probe_symbol=fyers_symbol)
 
         try:
             if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
@@ -1002,13 +1296,8 @@ class MarketDataService:
             import requests
             session = requests.Session()
             session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+            yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
             clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-            if original_symbol.startswith("^"):
-                yf_sym = original_symbol
-            elif original_symbol.endswith(".BO"):
-                yf_sym = f"{clean_sym}.BO"
-            else:
-                yf_sym = f"{clean_sym}.NS"
             yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
             interval = yf_timeframe_map.get(timeframe, "1d")
             
@@ -1069,13 +1358,7 @@ class MarketDataService:
         # 3. Tertiary fallback via direct Yahoo Chart API (resilient against crumb/cookie errors)
         try:
             import httpx
-            clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-            if original_symbol.startswith("^"):
-                yf_sym = original_symbol
-            elif original_symbol.endswith(".BO"):
-                yf_sym = f"{clean_sym}.BO"
-            else:
-                yf_sym = f"{clean_sym}.NS"
+            yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
 
             yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
             interval = yf_timeframe_map.get(timeframe, "1d")

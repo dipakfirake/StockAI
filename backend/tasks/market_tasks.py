@@ -48,15 +48,18 @@ def end_of_day_processing():
         return {"error": str(e)}
 
 async def _eod_processing_async():
-    from backend.core.cache import redis_client
+    from backend.core.cache import get_redis
     from backend.data.ingestion.candle_ingestion import NSE_NIFTY50_SYMBOLS, ingest_candles
     from backend.services.market_data import market_data_service
     from backend.services.indicators import indicator_service
     
     # 1. Clear caches to ensure fresh data for the next day
-    if redis_client:
-        await redis_client.flushdb()
+    try:
+        r = await get_redis()
+        await r.flushdb()
         logger.info("EOD: Redis cache cleared")
+    except Exception as e:
+        logger.warning(f"EOD: Could not flush Redis cache: {e}")
         
     # 2. Ingest one final time for the day to get the true EOD candle
     total_inserted = 0

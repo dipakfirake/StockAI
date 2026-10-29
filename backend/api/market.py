@@ -356,7 +356,12 @@ async def get_advanced_indicators(
 
 @router.get("/heatmap")
 async def get_market_heatmap(current_user=Depends(get_current_user)):
-    """Get Nifty 50 heatmap data via ultra-fast Fyers bulk quotes."""
+    """Get Nifty 50 heatmap data via ultra-fast Fyers bulk quotes with Redis caching."""
+    cache_key = "market:heatmap"
+    cached = await cache_get(cache_key)
+    if cached and cached.get("heatmap"):
+        return cached
+
     top_symbols = [
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
         "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "HINDUNILVR.NS", "LT.NS",
@@ -367,7 +372,10 @@ async def get_market_heatmap(current_user=Depends(get_current_user)):
     
     quotes_map = await market_data_service.fetch_quotes_bulk(top_symbols)
     heatmap = [q for q in quotes_map.values() if q.get("price", 0) > 0]
-    return {"heatmap": heatmap}
+    result = {"heatmap": heatmap}
+    if heatmap:
+        await cache_set(cache_key, result, ttl=5)
+    return result
 
 
 @router.get("/options/{symbol}")

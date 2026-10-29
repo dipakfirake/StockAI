@@ -14,6 +14,35 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-29)
 
+- **Market Data Feed Autonomous Failover, Handover, Quota Protection & Polling Storm Neutralization (COMPLETE & FULLY VERIFIED):**
+  - **Identified Deficiencies & Root Causes**:
+    1. *Permanent Lockout on Token Expiry / Auth Glitch*: Cooldown expiry in `market_data.py` failed to test Fyers health or reset `_fyers_token_valid = True`, leaving the platform permanently locked into delayed Yahoo Finance backup.
+    2. *External Token Updates Ignored Without Restart*: `_get_fyers_client()` was guarded by `_fyers_token_valid`, meaning updated tokens in PostgreSQL `SystemSettings`, Redis `fyers_creds`, or `.env` were ignored until container restart.
+    3. *WebSocket Reconnection Did Not Restore Primary REST Status*: `FyersStreamService._on_open()` set `_is_connected = True` without restoring `MarketDataService.reset_fyers_health()`.
+    4. *Fallback Symbol Normalization 404s*: Duplicate naive fallback blocks in `fetch_quote`, `fetch_quotes_bulk`, and `fetch_candles` constructed invalid tickers (`BANKNIFTY.NS`, `NSE:RELIANCE-EQ.NS`), triggering HTTP 404s on Yahoo Finance.
+    5. *Settings API False Token Expiry*: `backend/api/settings.py:358` still included `-300` in `is_auth_error`, causing bad request symbol parameters to invalidate active broker sessions.
+    6. *Watchlist Polling Storm Tripping Quotas*: `WatchlistSidebar.tsx` polled every 2s (`2000ms`), and `backend/api/watchlist.py` queried each stock via `asyncio.gather(fetch_quote)`. For 10 stocks, this burned 10 individual calls every 2s, completely consuming the 40 req/min quota in ~8 seconds.
+    7. *ChartPage 1-Second Polling Bomb*: `ChartPage.tsx` polled REST every 1,000ms (`setInterval(..., 1000)`) even while actively connected to the WebSocket stream, burning 60 requests/min.
+    8. *Unpaced Bulk Chunk Queries*: Multi-chunk queries in `fetch_quotes_bulk` fired back-to-back without delays, risking Fyers' 5 req/sec burst limit.
+    9. *Celery Task Cache Import Crash*: `backend/tasks/market_tasks.py` attempted to import non-existent `redis_client` from `backend.core.cache`, crashing EOD cache clearing.
+  - **Permanent Architectural Solutions Implemented**:
+    1. *State-Machine Circuit Breaker & Canary Probe (`HALF_OPEN`)*: Implemented `CLOSED`, `OPEN`, and `HALF_OPEN` state transitions with single-flight `probe_fyers_canary()`. On cooldown expiry, canary tests Fyers; on success, restores `PRIMARY_FYERS`; on failure, trips back to `OPEN` for 300s.
+    2. *Dynamic Credential Inspection & Hot-Swap*: Added `check_credentials_changed()` checking PostgreSQL `SystemSettings`, Redis `fyers_creds`, and `.env` mtime, dynamically resetting health and restarting socket streams without container restarts.
+    3. *WebSocket Reconnection Restoration*: Added `MarketDataService.reset_fyers_health()` in `FyersStreamService._on_open()`.
+    4. *Authoritative Yahoo Symbol Normalization*: Upgraded `_normalise_yf_symbol()` mapping bare index strings (`NIFTY`, `BANKNIFTY`, `SENSEX`, `INDIAVIX`, `NIFTY_AUTO`, `NIFTY_IT`) to Yahoo caret tickers and stripping broker prefixes, eliminating 404s.
+    5. *Settings -300 Decoupling*: Removed `-300` from `is_auth_error` in `backend/api/settings.py`.
+    6. *Watchlist Bulk Query Resolution*: Converted `backend/api/watchlist.py` to fetch all user stocks in a single `fetch_quotes_bulk` call, and relaxed `WatchlistSidebar.tsx` polling from 2s to 10s.
+    7. *ChartPage WebSocket Polling Neutralization*: In `ChartPage.tsx`, added `isWsConnectedRef` to bypass REST polling completely when WebSocket is receiving real-time ticks, and relaxed disconnected fallback to 5s.
+    8. *Bulk Chunk Pacing*: Added 200ms micro-delays (`await asyncio.sleep(0.2)`) and per-chunk budget evaluation in `fetch_quotes_bulk`.
+    9. *Celery Cache Fix*: Corrected `backend/tasks/market_tasks.py` to import `get_redis` and gracefully flush cache.
+    10. *Heatmap Caching*: Added Redis caching (`ttl=5`) to `GET /api/market/heatmap` in `backend/api/market.py`.
+  - **Verification Evidence**:
+    - Dedicated Feed Failover & Handover Tests (`backend/tests/test_feed_failover_handover.py`): **14/14 PASSED (100% green)**.
+    - Market Data & Stream Suites (`test_market_data.py`, `test_fyers_stream.py`): **18/18 PASSED (100% green)**.
+    - Consolidated Ticker Architecture Tests (`test_ticker_update_architecture.py`): **3/3 PASSED (100% green)**.
+    - Frontend Unit Tests (`frontend/src/services/api.test.ts`): **10/10 PASSED (100% green)**.
+    - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 14.76s**.
+
 - **Fyers Bulk Quote 50-Symbol Chunking & Code -300 Token Expiry Decoupling (COMPLETE & VERIFIED):**
   - **User Inquiry / Symptom**: User observed stock price values across the platform (Watchlist, Screener, Heatmap, Scanner) not updating in real time even when Fyers API was enabled and verified ("all check") in the Admin portal.
   - **Identified Root Causes**:

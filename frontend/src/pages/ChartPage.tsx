@@ -127,6 +127,7 @@ export default function ChartPage() {
   const macdSignalSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   
   const compareSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const isWsConnectedRef = useRef(false)
   
   const tradePriceLinesRef = useRef<any[]>([])
 
@@ -973,11 +974,14 @@ export default function ChartPage() {
     }
   }
 
-  // Continuous polling fallback to update live quote and active candle every 1 second
+  // Continuous polling fallback to update live quote and active candle when WebSocket is not connected
   useEffect(() => {
     if (!symbol) return
 
     const pollTimer = setInterval(async () => {
+      // Skip REST polling if WebSocket is actively receiving real-time ticks to protect Fyers API quota
+      if (isWsConnectedRef.current) return
+
       try {
         const res = await stocksApi.getQuote(symbol)
         if (res.data && res.data.price > 0) {
@@ -1022,7 +1026,7 @@ export default function ChartPage() {
           }
         }
       } catch (_) {}
-    }, 1000)
+    }, 5000)
 
     return () => clearInterval(pollTimer)
   }, [symbol])
@@ -1041,13 +1045,19 @@ export default function ChartPage() {
       ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
 
       ws.onopen = () => {
+        isWsConnectedRef.current = true
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol }))
         }
       }
 
       ws.onerror = () => {
+        isWsConnectedRef.current = false
         // Suppress unhandled socket disconnect errors in dev
+      }
+
+      ws.onclose = () => {
+        isWsConnectedRef.current = false
       }
 
       ws.onmessage = (event) => {
