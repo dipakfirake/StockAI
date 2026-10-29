@@ -2393,5 +2393,29 @@ installHook.js:1 Quick trade failed: AxiosError: Request failed with status code
      - Admin Docs & Health Security Tests (`backend/tests/test_admin_docs_and_health_security.py`): **8/8 PASSED in 30.43s (100% green)**.
 - **System Response:** Documented the CSP fix, provided exact commit/push commands and tested Oracle Cloud server pull/restart instructions complying with STRICT LIVE SERVER ISOLATION. Concluded with clear Flower and Swagger verification steps.
 
+---
+
+### Session Entry 46: Nginx Setup Script Sudo Permission Fix
+- **Timestamp:** 2026-10-29 10:41:00 IST (05:11:00 UTC)
+- **User Prompt:**
+  `"Targeting Nginx configuration: /etc/nginx/conf.d/stockai.conf
+Using Domain: stockai-live.duckdns.org
+Traceback (most recent call last):
+  File \"<string>\", line 60, in <module>
+PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"`
+- **Agent Technical Actions:**
+  1. **Root Cause Analysis**:
+     - `scripts/setup_duckdns_routes.sh` was invoked with standard user `opc` (`bash scripts/setup_duckdns_routes.sh`).
+     - Inside the script, Python attempted to directly open `/etc/nginx/conf.d/stockai.conf` in write mode (`with open('$CONF_FILE', 'w') as f:`).
+     - Because `/etc/nginx/conf.d/stockai.conf` is owned by `root:root` (`-rw-r--r--`), unprivileged write access raised `PermissionError: [Errno 13] Permission denied`.
+  2. **Script Fix (`scripts/setup_duckdns_routes.sh`)**:
+     - Updated Python to write the newly generated configuration to `/tmp/stockai_nginx.tmp` (world-writable `/tmp`).
+     - Used `sudo cp /tmp/stockai_nginx.tmp "$CONF_FILE"` and `sudo rm -f /tmp/stockai_nginx.tmp` in the bash shell to execute the file replacement with elevated permissions.
+     - Added idempotent regex cleanup to safely remove any previously duplicated location blocks before injection.
+  3. **Verification**:
+     - Script pushed to `origin main` (commit `1c2609d`).
+- **System Response:** Provided user with exact server command to pull and run `bash scripts/setup_duckdns_routes.sh`.
+
+
 
 ---
