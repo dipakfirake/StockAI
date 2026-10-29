@@ -144,21 +144,31 @@ if not ssl_block:
 
 s_pos, e_pos, b_text = ssl_block
 
-# Clean up any existing snippet in this block if present
+# Clean up any existing snippet in this block if present (idempotent)
 cleaned_block = b_text
 cleaned_block = re.sub(r'# --- Health and Liveness Probes ---.*?# --- Prometheus Telemetry ---.*?location /metrics\s*\{.*?\}', '', cleaned_block, flags=re.DOTALL)
+cleaned_block = re.sub(r'location\s*~?\s*\^?/(?:health|docs|flower|metrics)[^{]*\{[^}]*\}', '', cleaned_block)
+cleaned_block = re.sub(r'location\s*=\s*/flower\s*\{[^}]*\}', '', cleaned_block)
 
 # Insert snippet before closing brace of the SSL server block
 last_brace = cleaned_block.rfind('}')
 if last_brace != -1:
     new_block = cleaned_block[:last_brace] + '\n' + snippet + cleaned_block[last_brace:]
     new_content = content[:content.find(b_text)] + new_block + content[content.find(b_text) + len(b_text):]
-    with open('$CONF_FILE', 'w') as f:
+    with open('/tmp/stockai_nginx.tmp', 'w') as f:
         f.write(new_content)
-    print('🎉 Successfully injected routes into the SSL (443) server block in $CONF_FILE!')
+    print('Generated updated SSL configuration in /tmp/stockai_nginx.tmp')
 else:
     print('Failed to locate closing brace in target server block')
+    exit(1)
 "
+
+# Safely copy into place with sudo privileges
+if [ -f "/tmp/stockai_nginx.tmp" ]; then
+    sudo cp /tmp/stockai_nginx.tmp "$CONF_FILE"
+    sudo rm -f /tmp/stockai_nginx.tmp
+    echo "🎉 Successfully injected routes into the SSL (443) server block in $CONF_FILE!"
+fi
 
 echo "=== [4/4] Validating & Reloading Nginx ==="
 sudo nginx -t
