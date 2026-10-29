@@ -2416,6 +2416,23 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
      - Script pushed to `origin main` (commit `1c2609d`).
 - **System Response:** Provided user with exact server command to pull and run `bash scripts/setup_duckdns_routes.sh`.
 
+---
+
+### Session Entry 47: ReDoc Import.Meta Resolution via Pinned 2.1.5 UMD Bundle
+- **Timestamp:** 2026-10-29 10:54:00 IST (05:24:00 UTC)
+- **User Prompt:**
+  `"redoc.standalone.js:13180 Uncaught SyntaxError: Cannot use 'import.meta' outside a module"`
+- **Agent Technical Actions:**
+  1. **Binary & CDN Analysis**:
+     - Inspected `https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js` via automated script: found that it contains `import.meta` at line 13180, causing browsers to reject execution when loaded via classic `<script>` tags.
+     - Inspected `https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js`: confirmed that it is a 100% pure UMD bundle, completely free of `import.meta` (`'import.meta' in data == False`), and defines the required `Redoc` global.
+  2. **Code Remediations**:
+     - Updated `backend/main.py`: Switched `redoc_js_url` to `https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js`.
+  3. **Verification Evidence**:
+     - Backend Security Tests (`backend/tests/test_admin_docs_and_health_security.py`): **8/8 PASSED in 29.39s (100% green)**.
+- **System Response:** Documented the root cause of `import.meta` in the `latest` tag, explained why the 502 Bad Gateway was transient during container restart, committed/pushed the fix, and provided server pull/restart instructions.
+
+
 
 
 ---

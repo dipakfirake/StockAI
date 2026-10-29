@@ -25,9 +25,10 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 - **ReDoc Standalone UMD Script & Celery Flower Portal Guidance (COMPLETE & VERIFIED):**
   - **Issue**: `redoc.standalone.js:13180 Uncaught SyntaxError: Cannot use 'import.meta' outside a module`.
-  - **Fix**: Replaced unstable `redoc@next` bundle with official Redocly standalone UMD bundle `https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js` in `backend/main.py`.
+  - **Root Cause**: `https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js` and `redoc@next` contain un-transpiled `import.meta` at line 13180, which browsers reject in classic `<script>` tags.
+  - **Fix**: Pinned `redoc_js_url` to the official rock-solid UMD bundle `https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js` in `backend/main.py`. Verified with direct binary analysis that `import.meta in data` is False and `Redoc` global is defined.
   - **Flower Access**: Documented HTTP Basic Auth authentication flow (`headadmin` / `HeadAdmin@2003StockAI`) and clarified why opening in a new browser tab is necessary before using embedded iframes.
-  - **Verification**: Backend security tests (8/8 passed in 32.83s), Frontend build (0 errors in 20.46s).
+  - **Verification**: Backend security tests (8/8 passed in 29.39s), Frontend build (0 errors in 20.46s).
 
 - **Celery Flower, Swagger OpenAPI & Health Probe Secure HTTPS Integration on DuckDNS (COMPLETE & VERIFIED):**
   - **User Inquiry & Root Causes Identified**:
