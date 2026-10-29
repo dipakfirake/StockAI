@@ -1,8 +1,13 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    globals: true,
+    exclude: ['e2e/**', 'node_modules/**'],
+  },
   server: {
     host: true, // Listen on all network interfaces (required for Docker)
     port: 5173,

@@ -142,9 +142,69 @@ export const backtestApi = {
 }
 
 // ===== Market endpoints =====
+// Consolidated Single-Flight request cache & cloning for /market/indices
+let inFlightIndicesPromise: Promise<any> | null = null
+let cachedIndicesResponse: { data: any; timestamp: number } | null = null
+const INDICES_CLIENT_CACHE_TTL_MS = 2500
+
+const getMonotonicTime = (): number => {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now()
+  }
+  return Date.now()
+}
+
+const cloneIndicesResponse = (res: any) => {
+  if (!res) return res
+  try {
+    return {
+      ...res,
+      data: res.data ? JSON.parse(JSON.stringify(res.data)) : res.data,
+    }
+  } catch {
+    let clonedData = res.data
+    if (Array.isArray(res.data)) {
+      clonedData = [...res.data]
+    } else if (res.data && typeof res.data === 'object') {
+      clonedData = { ...res.data }
+    }
+    return {
+      ...res,
+      data: clonedData,
+    }
+  }
+}
+
+export const _resetIndicesCache = () => {
+  cachedIndicesResponse = null
+  inFlightIndicesPromise = null
+}
+
 export const marketApi = {
   getRegime: () => api.get('/market/regime'),
-  getIndices: () => api.get('/market/indices'),
+  getIndices: async (forceRefresh = false) => {
+    const now = getMonotonicTime()
+    if (!forceRefresh && cachedIndicesResponse && now - cachedIndicesResponse.timestamp < INDICES_CLIENT_CACHE_TTL_MS) {
+      // Return deep clone of cached response payload to guarantee complete reference isolation across consumers
+      return cloneIndicesResponse(cachedIndicesResponse.data)
+    }
+    if (!forceRefresh && inFlightIndicesPromise) {
+      const res = await inFlightIndicesPromise
+      return cloneIndicesResponse(res)
+    }
+    inFlightIndicesPromise = api.get('/market/indices')
+      .then((res) => {
+        cachedIndicesResponse = { data: res, timestamp: getMonotonicTime() }
+        inFlightIndicesPromise = null
+        return res
+      })
+      .catch((err) => {
+        inFlightIndicesPromise = null
+        throw err
+      })
+    const res = await inFlightIndicesPromise
+    return cloneIndicesResponse(res)
+  },
   getVix: () => api.get('/market/vix'),
   getEvents: () => api.get('/market/events'),
   getSectors: () => api.get('/market/sectors'),

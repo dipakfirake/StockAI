@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { marketApi, aiApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
+import { isIndexMatch } from '../components/LiveTicker'
 import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, Sparkles, RefreshCw, Target, ArrowRight } from 'lucide-react'
 
 interface Index {
@@ -110,6 +111,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const reconnectTimerRef = useRef<number | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -162,22 +164,6 @@ export default function Dashboard() {
     }
   }
 
-  // Continuous polling fallback to guarantee live index prices update every second
-  useEffect(() => {
-    const pollTimer = setInterval(async () => {
-      if (!localStorage.getItem('auth_token')) return
-      try {
-        const res = await marketApi.getIndices()
-        if (res.data?.indices) {
-          setIndices(res.data.indices)
-          setLastUpdated(new Date())
-        }
-      } catch (_) {}
-    }, 1000)
-
-    return () => clearInterval(pollTimer)
-  }, [])
-
   // Real-time tick updates for indices via WebSocket (when supported)
   useEffect(() => {
     if (indices.length === 0 || !isWebSocketSupportedOnHost()) return
@@ -185,60 +171,128 @@ export default function Dashboard() {
     const token = localStorage.getItem('auth_token')
     if (!token) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let isMounted = true
     let ws: WebSocket | null = null
 
-    try {
-      ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
-
-      ws.onopen = () => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          indices.forEach(idx => {
-            if (idx.symbol) {
-              ws!.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol: idx.symbol }))
-            }
-          })
+    const scheduleReconnect = () => {
+      const currentToken = localStorage.getItem('auth_token')
+      if (!isMounted || !currentToken || !isWebSocketSupportedOnHost()) return
+      if (reconnectTimerRef.current !== null) return
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null
+        if (isMounted) {
+          connectWebSocket()
         }
-      }
-
-      ws.onerror = () => {}
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.type === 'market_update' && data.price > 0) {
-            const cleanSym = (data.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
-            
-            setIndices(prev => prev.map(idx => {
-              const idxClean = (idx.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
-              if (idxClean === cleanSym || idx.name.toUpperCase() === cleanSym) {
-                return {
-                  ...idx,
-                  price: Number(data.price),
-                  change: data.change !== undefined ? data.change : idx.change,
-                  change_pct: data.change_pct !== undefined ? data.change_pct : idx.change_pct
-                }
-              }
-              return idx
-            }))
-          }
-        } catch (err) {
-          console.error('WebSocket Dashboard error:', err)
-        }
-      }
-    } catch (e) {
-      console.warn('WebSocket Dashboard init skipped:', e)
+      }, 5000)
     }
 
-    return () => {
+    const connectWebSocket = () => {
+      const currentToken = localStorage.getItem('auth_token')
+      if (!isMounted || !currentToken || !isWebSocketSupportedOnHost()) return
+
       if (ws) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.close()
-        } else if (ws.readyState === WebSocket.CONNECTING) {
-          ws.onopen = () => {
-            try { ws?.close() } catch (_) {}
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onclose = null
+        try { ws.close() } catch (_) {}
+        ws = null
+      }
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      try {
+        ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${currentToken}`)
+
+        ws.onopen = () => {
+          if (!isMounted) return
+          if (reconnectTimerRef.current !== null) {
+            window.clearTimeout(reconnectTimerRef.current)
+            reconnectTimerRef.current = null
+          }
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            indices.forEach(idx => {
+              if (idx.symbol) {
+                ws!.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol: idx.symbol }))
+              }
+            })
           }
         }
+
+        ws.onerror = () => {
+          // W3C WebSocket standard mandates onclose fires next; do not race reconnect here
+        }
+
+        ws.onclose = (event: CloseEvent) => {
+          if (!isMounted) return
+          if (event.code === 1008 || event.code === 4401 || event.code === 4003) {
+            if (reconnectTimerRef.current !== null) {
+              window.clearTimeout(reconnectTimerRef.current)
+              reconnectTimerRef.current = null
+            }
+            console.warn('Dashboard WebSocket auth rejected (code ' + event.code + '). Halting reconnect loop.')
+            return
+          }
+          scheduleReconnect()
+        }
+
+        ws.onmessage = (event) => {
+          if (!isMounted) return
+          try {
+            const data = JSON.parse(event.data)
+            const newPrice = Number(data.price)
+            if (data.type === 'market_update' && Number.isFinite(newPrice) && newPrice > 0) {
+              setIndices(prev => {
+                let hasChanged = false
+                const next = prev.map(idx => {
+                  if (isIndexMatch(idx.symbol, idx.name, data.symbol)) {
+                    const rawChange = Number(data.change)
+                    const newChange = Number.isFinite(rawChange) ? rawChange : Number(idx.change ?? 0)
+                    const rawPct = Number(data.change_pct !== undefined ? data.change_pct : data.change_percent)
+                    const newPct = Number.isFinite(rawPct) ? rawPct : Number(idx.change_pct ?? 0)
+
+                    if (Number(idx.price) !== newPrice || Number(idx.change) !== newChange || Number(idx.change_pct) !== newPct) {
+                      hasChanged = true
+                      return {
+                        ...idx,
+                        price: newPrice,
+                        change: newChange,
+                        change_pct: newPct,
+                      }
+                    }
+                  }
+                  return idx
+                })
+                return hasChanged ? next : prev
+              })
+            }
+          } catch (err) {
+            console.error('WebSocket Dashboard error:', err)
+          }
+        }
+      } catch (e) {
+        console.warn('WebSocket Dashboard init skipped:', e)
+        scheduleReconnect()
+      }
+    }
+
+    connectWebSocket()
+
+    return () => {
+      isMounted = false
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      if (ws) {
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onclose = null
+        try {
+          if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close()
+          }
+        } catch (_) {}
       }
     }
   }, [indices.length]) // Only re-run if number of indices changes

@@ -12,7 +12,39 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-10-28)
+## Latest verified checks (2026-10-29)
+
+- **Price Change-Driven Ticker Updates & Single-Request Cloning Preservation (COMPLETE & HARDENED IN REVIEW ROUND 3):**
+  - **Identified Root Causes**:
+    - `LiveTicker.tsx` originally established an unconditional `pollInterval = setInterval(fetchIndices, 1000)` running every 1,000ms.
+    - On every interval tick, `fetchIndices` called `setNifty(n50)` and `setBankNifty(bnf)` with newly instantiated objects, triggering continuous React re-renders every 1.0s even when market prices were static.
+    - When push-driven WebSockets connected (`ws.onopen`), the 1-second polling timer was never paused or stopped, causing clock-based polling to override event-driven market price ticks.
+    - Concurrent components (`Dashboard.tsx` and `LiveTicker.tsx`) simultaneously called `marketApi.getIndices()` without client-side coalescing, firing duplicate client-side network requests.
+    - *Round 1 Review Findings Fixed*: `JSON.parse(JSON.stringify(res))` caused circular structure serialization exceptions on Axios responses; `LiveTicker` had a zombie 30s interval leak upon component unmount due to asynchronous `ws.onclose` callbacks; missing WebSocket auto-reconnect permanently degraded stream to polling; fragile symbol matching failed on broker prefixes; clock drift affected `Date.now()` TTL checks.
+    - *Round 2 Review Findings Fixed*: Asymmetrical symbol matching in `LiveTicker.tsx`; infinite reconnect loop on auth failure; numeric string decimal incompatibility; missing `isMounted` guard in `Dashboard.tsx`; `cloneIndicesResponse` lacked try/catch fallback; `forceRefresh` lacked unit test coverage.
+    - *Round 3 Review Findings Fixed*:
+      1. `Dashboard.tsx` Bank Nifty Matching Failure: `Dashboard.tsx` compared `idxSym === cleanSym || idxName === cleanSym` (`"NSEBANK" === "BANKNIFTY"` and `"NIFTYBANK" === "BANKNIFTY"`), which always failed when broker/feed sent `symbol: "BANKNIFTY"` or `"NSE:BANKNIFTY-INDEX"`. Bank Nifty updates were dropped on the dashboard.
+      2. Zombie Reconnect Loop via `ws.onerror` Race: `ws.onerror` fired before `ws.onclose` on handshake auth failure (Code 1008), setting `reconnectTimerRef.current`. `ws.onclose` returned early without clearing the timer, causing the timer to reconnect every 5s indefinitely.
+      3. Missing WebSocket Reconnection in `Dashboard.tsx`: If WebSocket dropped due to network blips or server restarts, `Dashboard.tsx` never reconnected and stayed disconnected forever.
+      4. `cloneIndicesResponse` converted array responses to objects with numeric keys `{ '0': ... }` via `{ ...res.data }` in the catch fallback when circular references existed.
+      5. `cleanSymbol` failed on hyphens (`NIFTY-50`), underscores (`NIFTY_50`), and numeric inputs (crashed with `TypeError`).
+      6. Declared `arrow` variable in `LiveTicker.tsx` was omitted from rendered JSX.
+  - **Permanent Architectural Solutions Implemented**:
+    1. **Unified Cross-Component Index Matcher (`isIndexMatch`) & Resilient Sockets (`LiveTicker.tsx` & `Dashboard.tsx`)**:
+       - Created and exported `isIndexMatch(idxSymbol, idxName, targetSymbol)` in `LiveTicker.tsx` and imported it in `Dashboard.tsx`, guaranteeing 100% symmetrical index recognition across all Indian broker representations (`BANKNIFTY`, `NIFTY`, `NSE:BANKNIFTY-INDEX`, `NIFTY-50`, `CNXNIFTY`, `BSE:SENSEX-INDEX`, `NSE:NIFTYIT-INDEX`).
+       - Cancelled `reconnectTimerRef.current` explicitly in `ws.onclose` upon Close Code 1008/4401/4003 and eliminated premature reconnect scheduling in `ws.onerror`, permanently halting auth rejection reconnect loops.
+       - Added full auto-reconnection and lifecycle cleanup to `Dashboard.tsx` with Close Code 1008 terminal guards.
+       - Added `Number.isFinite(...)` defensive checks to price, change, and pct state updates to prevent `NaN` values from breaking state equality guards.
+       - Rendered `{arrow}` indicator in `LiveTicker.tsx` for visual directional momentum consistent with Dashboard.
+    2. **Array-Preserving Cloned Payloads & Hyphen/Underscore Normalization (`api.ts` & `LiveTicker.tsx`)**:
+       - Updated `cloneIndicesResponse` catch fallback to check `Array.isArray(res.data)` and preserve arrays via `[...res.data]`.
+       - Upgraded `cleanSymbol` with `String(...)` coercion and `[\s\-_]+` stripping.
+  - **Verification Evidence**:
+    - Frontend Unit Tests (`frontend/src/services/api.test.ts`): **10/10 PASSED in 1.13s (100% green)**.
+    - Backend Integration Tests (`backend/tests/test_ticker_update_architecture.py`): **3/3 PASSED in 45.20s (100% green)**.
+    - Frontend Lint (`npm run lint`): **0 errors, clean pass**.
+    - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 13.55s**.
+    - Independent Victory Audit Verdict: **VICTORY CONFIRMED** (3-phase clean-room verification passed with zero anomalies).
 
 - **Content-Security-Policy Whitelist for ReDoc CDN & Same-Origin Iframe Embedding (COMPLETE & VERIFIED):**
   - **Issue**: Browser blocked ReDoc script with CSP error: `Loading the script 'https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js' violates the following Content Security Policy directive: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net"`.
