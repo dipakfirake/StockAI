@@ -500,8 +500,10 @@ class MarketDataService:
                 else:
                     err_msg = str(response)
                     resp_code = response.get("code")
-                    if resp_code in (-15, -17, -300, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
+                    if resp_code in (-15, -16, -17, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
                         MarketDataService.mark_fyers_token_expired(f"Token expired/rejected (code {resp_code})", cooldown_seconds=300.0)
+                    elif resp_code == -300:
+                        logger.warning(f"Fyers reported invalid symbol for {fyers_symbol}: {response}")
                     elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
                         MarketDataService._fyers_cooldown_until = now + 30.0
                         logger.warning("Fyers rate limit (-360/429) hit in single quote. Entering 30s cooldown (token remains valid).")
@@ -512,7 +514,7 @@ class MarketDataService:
                 if "-360" in err_str or "429" in err_str or "rate limit" in err_str or "1015" in err_str or "plan limit" in err_str:
                     MarketDataService._fyers_cooldown_until = now + 30.0
                     logger.warning("Fyers rate limit exception in single quote. Entering 30s cooldown (token remains valid).")
-                elif "-300" in err_str or "-15" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
+                elif "-15" in err_str or "-16" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
                     MarketDataService.mark_fyers_token_expired(f"Fyers auth exception: {e}", cooldown_seconds=300.0)
                 logger.error(f"Failed to fetch Fyers quote for {original_symbol}: {e}")
         else:
@@ -632,72 +634,81 @@ class MarketDataService:
                 nse_norm = norm.replace("BSE:", "NSE:")
                 fyers_to_orig.setdefault(nse_norm, []).append(s)
 
-        fyers_symbols_str = ",".join(fyers_to_orig.keys())
+        fyers_keys = list(fyers_to_orig.keys())
         
         if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
-                data = {"symbols": fyers_symbols_str}
-                response = await asyncio.to_thread(fyers.quotes, data)
-                
-                if response.get("s") == "ok" and "d" in response:
-                    MarketDataService._last_fyers_tick_time = now
-                    for item in response["d"]:
-                        fyers_sym = item.get("n", "")
-                        quote_data = item.get("v", {})
-                        orig_symbols = fyers_to_orig.get(fyers_sym, [fyers_sym])
-                        
-                        last_price = float(quote_data.get("lp", 0.0) or 0.0)
-                        calc_change = float(quote_data.get("ch", 0.0) or 0.0)
-                        calc_change_pct = float(quote_data.get("chp", 0.0) or 0.0)
-                        prev_close = float(quote_data.get("prev_close_price", 0.0) or 0.0)
-                        
-                        if calc_change != 0.0 and (prev_close <= 0.0 or abs(prev_close - last_price) < 1e-4):
-                            prev_close = last_price - calc_change
-                        elif prev_close <= 0.0:
-                            prev_close = last_price
+                # Fyers quotes API accepts maximum 50 symbols per request
+                for i in range(0, len(fyers_keys), 50):
+                    chunk_keys = fyers_keys[i : i + 50]
+                    fyers_symbols_str = ",".join(chunk_keys)
+                    data = {"symbols": fyers_symbols_str}
+                    response = await asyncio.to_thread(fyers.quotes, data)
+                    
+                    if response.get("s") == "ok" and "d" in response:
+                        MarketDataService._last_fyers_tick_time = now
+                        for item in response["d"]:
+                            fyers_sym = item.get("n", "")
+                            quote_data = item.get("v", {})
+                            orig_symbols = fyers_to_orig.get(fyers_sym, [fyers_sym])
+                            
+                            last_price = float(quote_data.get("lp", 0.0) or 0.0)
+                            calc_change = float(quote_data.get("ch", 0.0) or 0.0)
+                            calc_change_pct = float(quote_data.get("chp", 0.0) or 0.0)
+                            prev_close = float(quote_data.get("prev_close_price", 0.0) or 0.0)
+                            
+                            if calc_change != 0.0 and (prev_close <= 0.0 or abs(prev_close - last_price) < 1e-4):
+                                prev_close = last_price - calc_change
+                            elif prev_close <= 0.0:
+                                prev_close = last_price
 
-                        if calc_change == 0.0 and calc_change_pct != 0.0 and prev_close > 0.0:
-                            calc_change = last_price - prev_close
-                        elif calc_change_pct == 0.0 and calc_change != 0.0 and prev_close > 0.0:
-                            calc_change_pct = (calc_change / prev_close) * 100.0
-                        
-                        if last_price > 0:
-                            for orig_sym in orig_symbols:
-                                q_obj = {
-                                    "symbol": orig_sym,
-                                    "price": round(last_price, 2),
-                                    "previous_close": round(prev_close, 2),
-                                    "change": round(calc_change, 2),
-                                    "change_pct": round(calc_change_pct, 2),
-                                    "volume": int(quote_data.get("volume", 0)),
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                    "data_status": "realtime",
-                                    "source": "Fyers API",
-                                }
-                                quotes_dict[orig_sym] = q_obj
-                                try:
-                                    await cache_set(f"quote:{orig_sym}", q_obj, ttl=settings.CACHE_TTL_QUOTE)
-                                except Exception:
-                                    pass
-                elif response.get("code") in (429, -360):
-                    MarketDataService._fyers_cooldown_until = now + 30.0
-                    logger.warning(f"Fyers rate limit ({response.get('code')}) hit in bulk quotes. Entering 30s cooldown (token remains valid).")
-                else:
-                    err_msg = str(response)
-                    resp_code = response.get("code")
-                    if resp_code in (-15, -17, -300, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
-                        MarketDataService.mark_fyers_token_expired(f"Bulk quote token error (code {resp_code})", cooldown_seconds=300.0)
-                    elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
+                            if calc_change == 0.0 and calc_change_pct != 0.0 and prev_close > 0.0:
+                                calc_change = last_price - prev_close
+                            elif calc_change_pct == 0.0 and calc_change != 0.0 and prev_close > 0.0:
+                                calc_change_pct = (calc_change / prev_close) * 100.0
+                            
+                            if last_price > 0:
+                                for orig_sym in orig_symbols:
+                                    q_obj = {
+                                        "symbol": orig_sym,
+                                        "price": round(last_price, 2),
+                                        "previous_close": round(prev_close, 2),
+                                        "change": round(calc_change, 2),
+                                        "change_pct": round(calc_change_pct, 2),
+                                        "volume": int(quote_data.get("volume", 0)),
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        "data_status": "realtime",
+                                        "source": "Fyers API",
+                                    }
+                                    quotes_dict[orig_sym] = q_obj
+                                    try:
+                                        await cache_set(f"quote:{orig_sym}", q_obj, ttl=settings.CACHE_TTL_QUOTE)
+                                    except Exception:
+                                        pass
+                    elif response.get("code") in (429, -360):
                         MarketDataService._fyers_cooldown_until = now + 30.0
-                        logger.warning("Fyers rate limit (-360/429) detected in bulk quotes. Entering 30s cooldown (token remains valid).")
-                    logger.error(f"Fyers bulk quote returned non-ok: {response}")
+                        logger.warning(f"Fyers rate limit ({response.get('code')}) hit in bulk quotes. Entering 30s cooldown (token remains valid).")
+                        break
+                    else:
+                        err_msg = str(response)
+                        resp_code = response.get("code")
+                        if resp_code in (-15, -16, -17, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
+                            MarketDataService.mark_fyers_token_expired(f"Bulk quote token error (code {resp_code})", cooldown_seconds=300.0)
+                            break
+                        elif resp_code == -300:
+                            logger.warning(f"Fyers reported invalid symbol parameter in chunk: {chunk_keys[:5]}")
+                        elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
+                            MarketDataService._fyers_cooldown_until = now + 30.0
+                            logger.warning("Fyers rate limit (-360/429) detected in bulk quotes. Entering 30s cooldown (token remains valid).")
+                            break
+                        logger.error(f"Fyers bulk quote returned non-ok: {response}")
             except Exception as e:
                 err_str = str(e).lower()
                 if "-360" in err_str or "429" in err_str or "rate limit" in err_str or "1015" in err_str or "plan limit" in err_str:
                     MarketDataService._fyers_cooldown_until = now + 30.0
                     logger.warning("Fyers rate limit exception in bulk quotes. Entering 30s cooldown (token remains valid).")
-                elif "-300" in err_str or "-15" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
+                elif "-15" in err_str or "-16" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
                     MarketDataService.mark_fyers_token_expired(f"Bulk quote auth exception: {e}", cooldown_seconds=300.0)
                 logger.error(f"Fyers bulk quote failed: {e}")
         else:

@@ -2578,3 +2578,28 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - `npm run build --prefix frontend`: 0 errors.
   - Audit Reports: `.agents/teamwork/victory_auditor_1/victory_audit_report.md` and `.agents/teamwork/sentinel_victory_auditor_1/victory_audit_report.md`.
 - **System Response:** Delivered comprehensive final report confirming root cause analysis, architectural remediations, multi-round adversarial verification, and independent victory audit confirmation.
+
+---
+
+### Session Entry 53: Fyers Bulk Quote Chunking & False Token Expiry Decoupling
+- **Timestamp:** 2026-10-29 14:15:00 IST (08:45:00 UTC)
+- **User Prompt:**
+  `"why prices values of all stocks are not changing when fyers api md all gets enabled nd all chevk."`
+- **Agent Technical Actions:**
+  1. **Root Cause Analysis & Architecture Audit**:
+     - Investigated why stock prices failed to fluctuate across the platform despite valid Fyers API credentials in the Admin portal.
+     - Discovered that Fyers API v3 enforces a hard limit of 50 comma-separated symbols per bulk quote request (`fyers.quotes({"symbols": ...})`).
+     - When any component or cache warmer requested quotes for >50 symbols (e.g. Nifty 50 + benchmark indices), Fyers rejected the request with `{'s': 'error', 'code': -300}`.
+     - In `backend/services/market_data.py`, error code `-300` was erroneously grouped with auth failure codes `(-15, -17, 401, 403)`. This triggered `MarketDataService.mark_fyers_token_expired()`, invalidating the Fyers session platform-wide for 5 minutes (`300s`) upon querying any batch >50 stocks or an unsupported symbol.
+     - Whenever Fyers was marked expired, requests fell back to Yahoo Finance, where free Indian equity data is delayed by 15 minutes and refreshes in coarse intervals, giving the appearance of frozen or static prices.
+     - Also identified Fyers Standard Free Plan rate limit (50 req/min) and daily SEBI token expiration (06:00 AM IST) requirements.
+  2. **Backend Engineering (`backend/services/market_data.py`)**:
+     - Chunked bulk quote symbol lists into batches of at most 50 symbols (`chunk_keys = fyers_keys[i : i + 50]`) in `MarketDataService.fetch_quotes_bulk`, querying Fyers in chunks and aggregating results seamlessly.
+     - Removed `-300` from `mark_fyers_token_expired()` in both `fetch_quote` and `fetch_quotes_bulk`. Now logged as a warning (`Fyers reported invalid symbol parameter`) without invalidating the broker session or disrupting market data for valid symbols.
+  3. **Verification Evidence**:
+     - Backend Market Data Unit Tests (`backend/tests/test_market_data.py`): **13/13 PASSED in 17.37s (100% green)**.
+     - Fyers Stream Service Tests (`backend/tests/test_fyers_stream.py`): **5/5 PASSED in 5.47s (100% green)**.
+     - Consolidated Ticker Architecture Tests (`backend/tests/test_ticker_update_architecture.py`): **3/3 PASSED in 45.51s (100% green)**.
+     - Admin Docs & Health Security Tests (`backend/tests/test_admin_docs_and_health_security.py`): **8/8 PASSED in 16.55s (100% green)**.
+     - Frontend Unit Tests (`frontend/src/services/api.test.ts`): **10/10 PASSED in 1.26s (100% green)**.
+- **System Response:** Provided thorough, transparent explanation of the 50-symbol broker threshold, the false-expiry `-300` bug, Yahoo Finance 15-minute fallback latency, SEBI 06:00 AM daily token expiration rule, and tested copy-pasteable server deployment commands.

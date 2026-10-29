@@ -14,6 +14,31 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-10-29)
 
+- **Fyers Bulk Quote 50-Symbol Chunking & Code -300 Token Expiry Decoupling (COMPLETE & VERIFIED):**
+  - **User Inquiry / Symptom**: User observed stock price values across the platform (Watchlist, Screener, Heatmap, Scanner) not updating in real time even when Fyers API was enabled and verified ("all check") in the Admin portal.
+  - **Identified Root Causes**:
+    1. **Fyers API 50-Symbol Bulk Limit & False Expiry Bug**:
+       - Fyers API v3 strictly limits `fyers.quotes({"symbols": "..."})` to a maximum of 50 comma-separated symbols.
+       - Whenever a page or cache warmer requested quotes for >50 symbols (e.g. Nifty 50 + indices or sector watchlists), Fyers API returned `{'s': 'error', 'code': -300}` ("Bad request / invalid symbols").
+       - In `backend/services/market_data.py`, error code `-300` was erroneously included in `if resp_code in (-15, -17, -300, 401, 403): MarketDataService.mark_fyers_token_expired(..., cooldown_seconds=300.0)`.
+       - As a result, querying any batch >50 stocks or an unsupported symbol instantly disabled Fyers market data for the entire platform for 5 minutes (`300s`), forcing all requests across all components to fall back to Yahoo Finance.
+    2. **Yahoo Finance 15-Minute Latency Fallback**:
+       - When Fyers is placed on cooldown or marked expired, StockAI falls back to Yahoo Finance to avoid dropping data.
+       - However, Yahoo Finance free data for Indian stocks (NSE/BSE) is delayed by 15 minutes and updates in coarse batches, making stock prices appear completely static and frozen during active trading hours.
+    3. **Standard Plan Rate Quotas (50 req/min)**:
+       - Fyers Standard (Free) API enforces a maximum rate of 50 REST requests per minute and 5 per second. When polling occurs across multiple tabs or components instead of using the WebSocket stream or cached coalescing, rate limit code `-360` triggers temporary cooldowns.
+    4. **Daily SEBI Broker Token Expiry (06:00 AM IST)**:
+       - Indian regulations mandate that broker access tokens expire daily at 06:00 AM IST. Even if App ID, Secret, and Redirect URI are configured, an administrator must log in each morning via the Admin portal ("Login with Fyers") to obtain the active day's OAuth token.
+  - **Permanent Architectural Solutions Implemented**:
+    1. **50-Symbol Chunking**: In `MarketDataService.fetch_quotes_bulk`, symbols are now chunked into batches of at most 50 (`chunk_keys = fyers_keys[i : i + 50]`), querying Fyers sequentially per chunk and merging results safely without exceeding the broker payload threshold.
+    2. **Decoupled Code -300**: Removed `-300` from `mark_fyers_token_expired()` in both `fetch_quote` and `fetch_quotes_bulk`. Now logged as a warning (`Fyers reported invalid symbol`) without invalidating the valid broker session or interrupting real-time market data ingestion for valid stocks.
+  - **Verification Evidence**:
+    - Backend Unit Tests (`test_market_data.py`): **13/13 PASSED in 17.37s (100% green)**.
+    - WebSocket & Live Stream Tests (`test_fyers_stream.py`): **5/5 PASSED in 5.47s (100% green)**.
+    - Consolidated Ticker Architecture Tests (`test_ticker_update_architecture.py`): **3/3 PASSED in 45.51s (100% green)**.
+    - Admin Docs & Health Security Tests (`test_admin_docs_and_health_security.py`): **8/8 PASSED in 16.55s (100% green)**.
+    - Frontend Unit Tests (`frontend/src/services/api.test.ts`): **10/10 PASSED in 1.26s (100% green)**.
+
 - **Price Change-Driven Ticker Updates & Single-Request Cloning Preservation (COMPLETE & HARDENED IN REVIEW ROUND 3):**
   - **Identified Root Causes**:
     - `LiveTicker.tsx` originally established an unconditional `pollInterval = setInterval(fetchIndices, 1000)` running every 1,000ms.
