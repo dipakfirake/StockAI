@@ -12,6 +12,27 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-11-03)
+
+- **PRODUCTION DEPLOYMENT (COMPLETE — commit `736da53`, pushed to `origin/main` 2026-11-03 09:36 IST):**
+  - All 4 bugs resolved and shipped: non-blocking Fyers socket, Warmup Governor rate pacing, High-Frequency Fluidity Engine (3–10 Hz), sentinel admin 403 guard, admin route protection in frontend.
+  - **Final Verification (fresh re-run on 2026-11-03):**
+    - Backend Pytest Full 11-Suite: **78/78 PASSED in 188.21s (exit code 0)** — zero failures, 3 pre-existing warnings.
+    - Frontend Vitest: **10/10 PASSED in 3.33s (exit code 0)**.
+    - Frontend Production Build: **1,992 modules transformed, 0 TypeScript errors, exit code 0, built in 12.83s**.
+  - **Git commit**: `736da53` — 30 files changed, +4535/-431 lines, 8 new files created.
+  - **Exact next safe step**: User runs deploy commands on live server (see "Production Deployment Commands" below).
+
+## Production Deployment Commands (run on live server manually)
+
+```bash
+# SSH into live server first, then:
+cd ~/StockAI
+git pull origin main
+docker compose build backend frontend
+docker compose restart backend frontend
+```
+
 ## Latest verified checks (2026-11-02)
 
 - **Milestone 3 Iteration 2: Release Remediation, Concurrency Hardening & OS Timer Calibration (COMPLETE & VERIFIED):**
