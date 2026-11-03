@@ -18,12 +18,16 @@ class TimeSyncService:
     _instance: Optional[TimeSyncService] = None
     _offset_seconds: float = 0.0
     _last_sync: Optional[datetime.datetime] = None
+    _syncing: bool = False
     _lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             # Sync in background daemon thread to avoid blocking application startup
+            with cls._instance._lock:
+                cls._instance._syncing = True
+                cls._instance._last_sync = datetime.datetime.now(datetime.timezone.utc)
             threading.Thread(target=cls._instance._sync, daemon=True).start()
         return cls._instance
 
@@ -44,6 +48,11 @@ class TimeSyncService:
                 logger.info(f"Time synced successfully. System clock offset: {self._offset_seconds:.2f} seconds.")
         except Exception as e:
             logger.debug(f"External time sync bypassed ({e}). Using system time.")
+        finally:
+            with self._lock:
+                self._syncing = False
+                if self._last_sync is None:
+                    self._last_sync = datetime.datetime.now(datetime.timezone.utc)
             
     def get_true_now(self, tzinfo=None) -> datetime.datetime:
         """
@@ -55,12 +64,15 @@ class TimeSyncService:
         """
         # Resync if it's been more than 4 hours
         with self._lock:
-            needs_sync = self._last_sync is None or \
+            needs_sync = not self._syncing and (
+                self._last_sync is None or
                 (datetime.datetime.now(datetime.timezone.utc) - self._last_sync).total_seconds() > 14400
-            
-        if needs_sync:
-            # Sync in a background thread to avoid blocking
-            threading.Thread(target=self._sync, daemon=True).start()
+            )
+            if needs_sync:
+                self._syncing = True
+                self._last_sync = datetime.datetime.now(datetime.timezone.utc)
+                # Sync in a background thread to avoid blocking
+                threading.Thread(target=self._sync, daemon=True).start()
             
         true_utc_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=self._offset_seconds)
         

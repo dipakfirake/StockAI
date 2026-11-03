@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { sentinelApi, validatorApi } from '../services/api';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../AuthContext';
+import { ShieldAlert } from 'lucide-react';
 
 interface SubsystemInfo {
   status: 'HEALTHY' | 'WARNING' | 'DEGRADED' | 'DOWN';
@@ -75,6 +77,9 @@ const formatCheckDate = (dateStr?: string): string => {
 };
 
 export default function SentinelMonitorPage() {
+  const { user } = useAuth();
+  const isAdmin = Boolean(user?.is_admin);
+
   const [data, setData] = useState<HealthSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [auditing, setAuditing] = useState(false);
@@ -199,6 +204,8 @@ export default function SentinelMonitorPage() {
   };
 
   useEffect(() => {
+    if (!isAdmin) return;
+
     fetchHealth(true);
     fetchValidatorStatus();
     fetchParadigms();
@@ -212,7 +219,7 @@ export default function SentinelMonitorPage() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [autoRefresh]);
+  }, [autoRefresh, isAdmin]);
 
   const handleAuditNow = async () => {
     setAuditing(true);
@@ -294,6 +301,49 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  if (!isAdmin) {
+    return (
+      <div style={{ maxWidth: '600px', margin: '80px auto', textAlign: 'center', padding: '30px' }}>
+        <div style={{
+          width: 64,
+          height: 64,
+          margin: '0 auto 16px',
+          borderRadius: '50%',
+          background: 'rgba(239, 68, 68, 0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#ef4444'
+        }}>
+          <ShieldAlert size={36} />
+        </div>
+        <h2 style={{ color: '#ef4444', fontSize: 24, fontWeight: 800, margin: '0 0 12px 0' }}>
+          Administrator Access Required
+        </h2>
+        <p style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '0.95rem', lineHeight: 1.6, margin: '0 0 24px 0' }}>
+          Project Sentinel Telemetry, Subsystem Watchdogs, and Cybersecurity Threat Scanners are restricted strictly to verified platform administrators.
+        </p>
+        <Link
+          to="/dashboard"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            background: 'rgba(59, 130, 246, 0.15)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            color: '#60a5fa',
+            padding: '10px 20px',
+            borderRadius: 8,
+            fontWeight: 600,
+            textDecoration: 'none'
+          }}
+        >
+          Return to Dashboard
+        </Link>
+      </div>
+    );
+  }
 
   const score = data?.health_score ?? 100;
   const scoreColor = score >= 90 ? '#22c55e' : score >= 70 ? '#f59e0b' : '#ef4444';

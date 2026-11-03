@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.core.auth import get_current_user
+from backend.core.cache import cache_get, cache_set
 from backend.core.param_validator import sanitize_symbol, validate_timeframe
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service
@@ -15,6 +16,9 @@ from backend.services.ai_engine import ai_engine_service
 from backend.services.risk_analysis import analyse_risk
 
 router = APIRouter()
+
+# In-flight tracker for background fundamental info lookups to prevent duplicate concurrent tasks
+_inflight_info_lookups: set[str] = set()
 
 
 @router.get("/{symbol}/insight")
@@ -103,8 +107,8 @@ async def get_stock_insight(
         except Exception:
             pass
 
-    indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
-    series_candles = indicator_service.compute_for_candles_series(candles)
+    indicators = await asyncio.to_thread(indicator_service.compute_all, candles) if len(candles) >= 30 else {}
+    series_candles = await asyncio.to_thread(indicator_service.compute_for_candles_series, candles)
     
     if anchor_date and len(series_candles) > 0:
         try:
@@ -169,13 +173,22 @@ async def get_quote(symbol: str, current_user=Depends(get_current_user)):
     if not quote:
         raise HTTPException(status_code=404, detail=f"No quote data found for {safe_symbol}")
     if not quote.get("market_cap") or quote.get("market_cap") == 0:
+        clean_sym = safe_symbol.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-INDEX", "").replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
+        is_index = safe_symbol.startswith("^") or safe_symbol.endswith("-INDEX") or clean_sym in ("NIFTY50", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "INDIAVIX")
         try:
-            from backend.core.cache import cache_get
-            cached_info = await cache_get(f"stock_info:{safe_symbol}")
+            cached_info = await cache_get(f"info:{clean_sym}")
             if cached_info and cached_info.get("market_cap"):
                 quote["market_cap"] = cached_info["market_cap"]
-            else:
-                asyncio.create_task(market_data_service.get_stock_info(safe_symbol))
+            elif not is_index and clean_sym not in _inflight_info_lookups:
+                _inflight_info_lookups.add(clean_sym)
+                async def _bg_fetch_info():
+                    try:
+                        await market_data_service.get_stock_info(safe_symbol)
+                    except Exception:
+                        pass
+                    finally:
+                        _inflight_info_lookups.discard(clean_sym)
+                asyncio.create_task(_bg_fetch_info())
         except Exception:
             pass
     return quote
@@ -194,8 +207,14 @@ async def get_candles(
     """Get OHLCV candlestick data with indicator series."""
     safe_symbol = sanitize_symbol(symbol)
     safe_tf = validate_timeframe(timeframe)
+    cache_key = f"candles_series:{safe_symbol}:{safe_tf}:{limit}"
+    if not anchor_date and not start_date and not end_date:
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
     candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit, start_date, end_date)
-    series_candles = indicator_service.compute_for_candles_series(candles)
+    series_candles = await asyncio.to_thread(indicator_service.compute_for_candles_series, candles)
     
     if anchor_date and len(series_candles) > 0:
         from backend.services.indicators import calculate_anchored_vwap, candles_to_df
@@ -211,7 +230,10 @@ async def get_candles(
             else:
                 c["anchored_vwap"] = None
 
-    return {"symbol": safe_symbol, "timeframe": safe_tf, "candles": series_candles}
+    result = {"symbol": safe_symbol, "timeframe": safe_tf, "candles": series_candles}
+    if not anchor_date and not start_date and not end_date:
+        await cache_set(cache_key, result, ttl=15)
+    return result
 
 
 @router.get("/{symbol}/indicators")
@@ -226,7 +248,7 @@ async def get_indicators(
     candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=250)
     if len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data to compute indicators")
-    indicators = indicator_service.compute_all(candles)
+    indicators = await asyncio.to_thread(indicator_service.compute_all, candles)
     return {"symbol": safe_symbol, "timeframe": safe_tf, "indicators": indicators}
 
 
@@ -242,8 +264,8 @@ async def get_signals(
     candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit=250)
     if len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data to compute signals")
-    indicators = indicator_service.compute_all(candles)
-    signals = signal_engine.evaluate(indicators, safe_symbol, safe_tf)
+    indicators = await asyncio.to_thread(indicator_service.compute_all, candles)
+    signals = await asyncio.to_thread(signal_engine.evaluate, indicators, safe_symbol, safe_tf)
     return {"symbol": safe_symbol, "timeframe": safe_tf, "signals": signals}
 
 

@@ -114,3 +114,75 @@ async def test_price_change_broadcast_delivers_to_subscribed_ticker():
         assert '24600.75' in sent_payload
     finally:
         _market_connections.pop(conn_id, None)
+
+
+@pytest.mark.asyncio
+async def test_micro_tick_fluidity_engine_cadence_and_anti_fabrication():
+    """
+    Empirical test for High-Frequency Micro-Tick Fluidity Engine:
+    - Bridges a discrete price step from 1000.00 to 1000.60
+    - Delivers at least 3 updates within the 300ms window
+    - Quantizes every price to exact multiples of ₹0.05
+    - Verifies volume remains constant (0 fake volume)
+    - Verifies transparent data_status ('realtime_interpolated' / 'realtime')
+    - Verifies prices are strictly clamped within boundaries
+    """
+    import json
+    from backend.api.websocket import fluidity_engine, _market_connections, _symbol_subscribers
+
+    sent_messages = []
+    mock_ws = AsyncMock()
+    mock_ws.send_text.side_effect = lambda msg: sent_messages.append(json.loads(msg))
+
+    conn_id = "test_fluidity_conn_1"
+    symbol = "TCS.NS"
+    _market_connections[conn_id] = {
+        "ws": mock_ws,
+        "symbols": {symbol},
+        "user_id": "test_fluidity_user",
+    }
+    _symbol_subscribers.setdefault(symbol, set()).add(conn_id)
+
+    with patch("backend.api.websocket.is_indian_market_open", return_value=True):
+        task = await fluidity_engine.schedule_micro_ticks(
+            symbol=symbol,
+            start_price=1000.00,
+            target_price=1000.60,
+            volume=50000,
+            prev_close=980.00,
+            open_price=990.00,
+            high_price=1010.00,
+            low_price=985.00,
+            source="Test Feed",
+            duration=0.3,
+            steps=3,
+        )
+        assert task is not None
+        await task
+
+    try:
+        assert len(sent_messages) == 3
+        prices = [m["price"] for m in sent_messages]
+        # At least 3 updates delivered
+        assert len(prices) >= 3
+
+        # Every price must be an exact multiple of 0.05
+        for p in prices:
+            assert round(p % 0.05, 4) in (0.0, 0.05)
+
+        # Clamped within [1000.00, 1000.60]
+        for p in prices:
+            assert 1000.00 <= p <= 1000.60
+
+        # Volume must strictly mirror 50000 (0 fake volume)
+        for m in sent_messages:
+            assert m["volume"] == 50000
+
+        # Intermediate ticks have data_status 'realtime_interpolated' and final has 'realtime'
+        assert sent_messages[0]["data_status"] == "realtime_interpolated"
+        assert sent_messages[1]["data_status"] == "realtime_interpolated"
+        assert sent_messages[2]["data_status"] == "realtime"
+        assert sent_messages[2]["price"] == 1000.60
+    finally:
+        _market_connections.pop(conn_id, None)
+        _symbol_subscribers.get(symbol, set()).discard(conn_id)

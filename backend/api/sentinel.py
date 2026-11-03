@@ -8,7 +8,7 @@ from backend.api.admin import require_admin
 from backend.core.auth import get_current_user
 from backend.core.audit_logger import log_security_event
 
-router = APIRouter(prefix="/sentinel", tags=["Sentinel 24/7 Watchdog"])
+router = APIRouter(prefix="/sentinel", tags=["Sentinel 24/7 Watchdog"], dependencies=[Depends(require_admin)])
 
 
 class ResolveIncidentSchema(BaseModel):
@@ -17,22 +17,12 @@ class ResolveIncidentSchema(BaseModel):
 
 @router.get("/status")
 async def get_sentinel_status(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """
-    Get 24/7 surveillance health status.
-    Admins receive full diagnostic breakdown; standard users receive sanitized summary.
+    Get 24/7 surveillance health status (Strictly Admin only).
     """
-    is_admin = bool(current_user.is_admin)
-    summary = sentinel_service.get_health_summary()
-    if is_admin:
-        return summary
-    return {
-        "overall_health_score": summary.get("overall_health_score", 100.0),
-        "overall_status": summary.get("overall_status", "NORMAL"),
-        "open_incident_count": summary.get("open_incident_count", 0),
-        "monitoring_active": summary.get("monitoring_active", True),
-    }
+    return sentinel_service.get_health_summary()
 
 
 @router.get("/incidents")
@@ -81,5 +71,28 @@ async def resolve_incident(
     return {
         "success": success,
         "incident_id": req.incident_id,
+        "status": "RESOLVED" if success else "NOT_FOUND",
+    }
+
+
+@router.post("/resolve/{incident_id}")
+async def resolve_incident_by_path(
+    incident_id: str,
+    current_user: User = Depends(require_admin),
+):
+    """Mark an incident as investigated and resolved via path parameter (Admin only)."""
+    success = await sentinel_service.resolve_incident(
+        incident_id=incident_id,
+        resolved_by=current_user.email,
+    )
+    log_security_event(
+        event_type="SENTINEL_INCIDENT_RESOLVED",
+        severity="INFO",
+        user_id=str(current_user.id),
+        details={"incident_id": incident_id, "resolved_by": current_user.email, "success": success},
+    )
+    return {
+        "success": success,
+        "incident_id": incident_id,
         "status": "RESOLVED" if success else "NOT_FOUND",
     }

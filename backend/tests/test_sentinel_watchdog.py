@@ -55,6 +55,18 @@ async def test_sentinel_api_endpoints():
             res2 = await client.get("/api/sentinel/incidents")
             assert res2.status_code == 200
             assert "incidents" in res2.json()
+
+        # 3. Verify non-admin gets 403 Forbidden on sentinel status
+        from fastapi import HTTPException
+        mock_normal_user = MagicMock(spec=User, id="user-uuid", email="user@stockai.com", is_admin=False)
+        app.dependency_overrides[get_current_user] = lambda: mock_normal_user
+        async def mock_require_admin_fail():
+            raise HTTPException(status_code=403, detail="Administrator access required")
+        app.dependency_overrides[require_admin] = mock_require_admin_fail
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res_forbidden = await client.get("/api/sentinel/status")
+            assert res_forbidden.status_code == 403
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         app.dependency_overrides.pop(require_admin, None)

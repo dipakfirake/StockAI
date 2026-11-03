@@ -20,10 +20,26 @@ from backend.api.admin import require_admin
 from backend.core.audit_logger import log_security_event
 from backend.core.logging_config import get_logger
 from backend.core.config import settings
+from backend.core.cache import cache_get, cache_set, cache_delete
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# Strong references to running background tasks to prevent garbage-collection and allow clean test draining
+_bg_tasks: set[asyncio.Task] = set()
+
+
+async def drain_bg_tasks(timeout: float = 2.0) -> None:
+    """Drain and await pending background tasks in settings (useful for clean teardown)."""
+    if _bg_tasks:
+        tasks = list(_bg_tasks)
+        try:
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=timeout)
+        except Exception:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
 
 # Sensitive settings that regular users must NEVER inspect in cleartext
 SENSITIVE_SETTING_KEYS = {"fyers_access_token", "fyers_client_id"}
@@ -293,7 +309,7 @@ async def get_fyers_status(
         ping_ms = round((time.perf_counter() - start_t) * 1000, 1)
 
         if prof.get("s") == "ok":
-            MarketDataService.reset_fyers_health()
+            MarketDataService.reset_fyers_health(engage_warmup=True)
             feed_info = MarketDataService.get_feed_status()
             data = prof.get("data", {})
             raw_fy_id = data.get("fy_id", client_id)
@@ -608,7 +624,7 @@ async def update_fyers_token(
     if hasattr(MarketDataService, "_env_cache") and isinstance(MarketDataService._env_cache, dict):
         MarketDataService._env_cache["FYERS_ACCESS_TOKEN"] = token
     MarketDataService._env_mtime = 0.0
-    MarketDataService.reset_fyers_health()
+    MarketDataService.reset_fyers_health(engage_warmup=True)
 
     # 4. Graceful Profile Ping: Extract user profile name without aborting on transient rate limits
     ping_ok = False
@@ -629,16 +645,27 @@ async def update_fyers_token(
         logger.info(f"Fyers profile ping notice ({e}). Token preserved as active.")
 
     # 5. Restart WebSocket Tick Stream dynamically with new token (non-blocking background task)
-    async def _restart_stream_bg():
-        try:
-            from backend.services.fyers_stream import fyers_stream_service
-            await asyncio.sleep(0.3)
-            await fyers_stream_service.stop()
-            await fyers_stream_service.start()
-        except Exception as e:
-            logger.warning(f"Could not dynamically restart fyers_stream_service in background: {e}")
+    now_t = time.time()
+    MarketDataService._last_loaded_token = token
+    MarketDataService._last_loaded_client_id = client_id
+    MarketDataService.engage_warmup_governor(60.0)
 
-    asyncio.create_task(_restart_stream_bg())
+    if now_t - getattr(MarketDataService, "_last_restart_dispatch_time", 0.0) >= 2.0:
+        MarketDataService._last_restart_dispatch_time = now_t
+
+        async def _restart_stream_bg():
+            try:
+                from backend.services.fyers_stream import fyers_stream_service
+                await asyncio.sleep(0.3)
+                await fyers_stream_service.restart()
+            except Exception as e:
+                logger.warning(f"Could not dynamically restart fyers_stream_service in background: {e}")
+
+        task = asyncio.create_task(_restart_stream_bg())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
+    else:
+        logger.info("Stream restart in settings debounced (recent restart already dispatched).")
 
     # 6. Prime the live status cache so immediate frontend tab checks show 🟢 ACTIVE instantly
     try:

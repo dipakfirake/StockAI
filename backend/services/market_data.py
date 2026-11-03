@@ -296,32 +296,138 @@ class MarketDataService:
     _last_loaded_token: str = ""
     _last_loaded_client_id: str = ""
     _last_token_check_time: float = 0.0
+    _last_restart_dispatch_time: float = 0.0
     _canary_in_progress: bool = False
+    _warmup_until: float = 0.0
+    _warmup_started_at: float = 0.0
+    _last_fyers_request_time: float = 0.0
+    _rate_budget_lock: Optional[asyncio.Lock] = None
+    _rate_budget_lock_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    @classmethod
+    def _get_rate_budget_lock(cls) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if cls._rate_budget_lock is None or cls._rate_budget_lock_loop is not loop:
+            cls._rate_budget_lock = asyncio.Lock()
+            cls._rate_budget_lock_loop = loop
+        return cls._rate_budget_lock
+
+    @classmethod
+    def engage_warmup_governor(cls, duration_seconds: float = 60.0) -> None:
+        """Engages the 60-second gradual warmup governor on token entry or renewal."""
+        import time
+        now = time.time()
+        cls._warmup_started_at = now
+        cls._warmup_until = now + duration_seconds
+        cls._last_fyers_request_time = 0.0
+        logger.info(f"Fyers Warmup Governor engaged for {duration_seconds}s to protect against burst storms.")
+
+    @classmethod
+    def is_in_warmup(cls, now: Optional[float] = None) -> bool:
+        """Returns True if Fyers rate limiter is currently in the 60s warmup ramp-up mode."""
+        import time
+        t = now if now is not None else time.time()
+        return t < getattr(cls, "_warmup_until", 0.0)
+
+    @classmethod
+    def _check_in_memory_rate_budget(cls, now: float) -> bool:
+        """
+        Evaluates sliding window, inter-request pacing, and gradual warmup governor:
+        - Warmup Governor (active for 60s following token renewal/activation):
+          - 0-20s: max 1 req / 1.5s (smooth initial ramp)
+          - 20-40s: max 1 req / 0.8s
+          - 40-60s: max 1 req / 0.4s
+          Excess/concurrent requests during warmup automatically route to Yahoo fallback.
+        - Normal Operation:
+          - Enforces min 250ms spacing between Fyers REST calls (safeguards 5 req/sec burst limit)
+          - Max 4 requests per 1.0s
+          - Max 40 requests per 60.0s
+        """
+        last_req = getattr(cls, "_last_fyers_request_time", 0.0)
+
+        # 1. Check Warmup Governor if active
+        if cls.is_in_warmup(now):
+            elapsed = now - cls._warmup_started_at
+            if elapsed < 20.0:
+                min_spacing = 1.5
+            elif elapsed < 40.0:
+                min_spacing = 0.8
+            else:
+                min_spacing = 0.4
+        else:
+            # Enforce 250ms spacing between REST requests to prevent burst limit exceedance
+            min_spacing = 0.25
+
+        if last_req > 0 and (now - last_req) < (min_spacing - 0.005):
+            return False
+
+        # 2. Sliding window evaluation
+        cls._fyers_request_timestamps = [t for t in cls._fyers_request_timestamps if now - t < 60.0]
+        burst_count = sum(1 for t in cls._fyers_request_timestamps if now - t < 1.0)
+        if burst_count >= 4 or len(cls._fyers_request_timestamps) >= 40:
+            return False
+
+        return True
 
     @classmethod
     def _check_and_record_fyers_rate_budget(cls) -> bool:
         """
-        Enforces Fyers Standard API Plan limits:
+        Synchronous fallback / fast-path rate limiter enforcing:
         - Max 50 requests/min (safety cap at 40 requests/min)
         - Max 5 requests/sec (safety cap at 4 requests/sec)
         Returns True if within budget, False if budget exhausted (route to backup).
         """
         import time
         now = time.time()
-        # Keep only timestamps within last 60 seconds
-        cls._fyers_request_timestamps = [t for t in cls._fyers_request_timestamps if now - t < 60.0]
-        
-        # Check 1-second burst:
-        burst_count = sum(1 for t in cls._fyers_request_timestamps if now - t < 1.0)
-        if burst_count >= 4:
+        if not cls._check_in_memory_rate_budget(now):
             return False
-            
-        # Check 60-second limit:
-        if len(cls._fyers_request_timestamps) >= 40:
-            return False
-            
         cls._fyers_request_timestamps.append(now)
+        cls._last_fyers_request_time = now
         return True
+
+    @classmethod
+    async def check_and_record_fyers_rate_budget(cls) -> bool:
+        """
+        Distributed rate limiter evaluating sliding window (max 40 req/60s, max 4 req/1s)
+        using Redis sorted set with in-memory fallback.
+        Records all outbound Fyers REST requests, including individual historical candle pagination chunks.
+        """
+        async with cls._get_rate_budget_lock():
+            import time
+            now = time.time()
+
+            # 1. Fast in-memory evaluation
+            if not cls._check_in_memory_rate_budget(now):
+                return False
+
+            # 2. Redis distributed sliding window evaluation
+            try:
+                from backend.core.cache import get_redis
+                r = await get_redis()
+                r_key = "fyers:rate_limit:sliding_window"
+                pipe = r.pipeline()
+                pipe.zremrangebyscore(r_key, 0, now - 60.0)
+                pipe.zcount(r_key, now - 1.0, "+inf")
+                pipe.zcard(r_key)
+                results = await pipe.execute()
+
+                burst_count = results[1]
+                min_count = results[2]
+
+                if burst_count >= 4 or min_count >= 40:
+                    return False
+
+                pipe = r.pipeline()
+                pipe.zadd(r_key, {f"{now}:{time.perf_counter()}": now})
+                pipe.expire(r_key, 120)
+                await pipe.execute()
+            except Exception as e:
+                logger.debug(f"Redis rate limit check skipped (fallback to memory): {e}")
+
+            # Record in memory
+            cls._fyers_request_timestamps.append(now)
+            cls._last_fyers_request_time = now
+            return True
 
     @classmethod
     def get_feed_status(cls) -> dict:
@@ -361,6 +467,8 @@ class MarketDataService:
             "source_label": source_label,
             "dual_connection_active": True,
             "circuit_state": circuit_state,
+            "warmup_active": cls.is_in_warmup(now),
+            "warmup_remaining": max(0, int(cls._warmup_until - now)),
             "rate_budget_available": max(0, 4 - len([ts for ts in cls._fyers_request_timestamps if now - ts < 1.0])),
         }
 
@@ -388,7 +496,7 @@ class MarketDataService:
         logger.warning(f"Dual-Engine: Fyers rate-limited ({reason}). Temporarily diverting to Yahoo Finance backup for {cooldown_seconds}s. Token remains VALID.")
 
     @classmethod
-    def reset_fyers_health(cls) -> None:
+    def reset_fyers_health(cls, engage_warmup: bool = False) -> None:
         """Restores Fyers as the active primary engine upon token renewal."""
         cls._fyers_token_valid = True
         cls._fyers_token_error_reason = ""
@@ -397,6 +505,12 @@ class MarketDataService:
         cls._active_engine = "PRIMARY_FYERS"
         cls._circuit_state = "CLOSED"
         cls._canary_in_progress = False
+        if engage_warmup:
+            cls.engage_warmup_governor(60.0)
+        else:
+            cls._warmup_until = 0.0
+            cls._warmup_started_at = 0.0
+            cls._last_fyers_request_time = 0.0
         logger.info("Dual-Engine: Fyers token refreshed. Hot-swapping back to Primary Fyers Engine.")
 
     @classmethod
@@ -524,16 +638,22 @@ class MarketDataService:
 
         if discovered_token and discovered_token != cls._last_loaded_token:
             logger.info("Dynamic Credential Hot-Swap: Detected new Fyers access token. Resetting Fyers health and restoring primary feed.")
-            cls.reset_fyers_health()
+            cls.reset_fyers_health(engage_warmup=True)
             cls._last_loaded_token = discovered_token
             if discovered_client_id:
                 cls._last_loaded_client_id = discovered_client_id
 
-            try:
-                from backend.services.fyers_stream import fyers_stream_service
-                asyncio.create_task(fyers_stream_service.restart())
-            except Exception as ex:
-                logger.debug(f"Stream restart on credential hot-swap skipped: {ex}")
+            # Debounce / deduplicate stream restart:
+            now = time.time()
+            if now - cls._last_restart_dispatch_time >= 3.0:
+                cls._last_restart_dispatch_time = now
+                try:
+                    from backend.services.fyers_stream import fyers_stream_service
+                    asyncio.create_task(fyers_stream_service.restart())
+                except Exception as ex:
+                    logger.debug(f"Stream restart on credential hot-swap skipped: {ex}")
+            else:
+                logger.info("Stream restart debounced in check_credentials_changed (already dispatched recently).")
 
             return True
 
@@ -734,7 +854,7 @@ class MarketDataService:
             if not MarketDataService._canary_in_progress:
                 await MarketDataService.probe_fyers_canary(probe_symbol=fyers_symbol)
 
-        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
+        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbol}
@@ -925,16 +1045,16 @@ class MarketDataService:
                 probe_sym = fyers_keys[0] if fyers_keys else "NSE:NIFTY50-INDEX"
                 await MarketDataService.probe_fyers_canary(probe_symbol=probe_sym)
 
-        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
+        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 # Fyers quotes API accepts maximum 50 symbols per request
                 for i in range(0, len(fyers_keys), 50):
                     if i > 0:
-                        # For subsequent chunks, verify budget and add a 200ms pacing delay to respect 5 req/sec burst limit
-                        await asyncio.sleep(0.2)
+                        # For subsequent chunks, verify budget and add a 250ms pacing delay to respect 5 req/sec burst limit
+                        await asyncio.sleep(0.25)
                         now = time.time()
-                        if not MarketDataService._check_and_record_fyers_rate_budget():
+                        if not await MarketDataService.check_and_record_fyers_rate_budget():
                             logger.warning("Fyers rate budget exhausted during bulk chunk query. Breaking to fallback for remaining.")
                             break
                     chunk_keys = fyers_keys[i : i + 50]
@@ -1167,7 +1287,7 @@ class MarketDataService:
                 await MarketDataService.probe_fyers_canary(probe_symbol=fyers_symbol)
 
         try:
-            if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and MarketDataService._check_and_record_fyers_rate_budget():
+            if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
                 fyers = await MarketDataService._get_fyers_client()
                 all_candles = []
                 
@@ -1201,7 +1321,20 @@ class MarketDataService:
                 max_days_per_request = 365 if timeframe in ["1d", "1w", "1mo"] else 100
                 
                 chunk_end = dt_end
+                chunk_idx = 0
                 while chunk_end > dt_start:
+                    if chunk_idx > 0:
+                        # Pacing delay between pagination chunks to respect 4 req/sec burst limit
+                        await asyncio.sleep(0.25)
+                        # Verify and record budget against rate limiter for subsequent pagination chunks
+                        if not await MarketDataService.check_and_record_fyers_rate_budget():
+                            logger.warning(
+                                f"Fyers rate budget exhausted during candle pagination for {fyers_symbol} "
+                                f"(chunk {chunk_idx + 1}). Halting further pagination to preserve broker quota."
+                            )
+                            break
+
+                    chunk_idx += 1
                     chunk_start = max(chunk_end - timedelta(days=max_days_per_request), dt_start)
                     
                     data = {
@@ -1238,10 +1371,6 @@ class MarketDataService:
                         break
                         
                     chunk_end = chunk_start - timedelta(days=1)
-                    
-                    # Sleep briefly only if paginating across multiple chunks
-                    if chunk_end > dt_start:
-                        await asyncio.sleep(0.35)
                     
                 if all_candles:
                     # Fyers candle format: [Epoch, Open, High, Low, Close, Volume]

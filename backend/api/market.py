@@ -1,6 +1,7 @@
 """Market overview, regime, and India Intelligence API router."""
 
 import asyncio
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from backend.core.logging_config import get_logger
@@ -23,51 +24,76 @@ logger = get_logger(__name__)
 NIFTY_SYMBOL = "^NSEI"
 SENSEX_SYMBOL = "^BSESN"
 
+_regime_lock: Optional[asyncio.Lock] = None
+_regime_lock_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _get_regime_lock() -> asyncio.Lock:
+    global _regime_lock, _regime_lock_loop
+    loop = asyncio.get_running_loop()
+    if _regime_lock is None or _regime_lock_loop is not loop:
+        _regime_lock = asyncio.Lock()
+        _regime_lock_loop = loop
+    return _regime_lock
+
 
 @router.get("/regime")
 async def get_market_regime(current_user=Depends(get_current_user)):
     """
     Detect current market regime from Nifty 50 indicators.
-    Simple version — uses only technical analysis.
+    High-speed Redis caching with loop-aware single-flight coalescing to eliminate GIL contention.
     """
-    try:
-        candles = await market_data_service.fetch_candles(NIFTY_SYMBOL, "1d", limit=250)
-        if len(candles) < 50:
-            return {"regime": "UNKNOWN", "confidence": 0.0, "signals": [], "reason": "Insufficient data"}
+    cache_key = "market:regime:v2"
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
 
-        indicators = indicator_service.compute_all(candles)
-        signals = signal_engine.evaluate(indicators, NIFTY_SYMBOL)
+    lock = _get_regime_lock()
+    async with lock:
+        # Double-check cache inside lock in case an earlier concurrent task populated it
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
 
-        sig = signals[0] if signals else {}
-        sig_type = sig.get("type", "HOLD")
-        score = sig.get("score", 0)
+        try:
+            candles = await market_data_service.fetch_candles(NIFTY_SYMBOL, "1d", limit=250)
+            if len(candles) < 50:
+                return {"regime": "UNKNOWN", "confidence": 0.0, "signals": [], "reason": "Insufficient data"}
 
-        if score >= 4:
-            regime, confidence = "BULLISH", 0.85
-        elif score >= 2:
-            regime, confidence = "BULLISH", 0.65
-        elif score <= -4:
-            regime, confidence = "BEARISH", 0.85
-        elif score <= -2:
-            regime, confidence = "BEARISH", 0.65
-        else:
-            regime, confidence = "SIDEWAYS", 0.55
+            indicators = await asyncio.to_thread(indicator_service.compute_all, candles)
+            signals = await asyncio.to_thread(signal_engine.evaluate, indicators, NIFTY_SYMBOL)
 
-        return {
-            "regime": regime,
-            "confidence": confidence,
-            "score": score,
-            "reason": sig.get("reason", ""),
-            "is_market_open": nse_scraper.is_market_open(),
-            "indicators": {
-                "rsi_14": indicators.get("rsi_14"),
-                "ema_50": indicators.get("ema_50"),
-                "ema_200": indicators.get("ema_200"),
-                "adx_14": indicators.get("adx_14"),
+            sig = signals[0] if signals else {}
+            score = sig.get("score", 0)
+
+            if score >= 4:
+                regime, confidence = "BULLISH", 0.85
+            elif score >= 2:
+                regime, confidence = "BULLISH", 0.65
+            elif score <= -4:
+                regime, confidence = "BEARISH", 0.85
+            elif score <= -2:
+                regime, confidence = "BEARISH", 0.65
+            else:
+                regime, confidence = "SIDEWAYS", 0.55
+
+            result = {
+                "regime": regime,
+                "confidence": confidence,
+                "score": score,
+                "reason": sig.get("reason", ""),
+                "is_market_open": nse_scraper.is_market_open(),
+                "indicators": {
+                    "rsi_14": indicators.get("rsi_14"),
+                    "ema_50": indicators.get("ema_50"),
+                    "ema_200": indicators.get("ema_200"),
+                    "adx_14": indicators.get("adx_14"),
+                }
             }
-        }
-    except Exception as e:
-        return {"regime": "UNKNOWN", "confidence": 0.0, "score": 0, "reason": f"Data unavailable: {str(e)}", "is_market_open": False, "indicators": {}}
+            await cache_set(cache_key, result, ttl=60)
+            return result
+        except Exception as e:
+            return {"regime": "UNKNOWN", "confidence": 0.0, "score": 0, "reason": f"Data unavailable: {str(e)}", "is_market_open": False, "indicators": {}}
 
 
 @router.get("/india-intelligence")

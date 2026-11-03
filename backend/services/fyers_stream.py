@@ -10,7 +10,7 @@ import asyncio
 import os
 import sys
 import types
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Set, Dict, List, Any
 
 # Ensure pkg_resources compatibility on modern Python (3.11+ / 3.12+)
@@ -40,8 +40,153 @@ try:
     from fyers_apiv3.FyersWebsocket import data_ws
     FyersDataSocket = data_ws.FyersDataSocket
 except Exception as e:
+    data_ws = None
     FyersDataSocket = None
     logger.warning(f"FyersDataSocket import failed or not available: {e}")
+
+# In-memory fast cache for resolved HSM tokens: {fyers_symbol: {"fyToken": ..., "symbol": ...}}
+_HSM_TOKEN_MEMORY_CACHE: Dict[str, dict] = {}
+
+
+def _patch_fyers_symbol_conversion():
+    """
+    Patches SymbolConversion.symbol_to_hsmtoken in fyers_apiv3 to:
+    1. Check local in-memory cache to eliminate redundant HTTP calls.
+    2. Add strict 3.0s timeout to requests.get so it never freezes worker threads.
+    3. Pass correct Authorization and version headers.
+    4. Handle network and timeout errors gracefully without raising unhandled exceptions.
+    """
+    if data_ws is None or not hasattr(data_ws, "SymbolConversion"):
+        return
+
+    if getattr(data_ws.SymbolConversion, "_is_stockai_patched", False):
+        return
+
+    import json
+    import urllib.parse
+    import requests
+
+    original_method = getattr(data_ws.SymbolConversion, "symbol_to_hsmtoken", None)
+
+    # Load mapper once
+    try:
+        if "pkg_resources" in sys.modules:
+            file_path = sys.modules["pkg_resources"].resource_filename('fyers_apiv3.FyersWebsocket', 'map.json')
+        else:
+            file_path = os.path.join(os.path.dirname(data_ws.__file__), 'map.json')
+        with open(file_path, "r") as f:
+            mapper = json.load(f)
+        index_dict = mapper.get("index_dict", {})
+        exch_seg_dict = mapper.get("exch_seg_dict", {})
+    except Exception as e:
+        logger.warning(f"Could not load Fyers map.json for symbol conversion: {e}")
+        index_dict = {}
+        exch_seg_dict = {}
+
+    def patched_symbol_to_hsmtoken(self, symbols: list):
+        if not symbols:
+            return ({}, [], False)
+
+        try:
+            # Check which symbols need network resolution
+            uncached = [s for s in symbols if s not in _HSM_TOKEN_MEMORY_CACHE]
+
+            if uncached:
+                symbols_query = ",".join(uncached)
+                data = {"symbols": symbols_query}
+                url_params = urllib.parse.urlencode(data)
+                URL = self.quotes_url + "?" + url_params
+
+                auth_header = self.access_token
+                try:
+                    stream_inst = FyersStreamService.get_instance()
+                    if stream_inst._client_id and stream_inst._access_token:
+                        auth_header = f"{stream_inst._client_id}:{stream_inst._access_token}"
+                except Exception:
+                    pass
+
+                headers = {
+                    "Authorization": auth_header,
+                    "Content-Type": "application/json",
+                    "version": "3",
+                }
+
+                try:
+                    response = requests.get(url=URL, headers=headers, timeout=3.0)
+                    quote_data = response.json()
+                    if "d" in quote_data:
+                        for item in quote_data["d"]:
+                            if item.get("s") == "ok" and "v" in item:
+                                sym_name = item["v"].get("symbol")
+                                if sym_name:
+                                    _HSM_TOKEN_MEMORY_CACHE[sym_name] = item["v"]
+                except Exception as err:
+                    logger.warning(f"Fyers HSM token HTTP lookup notice (3.0s guard): {err}")
+
+            # Reconstruct mapping using cached and newly fetched tokens
+            datadict = {}
+            wrong_symbol = []
+            dp_index_flag = False
+
+            for s in symbols:
+                val = _HSM_TOKEN_MEMORY_CACHE.get(s)
+                if not val or "fyToken" not in val:
+                    wrong_symbol.append(s)
+                    continue
+
+                fy_token = str(val["fyToken"])
+                sym = val.get("symbol", s)
+                key = fy_token[:4]
+                if key not in exch_seg_dict:
+                    wrong_symbol.append(sym)
+                    continue
+
+                segment = exch_seg_dict[key]
+                parts = sym.split("-")
+                update_dict = True
+
+                if len(parts) > 1 and parts[-1] == "INDEX" and self.data_type != "DepthUpdate":
+                    if sym in index_dict:
+                        ex_token = index_dict[sym]
+                    else:
+                        ex_token = sym.split(":")[1].split("-")[0] if ":" in sym else sym
+                    sub_symbol = f"if|{segment}|{ex_token}"
+                elif self.data_type == "DepthUpdate" and parts[-1] != "INDEX":
+                    ex_token = fy_token[10:]
+                    sub_symbol = f"dp|{segment}|{ex_token}"
+                elif self.data_type == "SymbolUpdate":
+                    ex_token = fy_token[10:]
+                    sub_symbol = f"sf|{segment}|{ex_token}"
+                elif self.data_type == "DepthUpdate" and parts[-1] == "INDEX":
+                    update_dict = False
+                    dp_index_flag = True
+                else:
+                    sub_symbol = f"sf|{segment}|{fy_token[10:]}"
+
+                if update_dict:
+                    datadict[sub_symbol] = sym
+
+            return (datadict, wrong_symbol, dp_index_flag)
+        except Exception as e:
+            logger.warning(f"Error in patched symbol_to_hsmtoken: {e}")
+            if original_method:
+                try:
+                    return original_method(self, symbols)
+                except Exception:
+                    pass
+            return ({}, symbols, False)
+
+    data_ws.SymbolConversion.symbol_to_hsmtoken = patched_symbol_to_hsmtoken
+    data_ws.SymbolConversion._is_stockai_patched = True
+    logger.info("StockAI non-blocking guarded patch applied to Fyers SymbolConversion.symbol_to_hsmtoken.")
+
+
+if FyersDataSocket is not None:
+    try:
+        _patch_fyers_symbol_conversion()
+    except Exception as _patch_err:
+        logger.warning(f"Could not apply Fyers symbol conversion patch: {_patch_err}")
+
 
 
 class FyersStreamService:
@@ -57,7 +202,10 @@ class FyersStreamService:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscribed_symbols: Set[str] = set()
         self._symbol_map: Dict[str, str] = {}  # Fyers symbol -> Target symbol (e.g. NSE:RELIANCE-EQ -> RELIANCE.NS)
-        self._lock = asyncio.Lock()
+        self.__lock: Optional[asyncio.Lock] = None
+        self.__lifecycle_lock: Optional[asyncio.Lock] = None
+        self._client_id: Optional[str] = None
+        self._access_token: Optional[str] = None
 
         # Pre-seed default core indices and high-activity equity symbols
         self._default_indices = [
@@ -80,6 +228,38 @@ class FyersStreamService:
         ]
         for fyers_sym in self._default_indices:
             self._subscribed_symbols.add(fyers_sym)
+
+    @property
+    def _lifecycle_lock(self) -> asyncio.Lock:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if self.__lifecycle_lock is None:
+            self.__lifecycle_lock = asyncio.Lock()
+        elif loop is not None and getattr(self.__lifecycle_lock, "_loop", None) not in (None, loop):
+            self.__lifecycle_lock = asyncio.Lock()
+        return self.__lifecycle_lock
+
+    @_lifecycle_lock.setter
+    def _lifecycle_lock(self, val: Any) -> None:
+        self.__lifecycle_lock = val
+
+    @property
+    def _lock(self) -> asyncio.Lock:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if self.__lock is None:
+            self.__lock = asyncio.Lock()
+        elif loop is not None and getattr(self.__lock, "_loop", None) not in (None, loop):
+            self.__lock = asyncio.Lock()
+        return self.__lock
+
+    @_lock.setter
+    def _lock(self, val: Any) -> None:
+        self.__lock = val
 
     @classmethod
     def get_instance(cls) -> "FyersStreamService":
@@ -104,9 +284,14 @@ class FyersStreamService:
 
     async def start(self) -> bool:
         """
-        Initializes credentials and establishes the background WebSocket connection.
-        Returns True if connected, or False if credentials are unavailable/expired.
+        Acquires lifecycle lock and initializes credentials and background connection.
+        Guarantees non-blocking execution via asyncio.to_thread with 3.0s timeout.
+        Returns True if connected, or False if credentials unavailable or connection failed.
         """
+        async with self._lifecycle_lock:
+            return await self._start_internal()
+
+    async def _start_internal(self) -> bool:
         if FyersDataSocket is None:
             logger.info("FyersDataSocket library unavailable. Operating in autonomous polling mode.")
             return False
@@ -165,6 +350,8 @@ class FyersStreamService:
         # Clean tokens
         client_id = str(client_id).strip()
         access_token = str(access_token).strip()
+        self._client_id = client_id
+        self._access_token = access_token
 
         # Fyers requires 'client_id:access_token' or 'access_token' format
         formatted_token = f"{client_id}:{access_token}" if ":" not in access_token else access_token
@@ -182,13 +369,24 @@ class FyersStreamService:
                 on_error=self._on_error,
                 on_message=self._on_tick
             )
-            self._socket.connect()
+            # Offload socket connect to worker thread guarded by strict 3.0s timeout
+            if hasattr(self._socket, "connect"):
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._socket.connect),
+                    timeout=3.0
+                )
             self._is_running = True
             logger.info("Fyers Data Socket initialization dispatched.")
             return True
+        except asyncio.TimeoutError:
+            logger.warning("Fyers Data Socket connect timed out after 3.0s. Falling back to autonomous polling mode.")
+            self._is_connected = False
+            self._is_running = False
+            return False
         except Exception as err:
             logger.warning(f"Fyers Data Socket connection failed: {err}. Falling back to 1-second poller.")
             self._is_connected = False
+            self._is_running = False
             return False
 
     def _on_open(self) -> None:
@@ -207,14 +405,20 @@ class FyersStreamService:
             for f_sym in list(self._subscribed_symbols):
                 self._symbol_map[f_sym] = MarketDataService._normalise_yf_symbol(f_sym)
 
-            # Subscribe to initial symbols
-            if self._socket and self._subscribed_symbols:
-                symbols_list = list(self._subscribed_symbols)
-                # Chunk into groups of 50 (Fyers batch limit per message)
-                for i in range(0, len(symbols_list), 50):
-                    chunk = symbols_list[i : i + 50]
-                    self._socket.subscribe(symbols=chunk, data_type="SymbolUpdate")
-                logger.info(f"Fyers WebSocket subscribed to {len(symbols_list)} symbols: {symbols_list[:5]}...")
+            # Schedule chunked non-blocking subscription onto the running event loop
+            symbols_list = list(self._subscribed_symbols)
+            if self._socket and symbols_list:
+                if self._loop and self._loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        self._subscribe_chunks(symbols_list),
+                        self._loop
+                    )
+                else:
+                    for i in range(0, len(symbols_list), 20):
+                        chunk = symbols_list[i : i + 20]
+                        if hasattr(self._socket, "subscribe"):
+                            self._socket.subscribe(symbols=chunk, data_type="SymbolUpdate")
+                    logger.info(f"Fyers WebSocket subscribed to {len(symbols_list)} symbols: {symbols_list[:5]}...")
         except Exception as e:
             logger.error(f"Error subscribing symbols on Fyers open: {e}")
 
@@ -342,9 +546,108 @@ class FyersStreamService:
         except Exception as e:
             logger.debug(f"Error handling Fyers tick: {e}")
 
+    async def _resolve_and_cache_hsm_tokens(self, symbols: List[str]) -> None:
+        """
+        Pre-warms HSM tokens from Redis (24h TTL) and populates _HSM_TOKEN_MEMORY_CACHE.
+        Offloads any external HTTP calls to asyncio.to_thread with strict 3.0s timeout
+        and proper headers, then caches resolved values in Redis ('fyers:hsm_token:{symbol}')
+        with 86400s TTL.
+        """
+        if not symbols:
+            return
+
+        # 1. Check Redis for any symbols not yet in local memory cache
+        missing_in_memory = [s for s in symbols if s not in _HSM_TOKEN_MEMORY_CACHE]
+        if missing_in_memory:
+            try:
+                from backend.core.cache import cache_get
+                for s in missing_in_memory:
+                    val = await cache_get(f"fyers:hsm_token:{s}")
+                    if val and isinstance(val, dict) and "fyToken" in val:
+                        _HSM_TOKEN_MEMORY_CACHE[s] = val
+            except Exception as e:
+                logger.debug(f"Redis HSM cache read notice: {e}")
+
+        # 2. For symbols still missing, perform offloaded HTTP query with 3.0s timeout
+        still_missing = [s for s in symbols if s not in _HSM_TOKEN_MEMORY_CACHE]
+        if still_missing and self._access_token:
+            auth_header = f"{self._client_id}:{self._access_token}" if self._client_id else self._access_token
+            resolved = await asyncio.to_thread(self._fetch_hsm_tokens_http, still_missing, auth_header)
+            if resolved:
+                try:
+                    from backend.core.cache import cache_set
+                    for sym, data_val in resolved.items():
+                        _HSM_TOKEN_MEMORY_CACHE[sym] = data_val
+                        await cache_set(f"fyers:hsm_token:{sym}", data_val, ttl=86400)
+                except Exception as e:
+                    logger.debug(f"Redis HSM cache write notice: {e}")
+
+    @staticmethod
+    def _fetch_hsm_tokens_http(symbols: List[str], auth_header: str) -> Dict[str, dict]:
+        """Synchronous HTTP call to Fyers quotes endpoint guarded by 3.0s timeout."""
+        import urllib.parse
+        import requests
+        results = {}
+        try:
+            symbols_query = ",".join(symbols)
+            data = {"symbols": symbols_query}
+            url = f"https://api-t1.fyers.in/data/quotes?{urllib.parse.urlencode(data)}"
+            headers = {
+                "Authorization": auth_header,
+                "Content-Type": "application/json",
+                "version": "3",
+            }
+            resp = requests.get(url, headers=headers, timeout=3.0)
+            payload = resp.json()
+            if "d" in payload:
+                for item in payload["d"]:
+                    if item.get("s") == "ok" and "v" in item:
+                        sym_name = item["v"].get("symbol")
+                        if sym_name:
+                            results[sym_name] = item["v"]
+        except Exception as e:
+            logger.warning(f"External HSM token HTTP fetch error: {e}")
+        return results
+
+    async def _subscribe_chunks(self, symbols: List[str]) -> None:
+        """
+        Chunks symbols into batches of 20 and executes self._socket.subscribe()
+        inside asyncio.to_thread guarded by 3.0s timeout. Paces chunks to prevent
+        exceeding broker burst limits.
+        """
+        if not symbols or not self._socket or not self.is_connected:
+            return
+
+        # Pre-resolve and warm HSM tokens in Redis & memory
+        await self._resolve_and_cache_hsm_tokens(symbols)
+
+        # Batch into chunks of 20 as per interface contract
+        chunk_size = 20
+        total_chunks = (len(symbols) + chunk_size - 1) // chunk_size
+
+        for idx, i in enumerate(range(0, len(symbols), chunk_size)):
+            chunk = symbols[i : i + chunk_size]
+            if idx > 0:
+                # Pacing delay between chunks to respect broker burst limits
+                await asyncio.sleep(0.1)
+
+            try:
+                if hasattr(self._socket, "subscribe"):
+                    await asyncio.wait_for(
+                        asyncio.to_thread(self._socket.subscribe, symbols=chunk, data_type="SymbolUpdate"),
+                        timeout=3.0
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(f"Socket subscribe chunk timed out after 3.0s for chunk {idx + 1}/{total_chunks}")
+            except Exception as e:
+                logger.warning(f"Error subscribing chunk {chunk}: {e}")
+
+        logger.info(f"Fyers WebSocket subscribed to {len(symbols)} symbols in {total_chunks} chunk(s).")
+
     async def subscribe_symbols(self, symbols: List[str]) -> None:
         """
-        Dynamically subscribe to a list of symbols (e.g. when a user navigates to a chart).
+        Dynamically subscribe to a list of symbols (e.g. when a user navigates to a chart or watchlist).
+        Serialized symbol tracking, HSM token caching, non-blocking chunked subscriptions.
         """
         if not symbols:
             return
@@ -364,33 +667,45 @@ class FyersStreamService:
                     self._subscribed_symbols.add(f_sym)
                     new_fyers_symbols.append(f_sym)
 
-        # If currently connected to Fyers, send subscription packet
+        # If currently connected to Fyers, send subscription packets non-blockingly
         if new_fyers_symbols and self._socket and self.is_connected:
-            try:
-                for i in range(0, len(new_fyers_symbols), 50):
-                    chunk = new_fyers_symbols[i : i + 50]
-                    self._socket.subscribe(symbols=chunk, data_type="SymbolUpdate")
-                logger.info(f"Fyers WebSocket dynamically subscribed to: {new_fyers_symbols}")
-            except Exception as e:
-                logger.warning(f"Error in dynamic Fyers subscription: {e}")
+            await self._subscribe_chunks(new_fyers_symbols)
 
     async def stop(self) -> None:
-        """Cleanly closes the WebSocket connection."""
+        """
+        Acquires lifecycle lock and cleanly closes the WebSocket connection.
+        Offloads thread joins to worker thread guarded by 3.0s timeout to prevent loop freezing.
+        """
+        async with self._lifecycle_lock:
+            await self._stop_internal()
+
+    async def _stop_internal(self) -> None:
         self._is_running = False
         self._is_connected = False
-        if self._socket:
+        sock = self._socket
+        self._socket = None
+        if sock:
             try:
-                self._socket.close_connection()
+                if hasattr(sock, "close_connection"):
+                    await asyncio.wait_for(
+                        asyncio.to_thread(sock.close_connection),
+                        timeout=3.0
+                    )
+            except asyncio.TimeoutError:
+                logger.warning("Fyers Data Socket close_connection timed out after 3.0s (thread join delayed). Cleanly abandoning socket reference.")
             except Exception as e:
                 logger.debug(f"Error closing FyersDataSocket: {e}")
-            self._socket = None
         logger.info("Fyers Data Socket closed.")
 
     async def restart(self) -> bool:
-        """Stops the existing socket and re-initiates connection with latest credentials."""
-        logger.info("Restarting Fyers Data Socket stream with updated credentials...")
-        await self.stop()
-        return await self.start()
+        """
+        Acquires lifecycle lock, stops existing socket cleanly, and re-initiates connection.
+        Serialized through _lifecycle_lock to prevent race conditions or duplicate socket allocations.
+        """
+        async with self._lifecycle_lock:
+            logger.info("Restarting Fyers Data Socket stream with updated credentials (lifecycle locked)...")
+            await self._stop_internal()
+            return await self._start_internal()
 
 
 # Global singleton instance

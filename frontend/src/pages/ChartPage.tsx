@@ -9,6 +9,7 @@ import { useTheme } from '../ThemeContext'
 import { toast } from '../components/Toast'
 import StockSearchBox from '../components/StockSearchBox'
 import ChartReplayControls from '../components/ChartReplayControls'
+import LiveQuoteHeader from '../components/LiveQuoteHeader'
 import { TrendlinePrimitive, Point } from '../components/DrawingEngine'
 import { formatINR, formatNumber2Dec } from '../utils/formatters'
 import { useLocalStorage } from '../hooks/useLocalStorage'
@@ -135,6 +136,21 @@ export default function ChartPage() {
   const patternsRef = useRef<any[]>([])
   const lastCandleRef = useRef<CandlestickData | null>(null)
   const lastVolumeRef = useRef<HistogramData | null>(null)
+
+  const quoteRef = useRef<any>(null)
+  const tickListenersRef = useRef<Set<(tick: any) => void>>(new Set())
+  const registerTickListener = useCallback((fn: (tick: any) => void) => {
+    tickListenersRef.current.add(fn)
+    return () => {
+      tickListenersRef.current.delete(fn)
+    }
+  }, [])
+  const pendingCandleRef = useRef<CandlestickData | null>(null)
+  const pendingVolumeRef = useRef<HistogramData | null>(null)
+  const rafChartIdRef = useRef<number | null>(null)
+  const reconnectTimerRef = useRef<number | null>(null)
+  const reconnectAttemptsRef = useRef<number>(0)
+  const wsRef = useRef<WebSocket | null>(null)
 
   const [signals, setSignals] = useState<Signal[]>([])
   const [aiScore, setAiScore] = useState<AIScore | null>(null)
@@ -953,6 +969,7 @@ export default function ChartPage() {
         const insight = insightRes.value.data
         setRawCandles(insight.candles || [])
         setQuote(insight.quote || null)
+        quoteRef.current = insight.quote || null
         setPatterns(insight.patterns || [])
         setSignals(insight.signals || [])
         setAiScore(insight.ai_score || null)
@@ -987,12 +1004,8 @@ export default function ChartPage() {
         const res = await stocksApi.getQuote(symbol)
         if (res.data && res.data.price > 0) {
           const newPrice = Number(res.data.price)
-          setQuote((prev: any) => prev ? {
-            ...prev,
-            price: newPrice,
-            change: res.data.change !== undefined ? res.data.change : prev.change,
-            change_pct: res.data.change_pct !== undefined ? res.data.change_pct : prev.change_pct,
-          } : res.data)
+          quoteRef.current = res.data
+          tickListenersRef.current.forEach(listener => listener(res.data))
 
           // Dynamically update the latest live candle in the chart in real-time
           if (candleSeriesRef.current && lastCandleRef.current) {
@@ -1032,104 +1045,172 @@ export default function ChartPage() {
     return () => clearInterval(pollTimer)
   }, [symbol])
 
-  // WebSocket for live quote updates (when supported by hosting proxy)
+  // WebSocket for live quote updates with exponential backoff auto-reconnect and RAF smoothing
   useEffect(() => {
     if (!symbol || !isWebSocketSupportedOnHost()) return
 
-    const token = localStorage.getItem('auth_token')
-    if (!token) return
+    let isMounted = true
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    let ws: WebSocket | null = null
+    const scheduleReconnect = () => {
+      const token = localStorage.getItem('auth_token')
+      if (!token || !isWebSocketSupportedOnHost() || !isMounted) return
+      if (reconnectTimerRef.current !== null) return
 
-    try {
-      ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
+      reconnectAttemptsRef.current += 1
+      const delay = Math.min(15000, 1000 * Math.pow(1.5, reconnectAttemptsRef.current - 1)) + Math.random() * 500
 
-      ws.onopen = () => {
-        isWsConnectedRef.current = true
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol }))
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null
+        connectWebSocket()
+      }, delay)
+    }
+
+    const connectWebSocket = () => {
+      const token = localStorage.getItem('auth_token')
+      if (!token || !isMounted) return
+
+      if (wsRef.current) {
+        wsRef.current.onopen = null
+        wsRef.current.onmessage = null
+        wsRef.current.onerror = null
+        wsRef.current.onclose = null
+        try { wsRef.current.close() } catch (_) {}
+        wsRef.current = null
+      }
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      try {
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
+        wsRef.current = ws
+
+        ws.onopen = () => {
+          if (!isMounted) return
+          isWsConnectedRef.current = true
+          reconnectAttemptsRef.current = 0
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'subscribe', channel: 'market_data', symbol }))
+          }
         }
-      }
 
-      ws.onerror = () => {
-        isWsConnectedRef.current = false
-        // Suppress unhandled socket disconnect errors in dev
-      }
+        ws.onerror = () => {
+          isWsConnectedRef.current = false
+        }
 
-      ws.onclose = () => {
-        isWsConnectedRef.current = false
-      }
+        ws.onclose = (event: CloseEvent) => {
+          isWsConnectedRef.current = false
+          if (event.code === 1008 || event.code === 4401 || event.code === 4003) {
+            if (reconnectTimerRef.current !== null) {
+              window.clearTimeout(reconnectTimerRef.current)
+              reconnectTimerRef.current = null
+            }
+            return
+          }
+          scheduleReconnect()
+        }
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          const cleanParam = symbol.replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
-          const cleanMsg = (data.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
-          
-          if (data.type === 'market_update' && (cleanMsg === cleanParam || cleanMsg === symbol.toUpperCase())) {
-            const newPrice = Number(data.price)
-            if (newPrice > 0) {
-              setQuote((prev: any) => prev ? {
-                ...prev,
-                price: newPrice,
-                change: data.change !== undefined ? data.change : prev.change,
-                change_pct: data.change_pct !== undefined ? data.change_pct : prev.change_pct,
-              } : prev)
+        ws.onmessage = (event) => {
+          if (!isMounted) return
+          try {
+            const data = JSON.parse(event.data)
+            const cleanParam = symbol.replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
+            const cleanMsg = (data.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
 
-              // Dynamically update the latest live candle in the chart in real-time
-              if (candleSeriesRef.current && lastCandleRef.current) {
-                const currentLast = lastCandleRef.current
-                const updatedCandle: CandlestickData = {
-                  time: currentLast.time,
-                  open: currentLast.open,
-                  high: Math.max(Number(currentLast.high), newPrice),
-                  low: Math.min(Number(currentLast.low), newPrice),
-                  close: newPrice,
+            if (data.type === 'market_update' && (cleanMsg === cleanParam || cleanMsg === symbol.toUpperCase())) {
+              const newPrice = Number(data.price)
+              if (Number.isFinite(newPrice) && newPrice > 0) {
+                quoteRef.current = {
+                  ...(quoteRef.current || {}),
+                  price: newPrice,
+                  change: data.change !== undefined ? data.change : quoteRef.current?.change,
+                  change_pct: data.change_pct !== undefined ? data.change_pct : quoteRef.current?.change_pct,
+                  volume: data.volume !== undefined ? data.volume : quoteRef.current?.volume,
                 }
-                lastCandleRef.current = updatedCandle
-                try {
-                  candleSeriesRef.current.update(updatedCandle)
-                } catch (_) {}
-              }
 
-              // Dynamically update volume bar if provided
-              if (volumeSeriesRef.current && lastVolumeRef.current && data.volume) {
-                const currentVol = lastVolumeRef.current
-                const updatedVol: HistogramData = {
-                  time: currentVol.time,
-                  value: Number(data.volume),
-                  color: (lastCandleRef.current && lastCandleRef.current.close >= lastCandleRef.current.open)
-                    ? 'rgba(16, 185, 129, 0.4)' 
-                    : 'rgba(239, 68, 68, 0.4)'
+                // Forward tick to memoized LiveQuoteHeader without re-rendering ChartPage
+                tickListenersRef.current.forEach(listener => listener(data))
+
+                // Buffer candlestick and volume chart series updates via requestAnimationFrame
+                if (candleSeriesRef.current && lastCandleRef.current) {
+                  const currentLast = lastCandleRef.current
+                  pendingCandleRef.current = {
+                    time: currentLast.time,
+                    open: currentLast.open,
+                    high: Math.max(Number(currentLast.high), newPrice),
+                    low: Math.min(Number(currentLast.low), newPrice),
+                    close: newPrice,
+                  }
+                  lastCandleRef.current = pendingCandleRef.current
                 }
-                lastVolumeRef.current = updatedVol
-                try {
-                  volumeSeriesRef.current.update(updatedVol)
-                } catch (_) {}
+
+                if (volumeSeriesRef.current && lastVolumeRef.current && data.volume) {
+                  const currentVol = lastVolumeRef.current
+                  pendingVolumeRef.current = {
+                    time: currentVol.time,
+                    value: Number(data.volume),
+                    color: (lastCandleRef.current && lastCandleRef.current.close >= lastCandleRef.current.open)
+                      ? 'rgba(16, 185, 129, 0.4)'
+                      : 'rgba(239, 68, 68, 0.4)'
+                  }
+                  lastVolumeRef.current = pendingVolumeRef.current
+                }
+
+                if (rafChartIdRef.current === null) {
+                  rafChartIdRef.current = requestAnimationFrame(() => {
+                    rafChartIdRef.current = null
+                    if (candleSeriesRef.current && pendingCandleRef.current) {
+                      try {
+                        candleSeriesRef.current.update(pendingCandleRef.current)
+                      } catch (_) {}
+                      pendingCandleRef.current = null
+                    }
+                    if (volumeSeriesRef.current && pendingVolumeRef.current) {
+                      try {
+                        volumeSeriesRef.current.update(pendingVolumeRef.current)
+                      } catch (_) {}
+                      pendingVolumeRef.current = null
+                    }
+                  })
+                }
               }
             }
+          } catch (err) {
+            console.error('WebSocket tick processing error:', err)
           }
-        } catch (err) {
-          console.error('WebSocket tick processing error:', err)
         }
+      } catch (e) {
+        console.warn('WebSocket init skipped:', e)
+        scheduleReconnect()
       }
-    } catch (e) {
-      console.warn('WebSocket init skipped:', e)
     }
 
+    connectWebSocket()
+
     return () => {
-      if (ws) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.close()
-        } else if (ws.readyState === WebSocket.CONNECTING) {
-          ws.onopen = () => {
-            try { ws?.close() } catch (_) {}
-          }
-        }
+      isMounted = false
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
       }
+      if (rafChartIdRef.current !== null) {
+        cancelAnimationFrame(rafChartIdRef.current)
+        rafChartIdRef.current = null
+      }
+      if (wsRef.current) {
+        wsRef.current.onopen = null
+        wsRef.current.onmessage = null
+        wsRef.current.onerror = null
+        wsRef.current.onclose = null
+        try {
+          if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+            wsRef.current.close()
+          }
+        } catch (_) {}
+        wsRef.current = null
+      }
+      isWsConnectedRef.current = false
     }
   }, [symbol])
+
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
@@ -1200,10 +1281,10 @@ export default function ChartPage() {
       doc.text('1. Market Summary', margin, currentY);
       currentY += 20;
       doc.setFontSize(11);
-      doc.setTextColor(71, 85, 105);
-      doc.text(`LTP: Rs. ${formatNum(quote?.price, 2)}`, margin, currentY);
-      const low52 = formatNum(quote?.['52w_low'], 2);
-      const high52 = formatNum(quote?.['52w_high'], 2);
+      const currentQuote = quoteRef.current || quote;
+      doc.text(`LTP: Rs. ${formatNum(currentQuote?.price, 2)}`, margin, currentY);
+      const low52 = formatNum(currentQuote?.['52w_low'], 2);
+      const high52 = formatNum(currentQuote?.['52w_high'], 2);
       const range52Text = (low52 !== 'N/A' && high52 !== 'N/A')
         ? `Day/52W Range: Rs. ${low52} - ${high52}`
         : 'Day/52W Range: N/A';
@@ -1461,73 +1542,17 @@ export default function ChartPage() {
         </div>
       </div>
 
-      {/* Quote Summary */}
-      {quote && (
-        <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{symbol.replace('.NS', '')}</div>
-            <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-              {formatINR(quote.price)}
-              {quote.change !== undefined && (
-                <span style={{ fontSize: 16, marginLeft: 8, color: quote.change >= 0 ? '#10b981' : '#ef4444' }}>
-                  {quote.change > 0 ? '+' : ''}{quote.change.toFixed(2)} ({quote.change_pct?.toFixed(2)}%)
-                </span>
-              )}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W High</div><div className="mono">{formatINR(quote['52w_high'])}</div></div>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>52W Low</div><div className="mono">{formatINR(quote['52w_low'])}</div></div>
-            <div><div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Volume</div><div className="mono">{quote.volume ? Number(quote.volume).toLocaleString('en-IN') : '—'}</div></div>
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Market Cap</div>
-              <div className="mono">
-                {(() => {
-                  const cap = Number(quote.market_cap || info?.market_cap || 0);
-                  if (cap > 0) {
-                    return cap >= 1e7
-                      ? `₹${(cap / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 1 })} Cr`
-                      : `₹${(cap / 1e9).toFixed(1)} B`;
-                  }
-                  return '—';
-                })()}
-              </div>
-            </div>
-          </div>
-        {/* AI Score Ring */}
-          <div id="ai-score-ring" style={{ marginLeft: 'auto', textAlign: 'center', flexShrink: 0 }}>
-            {user?.subscription_tier === 'PRO' ? (
-              aiScore ? (() => {
-                const confidence = Math.round(aiScore.confidence * 100);
-                const r = 28;
-                const circ = 2 * Math.PI * r;
-                const offset = circ - (confidence / 100) * circ;
-                const color = aiScore.score === 'BUY' ? '#10b981' : aiScore.score === 'SELL' ? '#ef4444' : '#f59e0b';
-                return (
-                  <div style={{ position: 'relative', width: 76, height: 76, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <svg width="76" height="76" style={{ transform: 'rotate(-90deg)', position: 'absolute' }}>
-                      <circle cx="38" cy="38" r={r} fill="none" stroke="var(--color-border)" strokeWidth="5" />
-                      <circle cx="38" cy="38" r={r} fill="none" stroke={color} strokeWidth="5"
-                        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
-                        style={{ transition: 'stroke-dashoffset 1.2s cubic-bezier(0.16,1,0.3,1), stroke 0.4s ease' }}
-                      />
-                    </svg>
-                    <div style={{ textAlign: 'center', zIndex: 1 }}>
-                      <div style={{ fontSize: 15, fontWeight: 800, color }}>{aiScore.score}</div>
-                      <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{confidence}%</div>
-                    </div>
-                  </div>
-                );
-              })()
-                : <div style={{ width: 76, height: 76, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div className="skeleton" style={{ width: 60, height: 60, borderRadius: '50%' }} /></div>
-            ) : (
-              <button onClick={() => navigate('/pricing')} className="badge badge-neutral" style={{ fontSize: 12, padding: '6px 12px', cursor: 'pointer', border: '1px solid var(--color-accent-blue)' }}>
-                <Lock size={12} style={{ display: 'inline', marginRight: 4 }}/> PRO
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Decoupled & Memoized Live Quote Header */}
+      <LiveQuoteHeader
+        symbol={symbol}
+        initialQuote={quote}
+        info={info}
+        aiScore={aiScore}
+        user={user}
+        onNavigatePricing={() => navigate('/pricing')}
+        registerTickListener={registerTickListener}
+      />
+
 
       {/* Main Chart + Sub-charts */}
       <div style={{ position: 'relative' }}>

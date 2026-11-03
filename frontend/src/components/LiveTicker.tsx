@@ -59,6 +59,9 @@ export default function LiveTicker() {
   const [bankNifty, setBankNifty] = useState<IndexData | null>(null)
   const pollTimerRef = useRef<number | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
+  const pendingNiftyRef = useRef<IndexData | null>(null)
+  const pendingBankNiftyRef = useRef<IndexData | null>(null)
+  const rafTickerIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     let isMounted = true
@@ -218,43 +221,51 @@ export default function LiveTicker() {
             const newPrice = Number(data.price)
             if (data.type === 'market_update' && Number.isFinite(newPrice) && newPrice > 0) {
               const symRaw = data.symbol || ''
+              const rawChange = Number(data.change)
+              const rawPct = Number(data.change_pct !== undefined ? data.change_pct : data.change_percent)
 
               if (isNifty50(symRaw)) {
-                setNifty(prev => {
-                  const rawChange = Number(data.change)
-                  const newChange = Number.isFinite(rawChange) ? rawChange : (prev?.change ?? 0)
-                  const rawPct = Number(data.change_pct !== undefined ? data.change_pct : data.change_percent)
-                  const newPct = Number.isFinite(rawPct) ? rawPct : (prev?.change_pct ?? prev?.change_percent ?? 0)
-                  // Strictly price-change-driven: do not update if price and change remain identical
-                  if (prev && prev.price === newPrice && prev.change === newChange && (prev.change_pct === newPct || prev.change_percent === newPct)) {
-                    return prev
-                  }
-                  return {
-                    name: prev?.name || 'Nifty 50',
-                    symbol: '^NSEI',
-                    price: newPrice,
-                    change: newChange,
-                    change_pct: newPct,
-                    change_percent: newPct,
-                  }
-                })
+                pendingNiftyRef.current = {
+                  name: 'Nifty 50',
+                  symbol: '^NSEI',
+                  price: newPrice,
+                  change: Number.isFinite(rawChange) ? rawChange : 0,
+                  change_pct: Number.isFinite(rawPct) ? rawPct : 0,
+                  change_percent: Number.isFinite(rawPct) ? rawPct : 0,
+                }
               } else if (isBankNifty(symRaw)) {
-                setBankNifty(prev => {
-                  const rawChange = Number(data.change)
-                  const newChange = Number.isFinite(rawChange) ? rawChange : (prev?.change ?? 0)
-                  const rawPct = Number(data.change_pct !== undefined ? data.change_pct : data.change_percent)
-                  const newPct = Number.isFinite(rawPct) ? rawPct : (prev?.change_pct ?? prev?.change_percent ?? 0)
-                  // Strictly price-change-driven: do not update if price and change remain identical
-                  if (prev && prev.price === newPrice && prev.change === newChange && (prev.change_pct === newPct || prev.change_percent === newPct)) {
-                    return prev
+                pendingBankNiftyRef.current = {
+                  name: 'Nifty Bank',
+                  symbol: '^NSEBANK',
+                  price: newPrice,
+                  change: Number.isFinite(rawChange) ? rawChange : 0,
+                  change_pct: Number.isFinite(rawPct) ? rawPct : 0,
+                  change_percent: Number.isFinite(rawPct) ? rawPct : 0,
+                }
+              }
+
+              if (rafTickerIdRef.current === null) {
+                rafTickerIdRef.current = requestAnimationFrame(() => {
+                  rafTickerIdRef.current = null
+                  if (pendingNiftyRef.current) {
+                    const next = pendingNiftyRef.current
+                    pendingNiftyRef.current = null
+                    setNifty((prev) => {
+                      if (prev && prev.price === next.price && prev.change === next.change && (prev.change_pct === next.change_pct || prev.change_percent === next.change_percent)) {
+                        return prev
+                      }
+                      return next
+                    })
                   }
-                  return {
-                    name: prev?.name || 'Nifty Bank',
-                    symbol: '^NSEBANK',
-                    price: newPrice,
-                    change: newChange,
-                    change_pct: newPct,
-                    change_percent: newPct,
+                  if (pendingBankNiftyRef.current) {
+                    const next = pendingBankNiftyRef.current
+                    pendingBankNiftyRef.current = null
+                    setBankNifty((prev) => {
+                      if (prev && prev.price === next.price && prev.change === next.change && (prev.change_pct === next.change_pct || prev.change_percent === next.change_percent)) {
+                        return prev
+                      }
+                      return next
+                    })
                   }
                 })
               }
@@ -278,6 +289,10 @@ export default function LiveTicker() {
       if (reconnectTimerRef.current !== null) {
         window.clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null
+      }
+      if (rafTickerIdRef.current !== null) {
+        cancelAnimationFrame(rafTickerIdRef.current)
+        rafTickerIdRef.current = null
       }
       if (ws) {
         ws.onopen = null

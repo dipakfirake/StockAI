@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, date, timezone
 from typing import Optional
+import pytz
 
 import aiohttp
 from backend.core.logging_config import get_logger
@@ -23,6 +24,8 @@ from backend.core.cache import cache_get, cache_set
 from backend.services.time_sync import time_sync
 
 logger = get_logger(__name__)
+
+KOLKATA_TZ = pytz.timezone("Asia/Kolkata")
 
 NSE_BASE_URL = "https://www.nseindia.com"
 NSE_API_URL = "https://www.nseindia.com/api"
@@ -79,11 +82,9 @@ class NSEScraper:
     @staticmethod
     def is_market_open(dt: Optional[datetime] = None) -> bool:
         """Check if NSE market is open at the given datetime (IST), using synced time to prevent Docker drift."""
-        import pytz
-        tz = pytz.timezone("Asia/Kolkata")
-        now = dt or time_sync.get_true_now(tz)
+        now = dt or time_sync.get_true_now(KOLKATA_TZ)
         if hasattr(now, "tzinfo") and now.tzinfo is None:
-            now = tz.localize(now)
+            now = KOLKATA_TZ.localize(now)
 
         # Weekday check (Mon=0, Sun=6)
         if now.weekday() >= 5:

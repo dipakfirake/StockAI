@@ -68,8 +68,8 @@ export default function App() {
               <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
               <Route path="/pricing" element={<PricingPage />} />
-              <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
-              <Route path="/admin/sentinel" element={<ProtectedRoute><SentinelMonitorPage /></ProtectedRoute>} />
+              <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+              <Route path="/admin/sentinel" element={<ProtectedRoute adminOnly><SentinelMonitorPage /></ProtectedRoute>} />
               <Route path="/login" element={<LoginPage />} />
               {/* AI Forecast & Prediction Route Aliases */}
               <Route path="/predictions" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />

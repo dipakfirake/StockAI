@@ -33,7 +33,7 @@ async def get_watchlist(
     quotes_dict = await market_data_service.fetch_quotes_bulk(symbols) if symbols else {}
     stocks = []
     for item in items:
-        entry = {"symbol": item.symbol, "added_at": item.added_at.isoformat()}
+        entry = {"symbol": item.symbol, "added_at": item.added_at.isoformat() if getattr(item, "added_at", None) else ""}
         quote = quotes_dict.get(item.symbol)
         if isinstance(quote, dict):
             entry.update({
