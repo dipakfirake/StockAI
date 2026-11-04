@@ -18,7 +18,14 @@ from backend.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-SUPPORTED_STRATEGIES = {"rsi_mean_reversion", "ema_crossover", "macd_signal", "ai_machine_learning"}
+SUPPORTED_STRATEGIES = {
+    "rsi_mean_reversion",
+    "ema_crossover",
+    "macd_signal",
+    "ai_machine_learning",
+    "supertrend_trend_rider",
+    "smc_liquidity_fvg",
+}
 
 
 class BacktestEngine:
@@ -97,6 +104,10 @@ class BacktestEngine:
             res = BacktestEngine._macd_signal(df, params, initial_capital, symbol, slippage_pct, commission)
         elif strategy == "ai_machine_learning":
             res = BacktestEngine._ai_machine_learning(df, params, initial_capital, symbol, slippage_pct, commission)
+        elif strategy == "supertrend_trend_rider":
+            res = BacktestEngine._supertrend_trend_rider(df, params, initial_capital, symbol, slippage_pct, commission)
+        elif strategy == "smc_liquidity_fvg":
+            res = BacktestEngine._smc_liquidity_fvg(df, params, initial_capital, symbol, slippage_pct, commission)
         
         res["benchmark"] = benchmark_metrics
         return res
@@ -166,17 +177,45 @@ class BacktestEngine:
         else:
             profit_factor = 0.0
 
+        # Institutional metrics: Expectancy, Payoff Ratio, Streak Tracking
+        max_consec_wins = 0
+        max_consec_losses = 0
+        cur_consec_wins = 0
+        cur_consec_losses = 0
+        for p in pnls:
+            if p > 0:
+                cur_consec_wins += 1
+                cur_consec_losses = 0
+                if cur_consec_wins > max_consec_wins:
+                    max_consec_wins = cur_consec_wins
+            elif p < 0:
+                cur_consec_losses += 1
+                cur_consec_wins = 0
+                if cur_consec_losses > max_consec_losses:
+                    max_consec_losses = cur_consec_losses
+
+        avg_win_val = sum(wins) / len(wins) if wins else 0.0
+        avg_loss_val = sum(losses) / len(losses) if losses else 0.0
+        win_rate_val = len(wins) / len(pnls) if pnls else 0.0
+        loss_rate_val = len(losses) / len(pnls) if pnls else 0.0
+        expectancy = (win_rate_val * avg_win_val) + (loss_rate_val * avg_loss_val)
+        payoff_ratio = abs(avg_win_val / avg_loss_val) if avg_loss_val != 0 else round(avg_win_val, 2)
+
         return {
             "total_return_pct": round(total_return_pct, 2),
             "sharpe_ratio": round(sharpe, 3),
             "sortino_ratio": round(sortino, 3),
             "calmar_ratio": round(calmar, 3),
             "max_drawdown_pct": round(max_drawdown_pct, 2),
-            "win_rate": round(len(wins) / len(pnls), 4) if pnls else 0,
+            "win_rate": round(win_rate_val, 4),
             "total_trades": len(pnls),
             "profit_factor": round(profit_factor, 3),
-            "avg_win": round(sum(wins) / len(wins), 2) if wins else 0,
-            "avg_loss": round(sum(losses) / len(losses), 2) if losses else 0,
+            "avg_win": round(avg_win_val, 2),
+            "avg_loss": round(avg_loss_val, 2),
+            "expectancy_per_trade": round(expectancy, 2),
+            "win_loss_ratio": round(payoff_ratio, 2),
+            "max_consecutive_wins": max_consec_wins,
+            "max_consecutive_losses": max_consec_losses,
             "final_equity": round(final_equity, 2),
         }
 
@@ -449,5 +488,234 @@ class BacktestEngine:
 
         metrics = BacktestEngine._compute_metrics(trades, equity_curve, capital)
         return {"symbol": symbol, "strategy": "ai_machine_learning", "params": params, "metrics": metrics, "trades": trades[-20:], "equity_curve": equity_curve}
+
+    @staticmethod
+    def _supertrend_trend_rider(df: pd.DataFrame, params: dict, capital: float, symbol: str, slippage_pct: float, commission: float) -> dict:
+        """
+        SuperTrend Trend Rider (ATR Volatility Trend Following).
+        Enters when price is above 200 EMA and SuperTrend turns bullish.
+        Uses dynamic ATR trailing stop loss to lock in runaway profits.
+        """
+        from ta.trend import EMAIndicator
+        from ta.volatility import AverageTrueRange
+        from backend.services.indicators import calculate_supertrend
+
+        period = int(params.get("period", 10))
+        multiplier = float(params.get("multiplier", 3.0))
+        qty = int(params.get("quantity", 10))
+
+        st_df = calculate_supertrend(df, period=period, multiplier=multiplier)
+        df["supertrend"] = st_df["SuperTrend"]
+        df["direction"] = st_df["Direction"]
+        df["ema_200"] = EMAIndicator(df["Close"], window=min(200, max(20, len(df) // 2))).ema_indicator()
+        df["atr"] = AverageTrueRange(high=df["High"], low=df["Low"], close=df["Close"], window=14).average_true_range()
+        df = df.dropna()
+
+        trades, equity_curve = [], []
+        position = None
+        equity = capital
+        prev_dir = 0
+
+        for ts, row in df.iterrows():
+            price = float(row["Close"])
+            cur_dir = int(row["direction"])
+            ema_200 = float(row["ema_200"])
+            atr = float(row["atr"]) if float(row["atr"]) > 0 else 1.0
+
+            # Entry: SuperTrend flips from -1 (bearish) to 1 (bullish) and price > EMA 200
+            if position is None:
+                if cur_dir == 1 and prev_dir == -1 and price > ema_200:
+                    entry = price * (1 + slippage_pct)
+                    sl = entry - (1.5 * atr)
+                    position = {
+                        "entry": entry,
+                        "qty": qty,
+                        "entry_date": ts.isoformat(),
+                        "highest_price": entry,
+                        "sl": sl,
+                    }
+            else:
+                # Update trailing stop on winning trends
+                if price > position["highest_price"]:
+                    position["highest_price"] = price
+                    new_sl = price - (1.5 * atr)
+                    if new_sl > position["sl"]:
+                        position["sl"] = new_sl
+
+                # Exit condition: SuperTrend flips bearish (-1) OR trailing stop is hit
+                if cur_dir == -1 or price <= position["sl"]:
+                    exit_p = price * (1 - slippage_pct)
+                    pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+                    equity += pnl
+                    trades.append({
+                        "entry": position["entry"],
+                        "exit": exit_p,
+                        "pnl": pnl,
+                        "entry_date": position["entry_date"],
+                        "exit_date": ts.isoformat(),
+                    })
+                    position = None
+
+            prev_dir = cur_dir
+
+            # Mark to market equity curve
+            cur_pnl = ((price * (1 - slippage_pct) - position["entry"]) * position["qty"] - commission * 2) if position else 0.0
+            equity_curve.append({"date": ts.isoformat(), "equity": round(equity + cur_pnl, 2)})
+
+        # Close lingering open position
+        if position is not None and not df.empty:
+            final_ts = df.index[-1].isoformat()
+            final_price = float(df["Close"].iloc[-1])
+            exit_p = final_price * (1 - slippage_pct)
+            pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+            equity += pnl
+            trades.append({
+                "entry": position["entry"],
+                "exit": exit_p,
+                "pnl": pnl,
+                "entry_date": position["entry_date"],
+                "exit_date": final_ts,
+            })
+            if equity_curve:
+                equity_curve[-1]["equity"] = round(equity, 2)
+
+        metrics = BacktestEngine._compute_metrics(trades, equity_curve, capital)
+        return {
+            "symbol": symbol,
+            "strategy": "supertrend_trend_rider",
+            "params": params,
+            "metrics": metrics,
+            "trades": trades[-20:],
+            "equity_curve": equity_curve,
+        }
+
+    @staticmethod
+    def _smc_liquidity_fvg(df: pd.DataFrame, params: dict, capital: float, symbol: str, slippage_pct: float, commission: float) -> dict:
+        """
+        Smart Money Concepts (SMC) Institutional FVG Hunter.
+        Identifies unmitigated Fair Value Gaps in established trends.
+        Enters upon pullback into FVG zone with tight stop and asymmetric 2.5R target.
+        """
+        from ta.trend import EMAIndicator
+        from ta.volatility import AverageTrueRange
+
+        qty = int(params.get("quantity", 10))
+        rr_multiplier = float(params.get("risk_reward", 2.5))
+        min_gap_pct = float(params.get("gap_pct", 0.3))
+
+        df["ema_50"] = EMAIndicator(df["Close"], window=min(50, max(10, len(df) // 4))).ema_indicator()
+        df["ema_200"] = EMAIndicator(df["Close"], window=min(200, max(20, len(df) // 2))).ema_indicator()
+        df["atr"] = AverageTrueRange(high=df["High"], low=df["Low"], close=df["Close"], window=14).average_true_range()
+        df = df.dropna()
+
+        trades, equity_curve = [], []
+        position = None
+        equity = capital
+        active_fvgs = []
+
+        for i in range(2, len(df)):
+            ts = df.index[i]
+            row = df.iloc[i]
+            price = float(row["Close"])
+            high_price = float(row["High"])
+            low_price = float(row["Low"])
+            ema_50 = float(row["ema_50"])
+            ema_200 = float(row["ema_200"])
+
+            # 1. Detect new Bullish FVG formed at i-1: candle[i-2].high < candle[i].low
+            c1_high = float(df.iloc[i-2]["High"])
+            c3_low = float(df.iloc[i]["Low"])
+            c2_close = float(df.iloc[i-1]["Close"])
+            if c2_close > 0 and c3_low > c1_high:
+                gap_size = c3_low - c1_high
+                gap_pct = (gap_size / c2_close) * 100.0
+                if gap_pct >= min_gap_pct and ema_50 > ema_200:
+                    active_fvgs.append({
+                        "top": c3_low,
+                        "bottom": c1_high,
+                        "created_idx": i,
+                    })
+
+            # 2. Check position exits
+            if position is not None:
+                if high_price >= position["target"]:
+                    exit_p = position["target"] * (1 - slippage_pct)
+                    pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+                    equity += pnl
+                    trades.append({
+                        "entry": position["entry"],
+                        "exit": exit_p,
+                        "pnl": pnl,
+                        "entry_date": position["entry_date"],
+                        "exit_date": ts.isoformat(),
+                        "outcome": "TARGET_HIT",
+                    })
+                    position = None
+                elif low_price <= position["sl"]:
+                    exit_p = position["sl"] * (1 - slippage_pct)
+                    pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+                    equity += pnl
+                    trades.append({
+                        "entry": position["entry"],
+                        "exit": exit_p,
+                        "pnl": pnl,
+                        "entry_date": position["entry_date"],
+                        "exit_date": ts.isoformat(),
+                        "outcome": "STOP_LOSS",
+                    })
+                    position = None
+
+            # 3. Check entry into active FVG zone
+            if position is None and active_fvgs:
+                surviving_fvgs = []
+                for fvg in active_fvgs:
+                    if low_price <= fvg["top"] and low_price >= fvg["bottom"] and position is None:
+                        entry = price * (1 + slippage_pct)
+                        sl = fvg["bottom"] * 0.995
+                        risk = entry - sl
+                        if risk > 0:
+                            target = entry + (rr_multiplier * risk)
+                            position = {
+                                "entry": entry,
+                                "qty": qty,
+                                "entry_date": ts.isoformat(),
+                                "sl": sl,
+                                "target": target,
+                            }
+                    elif low_price < fvg["bottom"]:
+                        pass  # Invalidated/mitigated
+                    else:
+                        surviving_fvgs.append(fvg)
+                active_fvgs = surviving_fvgs
+
+            cur_pnl = ((price * (1 - slippage_pct) - position["entry"]) * position["qty"] - commission * 2) if position else 0.0
+            equity_curve.append({"date": ts.isoformat(), "equity": round(equity + cur_pnl, 2)})
+
+        # Close open position at end
+        if position is not None and not df.empty:
+            final_ts = df.index[-1].isoformat()
+            final_price = float(df["Close"].iloc[-1])
+            exit_p = final_price * (1 - slippage_pct)
+            pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
+            equity += pnl
+            trades.append({
+                "entry": position["entry"],
+                "exit": exit_p,
+                "pnl": pnl,
+                "entry_date": position["entry_date"],
+                "exit_date": final_ts,
+            })
+            if equity_curve:
+                equity_curve[-1]["equity"] = round(equity, 2)
+
+        metrics = BacktestEngine._compute_metrics(trades, equity_curve, capital)
+        return {
+            "symbol": symbol,
+            "strategy": "smc_liquidity_fvg",
+            "params": params,
+            "metrics": metrics,
+            "trades": trades[-20:],
+            "equity_curve": equity_curve,
+        }
 
 backtest_engine = BacktestEngine()

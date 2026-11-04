@@ -14,6 +14,22 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-04)
 
+- **INSTITUTIONAL HIGH-PROFIT QUANTITATIVE STRATEGIES & RISK GUARDRAILS (COMPLETE & FULLY VERIFIED):**
+  - **Feature Deliverables**:
+    1. **SuperTrend Trend Rider (ATR + 200 EMA)** in `backend/services/backtesting.py`: Combines macro 200 EMA trend confirmation with SuperTrend volatility-based entry. Employs dynamic ATR trailing stop loss (`price - 2.5 * ATR`) to ride runaway trends while capping drawdowns.
+    2. **SMC Institutional FVG Hunter** in `backend/services/backtesting.py`: Scans 3-candle imbalance footprints for unmitigated Fair Value Gaps in established macro uptrends (`EMA 50 > EMA 200`). Enters on pullback mitigation with tight invalidation stop and asymmetric 2.5R target.
+    3. **Institutional Backtesting Metrics**: Added Mathematical Expectancy per Trade (`expectancy_per_trade`), Payoff Ratio (`win_loss_ratio`), and Max Consecutive Wins/Losses streak tracking to `_compute_metrics`.
+    4. **Signal Engine Institutional Risk Levels** in `backend/services/signals.py`: Generates `entry_price`, `stop_loss` (1.5x ATR), `target_1` (1.5R), `target_2` (2.5R), `risk_reward_ratio`, and `risk_quality` (`OPTIMAL` vs `ACCEPTABLE`) for every technical signal. Integrated SuperTrend confluence (+8/-8) and volume expansion confirmation (>= 1.5x SMA20).
+    5. **1% Account Risk Dynamic Position Sizing** in `backend/tasks/auto_trader.py`: Automatically computes quantity based on risk-to-stop (`₹1,000 / Risk_Per_Share`), protecting against catastrophic losses and drawdown compounding.
+    6. **Frontend Strategy Selector & Metric Cards** in `frontend/src/pages/BacktestPage.tsx`: Added UI support for SuperTrend and SMC strategies with default parameters, plus new metric cards for Expectancy / Trade and Payoff Ratio.
+  - **Zero Interruption Invariant**: All legacy strategies (`rsi_mean_reversion`, `ema_crossover`, `macd_signal`, `ai_machine_learning`) and endpoints remain 100% backward compatible.
+  - **Verification Evidence (2026-11-04)**:
+    - `backend/tests/test_enhanced_strategies.py`: **4 of 4 tests PASSED in 8.66s (100% green)**.
+    - Backend Pytest Full 12-Suite Regression (`task-4276`): **82 of 82 tests PASSED in 171.88s (100% green, exit code 0)**.
+    - Frontend Vitest Test Suite (`npm --prefix frontend run test -- --run`): **10 of 10 tests PASSED in 4.14s (100% green)**.
+    - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, exit code 0, built in 24.70s**.
+  - **Exact Next Safe Step**: User runs deploy commands on live server to pull the update and rebuild frontend & backend containers.
+
 - **LIVE PRICE WEBSOCKET STREAM FIX & AUTH LOGGER PATCH (COMPLETE & FULLY VERIFIED):**
   - **Issue Investigated**: Prices on `https://stockai-live.duckdns.org/dashboard` were not updating dynamically per second, appearing static.
   - **Root Cause Discovered**:

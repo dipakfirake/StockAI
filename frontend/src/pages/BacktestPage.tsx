@@ -11,6 +11,8 @@ const STRATEGIES = [
   { id: 'ema_crossover', name: 'EMA Crossover', defaultParams: { fast_ema: 9, slow_ema: 21, quantity: 10 }, description: 'Buy when EMA9 crosses above EMA21, sell on cross down' },
   { id: 'macd_signal', name: 'MACD Signal Cross', defaultParams: { quantity: 10 }, description: 'Buy when MACD histogram turns positive, sell when negative' },
   { id: 'ai_machine_learning', name: 'AI LightGBM Probabilistic', defaultParams: { qty_mode: 'atr', risk_pct: 0.02 }, description: 'Simulates AI predictions using LightGBM. Uses ATR-based dynamic position sizing and trailing stop losses.' },
+  { id: 'supertrend_trend_rider', name: 'SuperTrend Trend Rider (ATR + 200 EMA)', defaultParams: { period: 10, multiplier: 3.0, quantity: 10 }, description: 'Institutional trend rider: Buys when price > EMA 200 & SuperTrend turns bullish. Uses ATR dynamic trailing stop to lock in multi-week runners.' },
+  { id: 'smc_liquidity_fvg', name: 'SMC Institutional FVG Hunter', defaultParams: { gap_pct: 0.3, risk_reward: 2.5, quantity: 10 }, description: 'Smart Money Concepts: Enters on unmitigated Fair Value Gap pullbacks with tight stops and asymmetric 2.5R profit targets.' },
 ]
 
 export default function BacktestPage() {
@@ -42,6 +44,8 @@ export default function BacktestPage() {
       if (form.strategy === 'rsi_mean_reversion') { params.rsi_buy = 30; params.rsi_sell = 70 }
       if (form.strategy === 'ema_crossover') { params.fast_ema = 9; params.slow_ema = 21 }
       if (form.strategy === 'ai_machine_learning') { params.qty_mode = 'atr'; params.risk_pct = 0.02 }
+      if (form.strategy === 'supertrend_trend_rider') { params.period = 10; params.multiplier = 3.0 }
+      if (form.strategy === 'smc_liquidity_fvg') { params.gap_pct = 0.3; params.risk_reward = 2.5 }
 
       const res = await backtestApi.run({
         symbol: form.symbol.toUpperCase(),
@@ -211,7 +215,9 @@ export default function BacktestPage() {
                   { label: 'Max Drawdown', value: `${metrics.max_drawdown_pct}%`, color: 'var(--color-bearish)' },
                   { label: 'Win Rate', value: `${Math.round((metrics.win_rate || 0) * 100)}%`, color: metrics.win_rate >= 0.5 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
                   { label: 'Total Trades', value: metrics.total_trades },
-                  { label: 'Profit Factor', value: metrics.profit_factor === Infinity ? '∞' : metrics.profit_factor, color: metrics.profit_factor > 1 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
+                  { label: 'Profit Factor', value: metrics.profit_factor === Infinity ? '∞' : metrics.profit_factor, color: metrics.profit_factor > 1.5 ? 'var(--color-bullish)' : metrics.profit_factor > 1 ? 'var(--color-neutral)' : 'var(--color-bearish)' },
+                  { label: 'Expectancy / Trade', value: metrics.expectancy_per_trade ? `₹${metrics.expectancy_per_trade.toLocaleString('en-IN')}` : '₹0', color: (metrics.expectancy_per_trade || 0) > 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
+                  { label: 'Payoff Ratio (W/L)', value: metrics.win_loss_ratio ? `${metrics.win_loss_ratio}x` : '—', color: (metrics.win_loss_ratio || 0) >= 1.5 ? 'var(--color-bullish)' : 'var(--color-neutral)' },
                 ].map((m, i) => (
                   <div key={i} className="card" style={{ padding: '12px 16px', opacity: metrics.total_trades === 0 ? 0.5 : 1 }}>
                     <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>{m.label}</div>

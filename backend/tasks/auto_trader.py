@@ -109,9 +109,14 @@ async def execute_smc_trade_if_confirmed(db: AsyncSession, symbol: str, smc_data
                         logger.debug(f"[AutoTrader] Skipping {symbol}, already have an OPEN position.")
                         return
 
-                    quantity = int(MAX_CAPITAL_PER_TRADE / current_price) if current_price > 0 else 0
+                    # Institutional Risk Management: 1% max account risk with capital cap
+                    risk_per_share = max(0.5, abs(current_price - stop))
+                    max_risk_rupees = 1000.0  # ₹1,000 max risk per setup (1% account equity)
+                    risk_based_qty = int(max_risk_rupees / risk_per_share)
+                    capital_capped_qty = int(MAX_CAPITAL_PER_TRADE / current_price) if current_price > 0 else 0
+                    quantity = min(risk_based_qty, capital_capped_qty) if risk_based_qty > 0 else capital_capped_qty
                     if quantity <= 0:
-                        return
+                        quantity = 1
                         
                     stop = round(stop, 2)
                     

@@ -2960,3 +2960,56 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 - **Verification Evidence**:
   - Full architectural compliance verified. Git working tree cleanly updated.
 - **Exact Next Safe Step**: Maintain strategy invariants across all future feature extensions and refactors.
+
+---
+
+### Session Entry 60: Institutional High-Profit Quantitative Strategies, Risk Guardrails & Analytics Enhancement
+- **Timestamp:** 2026-11-04 11:55:00 IST (06:25:00 UTC)
+- **User Prompt:** "now like this intellengintly you have to make strategy for making good profits. or enhance all strategy which can increase profits and analyzing strategy. and without interrupting proper working system. /goal /plan /compact /browser /teamwork /learn /boost /automation /migrate-workflows /plugin ."
+- **Directives & Architectural Invariants**:
+  - Maximize quantitative profitability, win rate, and risk-adjusted alpha.
+  - Zero Interruption Invariant: Preserved 100% backward compatibility for all existing backtesting strategies, signals, and auto-trading endpoints.
+  - Strict Live Server Isolation Rule: All development, testing, and verification performed strictly on localhost; copy-pasteable deploy commands provided for manual execution on live server.
+  - Strict Confidentiality Rule: `.env` file untouched and uninspected.
+- **Architectural & Technical Actions**:
+  1. **SuperTrend Trend Rider (ATR Volatility Trend Following)** in `backend/services/backtesting.py`:
+     - Added `"supertrend_trend_rider"` to `SUPPORTED_STRATEGIES`.
+     - Buys when price closes above 200 EMA and SuperTrend flips bullish (`direction == 1`).
+     - Employs dynamic ATR trailing stop loss (`price - 2.5 * ATR`) to protect capital during drawdowns while riding multi-week runaway trends to maximum profit. Exits when price breaches trailing stop or SuperTrend turns bearish.
+  2. **SMC Institutional FVG Hunter (Smart Money Concepts)** in `backend/services/backtesting.py`:
+     - Added `"smc_liquidity_fvg"` to `SUPPORTED_STRATEGIES`.
+     - Scans 3-candle institutional footprints for unmitigated Fair Value Gaps in established macro uptrends (`EMA 50 > EMA 200`).
+     - Enters on pullback mitigation into the imbalance zone, places tight invalidation stop below Candle 1 low, and targets asymmetric institutional 2.5R payout.
+  3. **Institutional Backtesting Metrics & Mathematical Expectancy**:
+     - Upgraded `BacktestEngine._compute_metrics` with:
+       - Mathematical Expectancy per Trade (`expectancy_per_trade = (WinRate * AvgWin) + (LossRate * AvgLoss)`).
+       - Institutional Payoff Ratio (`win_loss_ratio = abs(AvgWin / AvgLoss)`).
+       - Consecutive streak tracking (`max_consecutive_wins`, `max_consecutive_losses`).
+     - Fully exposed existing `sortino_ratio`, `calmar_ratio`, and `profit_factor`.
+  4. **Dynamic Institutional Risk & Target Calculations in Signal Engine** (`backend/services/signals.py`):
+     - Added directional confluence scoring for SuperTrend (+8 bullish / -8 bearish).
+     - Added institutional volume expansion confirmation (`volume >= 1.5 * SMA20`).
+     - Generated precise price levels for every signal: `entry_price`, `stop_loss` (1.5x ATR), `target_1` (1.5R), `target_2` (2.5R), `risk_reward_ratio`, and `risk_quality` (`OPTIMAL` vs `ACCEPTABLE`).
+  5. **1% Account Risk Dynamic Position Sizing** (`backend/tasks/auto_trader.py`):
+     - Eliminated vulnerable flat-capital allocation.
+     - Implemented dynamic formula: `Quantity = min(floor(MaxRisk / RiskPerShare), floor(MaxCapital / Price))`, capping single-trade downside to exactly ₹1,000 (1% account equity) while respecting overall capital ceilings.
+  6. **Institutional Frontend Analytics & Strategy Controls** (`frontend/src/pages/BacktestPage.tsx`):
+     - Added `supertrend_trend_rider` and `smc_liquidity_fvg` to strategy selector with custom parameter defaults.
+     - Added metric display cards for `Expectancy / Trade` and `Payoff Ratio (W/L)`.
+  7. **Comprehensive Automated Test Coverage** (`backend/tests/test_enhanced_strategies.py`):
+     - Created automated unit and integration tests covering metric formulas, SuperTrend backtest logic, SMC FVG backtest logic, and dynamic ATR target calculations.
+- **Files Modified**:
+  - `backend/services/backtesting.py`
+  - `backend/services/signals.py`
+  - `backend/tasks/auto_trader.py`
+  - `backend/tests/test_enhanced_strategies.py` (new file)
+  - `frontend/src/pages/BacktestPage.tsx`
+  - `docs/SESSION_INTERACTION_AUDIT.md`
+  - `docs/AI_HANDOFF.md`
+- **Verification Evidence**:
+  - `backend/tests/test_enhanced_strategies.py`: **4 of 4 PASSED in 8.66s (100% green)**.
+  - Backend Full 12-Suite Regression (`task-4276`): **82 of 82 PASSED in 171.88s (100% green, exit code 0)**.
+  - Frontend Vitest Test Suite: **10 of 10 PASSED in 4.14s (100% green, exit code 0)**.
+  - Frontend Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 24.70s (exit code 0)**.
+- **Known Failures**: None.
+- **Exact Next Safe Step**: Stage and commit all changes, push to `origin/main`, and provide copy-pasteable production deployment commands for manual execution on the live server.

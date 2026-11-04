@@ -54,6 +54,10 @@ class SignalEngine:
         
         close = _get("close")
         adx = _get("adx_14")
+        atr = _get("atr_14") or _get("atr")
+        volume = _get("volume")
+        vol_sma_20 = _get("vol_sma_20")
+        supertrend_raw = _get("supertrend")
 
         reasons = []
         
@@ -124,6 +128,30 @@ class SignalEngine:
                 composite_score = max(0.0, composite_score - 10)
                 reasons.append(f"ADX({adx:.1f}) confirms strong bearish trend")
 
+        # --- 6. SuperTrend Directional Confluence ---
+        st_dir = None
+        if isinstance(supertrend_raw, dict):
+            st_dir = supertrend_raw.get("direction") or supertrend_raw.get("Direction")
+        elif supertrend_raw is not None:
+            try:
+                st_dir = int(supertrend_raw)
+            except (ValueError, TypeError):
+                st_dir = None
+
+        if st_dir == 1:
+            if composite_score >= 50:
+                composite_score = min(100.0, composite_score + 8.0)
+                reasons.append("SuperTrend confirms Bullish trend")
+        elif st_dir == -1:
+            if composite_score <= 50:
+                composite_score = max(0.0, composite_score - 8.0)
+                reasons.append("SuperTrend confirms Bearish trend")
+
+        # --- 7. Institutional Volume Expansion Confirmation ---
+        if volume is not None and vol_sma_20 is not None and vol_sma_20 > 0:
+            if volume >= (vol_sma_20 * 1.5):
+                reasons.append("High volume expansion confirms institutional activity")
+
         # --- Build Signal ---
         if composite_score >= 80:
             sig_type, strength = "BUY", "STRONG"
@@ -149,6 +177,31 @@ class SignalEngine:
         # 50 -> 0. 100 -> 5. 0 -> -5
         legacy_score = (composite_score - 50) / 10.0
 
+        # --- Dynamic Institutional Risk & Target Calculations ---
+        entry_price = round(float(close), 2) if close is not None else None
+        stop_loss = None
+        target_1 = None
+        target_2 = None
+        risk_reward_ratio = None
+        risk_quality = "NEUTRAL"
+
+        if entry_price is not None and atr is not None and float(atr) > 0:
+            atr_val = float(atr)
+            if sig_type == "BUY":
+                stop_loss = round(entry_price - (1.5 * atr_val), 2)
+                risk_per_share = max(0.05, entry_price - stop_loss)
+                target_1 = round(entry_price + (1.5 * risk_per_share), 2)
+                target_2 = round(entry_price + (2.5 * risk_per_share), 2)
+                risk_reward_ratio = round((target_1 - entry_price) / risk_per_share, 2)
+                risk_quality = "OPTIMAL" if strength == "STRONG" else "ACCEPTABLE"
+            elif sig_type == "SELL":
+                stop_loss = round(entry_price + (1.5 * atr_val), 2)
+                risk_per_share = max(0.05, stop_loss - entry_price)
+                target_1 = round(entry_price - (1.5 * risk_per_share), 2)
+                target_2 = round(entry_price - (2.5 * risk_per_share), 2)
+                risk_reward_ratio = round((entry_price - target_1) / risk_per_share, 2)
+                risk_quality = "OPTIMAL" if strength == "STRONG" else "ACCEPTABLE"
+
         signals.append({
             "type": sig_type,
             "strength": strength,
@@ -156,8 +209,14 @@ class SignalEngine:
             "composite_rating": round(composite_score, 1),
             "reason": reason_text,
             "holding_period": horizon,
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "target_1": target_1,
+            "target_2": target_2,
+            "risk_reward_ratio": risk_reward_ratio,
+            "risk_quality": risk_quality,
             "indicators_used": {
-                "rsi": rsi, "macd": macd, "ema9": ema9, "ema21": ema21, "adx": adx, "cci": cci, "stoch": stoch_k
+                "rsi": rsi, "macd": macd, "ema9": ema9, "ema21": ema21, "adx": adx, "cci": cci, "stoch": stoch_k, "supertrend": st_dir, "atr": atr
             },
         })
 
