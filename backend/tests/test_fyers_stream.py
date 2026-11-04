@@ -26,7 +26,7 @@ async def test_fyers_stream_start_without_creds(stream_service):
         mock_settings.FYERS_ACCESS_TOKEN = None
         
         with patch("backend.services.market_data.MarketDataService._env_cache", {}), \
-             patch("backend.core.cache.cache_get", new_callable=AsyncMock, return_value=None), \
+             patch("backend.services.fyers_stream.cache_get", new_callable=AsyncMock, return_value=None), \
              patch("backend.core.database.AsyncSessionLocal", side_effect=Exception("No DB")):
             result = await stream_service.start()
             assert result is False
@@ -207,8 +207,8 @@ async def test_hsm_token_resolution_and_caching(stream_service):
         "symbol": "NSE:RELIANCE-EQ"
     }
 
-    with patch("backend.core.cache.cache_get", side_effect=fake_cache_get), \
-         patch("backend.core.cache.cache_set", side_effect=fake_cache_set), \
+    with patch("backend.services.fyers_stream.cache_get", side_effect=fake_cache_get), \
+         patch("backend.services.fyers_stream.cache_set", side_effect=fake_cache_set), \
          patch.object(stream_service, "_fetch_hsm_tokens_http") as mock_http:
 
         mock_http.return_value = {

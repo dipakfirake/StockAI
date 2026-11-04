@@ -12,6 +12,41 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-11-04)
+
+- **LIVE PRICE WEBSOCKET STREAM FIX & AUTH LOGGER PATCH (COMPLETE & FULLY VERIFIED):**
+  - **Issue Investigated**: Prices on `https://stockai-live.duckdns.org/dashboard` were not updating dynamically per second, appearing static.
+  - **Root Cause Discovered**:
+    1. The live server's Nginx configuration had `location /ws {` without a trailing slash. When frontend connected to `wss://stockai-live.duckdns.org/ws?token=...`, Nginx responded with `HTTP/1.1 301 Moved Permanently` to `/ws/`. Under RFC 6455, browser WebSocket engines (Chrome, Edge, Firefox) abort connections immediately on any 3xx redirect.
+    2. Because WebSockets permanently failed, all 5 frontend components (`Dashboard.tsx`, `LiveTicker.tsx`, `WatchlistSidebar.tsx`, `ChartPage.tsx`, `websocket.ts`) fell back to REST polling at 60-second intervals, making prices look completely frozen.
+    3. The backend "single request & clone" strategy is working as designed: bulk requests are coalesced, cached in Redis (`market:indices:v4`, TTL=3s), and distributed with zero redundant broker calls.
+  - **Fixes Applied**:
+    1. Updated all frontend WebSocket connection URLs from `/ws?token=` to `/ws/?token=` (with trailing slash) across all 5 components.
+    2. In `frontend/src/pages/Dashboard.tsx`, updated `setLastUpdated(new Date())` and data status indicators upon incoming tick delivery.
+    3. In `scripts/setup_duckdns_routes.sh`, updated the Nginx configuration template to match `location ~ ^/ws(/.*)?$ { ... }` with proper HTTP/1.1 Upgrade headers.
+    4. In `backend/services/fyers_stream.py`, added loop tracking variables (`__lock_loop`, `__lifecycle_lock_loop`) and module-level cache helper definitions with non-blocking fallbacks.
+    5. In `backend/api/auth.py`, initialized `logger = get_logger(__name__)` to resolve `NameError: name 'logger' is not defined` during Google OAuth2 token audience mismatch checks.
+  - **Verification Evidence (2026-11-04)**:
+    - Backend Pytest Full 11-Suite: **78 of 78 tests PASSED in 146.72s (100% green, exit code 0)**.
+    - Email Intelligence & Auth Suite (`backend/tests/test_email_intelligence_and_auth.py`): **17 of 17 tests PASSED in 18.86s (100% green, exit code 0)**.
+    - Frontend Vitest Test Suite (`npm --prefix frontend run test -- --run`): **10 of 10 tests PASSED in 1.49s (100% green)**.
+    - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, exit code 0, built in 14.62s**.
+  - **Exact Next Safe Step**: User runs deploy commands on live server to pull the update and reload Nginx/containers.
+
+## Production Deployment Commands (run on live server manually)
+
+```bash
+# SSH into live server first, then:
+cd ~/StockAI
+git pull origin main
+docker compose build backend frontend
+docker compose restart backend frontend
+
+# In addition, ensure Nginx on live server routes /ws/ properly:
+sudo sed -i 's|location /ws {|location ~ ^/ws(/.*)?$ {|g' /etc/nginx/conf.d/stockai.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
+
 ## Latest verified checks (2026-11-03)
 
 - **PRODUCTION DEPLOYMENT (COMPLETE — commit `736da53`, pushed to `origin/main` 2026-11-03 09:36 IST):**

@@ -1080,7 +1080,7 @@ export default function ChartPage() {
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       try {
-        const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/?token=${token}`)
         wsRef.current = ws
 
         ws.onopen = () => {

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.core.config import settings
+from backend.core.logging_config import get_logger
 from backend.core.auth import verify_password, hash_password, create_access_token, get_current_user, oauth2_scheme
 from backend.core.auth_security import validate_password_strength, brute_force_protector, validate_email_syntax, sanitize_display_name
 from backend.core.audit_logger import log_security_event
@@ -20,6 +21,8 @@ from backend.core.email_intelligence import validate_email_for_registration, can
 from backend.core.fraud_detection import fraud_detection_engine
 from backend.services.email_service import email_otp_service
 from backend.models.user import User
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 

@@ -2902,3 +2902,40 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Git commit 736da53 pushed to origin/main on GitHub (dipakfirake/StockAI).
 - **Known Failures**: None. Pre-existing cosmetic chunk-size build warning (jsPDF/html2canvas) unchanged.
 - **Exact Next Safe Step**: User runs on live server: cd ~/StockAI; git pull origin main; docker compose build backend frontend; docker compose restart backend frontend
+
+---
+
+### Session Entry 58: Live Price Stream Diagnosis, WebSocket 301 Fix, Google Auth Logger Patch & Verification
+- **Timestamp:** 2026-11-04 10:05:00 IST (04:35:00 UTC)
+- **User Prompt:** `https://stockai-live.duckdns.org/dashboard` check why prices not changing per second, check single request and cloning strategy, check price updates only when exchange price changes, continue all previous remaining and cancelled tasks and prompts due to quota exhausted.
+- **Root Cause & Technical Findings**:
+  1. **WebSocket 301 Redirect Disconnect**:
+     - Nginx on the live server had `location /ws {` without a trailing slash. When frontend connected to `wss://stockai-live.duckdns.org/ws?token=...`, Nginx returned `HTTP/1.1 301 Moved Permanently` to `/ws/`.
+     - Under RFC 6455, browser WebSocket implementations abort immediately on any 3xx redirect.
+     - Consequently, all 5 frontend WebSocket consumers (`Dashboard`, `LiveTicker`, `WatchlistSidebar`, `ChartPage`, `websocket.ts`) failed and fell back to 60-second REST polling.
+  2. **Single Request & Cloning Engine Status**:
+     - Confirmed operational. Consolidated bulk quotes fetch executes once, stores in Redis (`market:indices:v4`, TTL=3s), and serves concurrent platform components from cache without duplicate broker calls.
+  3. **Exchange Price Change Guard**:
+     - Frontend React components enforce state equality guards; renders occur only when `price`, `change`, or `change_pct` change.
+  4. **Google Auth Logger Patch**:
+     - Discovered `NameError: name 'logger' is not defined` in `backend/api/auth.py:285` during Google OAuth2 token audience verification. Imported `get_logger` and initialized `logger`.
+  5. **Fyers Stream Asyncio Lock Loop Tracking**:
+     - Fixed loop detection in `FyersStreamService` properties using explicit `__lock_loop` and `__lifecycle_lock_loop` variables. Moved cache imports to module level.
+- **Files Modified**:
+  - `frontend/src/pages/Dashboard.tsx`: Changed `/ws?token=` to `/ws/?token=`; updated `setLastUpdated(new Date())` and status upon tick arrival.
+  - `frontend/src/components/LiveTicker.tsx`: Changed `/ws?token=` to `/ws/?token=`.
+  - `frontend/src/components/WatchlistSidebar.tsx`: Changed `/ws?token=` to `/ws/?token=`.
+  - `frontend/src/pages/ChartPage.tsx`: Changed `/ws?token=` to `/ws/?token=`.
+  - `frontend/src/services/websocket.ts`: Changed `/ws?token=` to `/ws/?token=`.
+  - `scripts/setup_duckdns_routes.sh`: Updated Nginx WebSocket location regex to `location ~ ^/ws(/.*)?$ { ... }` with Upgrade headers.
+  - `backend/services/fyers_stream.py`: Added `__lock_loop` and `__lifecycle_lock_loop` loop-tracking, module-level cache definitions.
+  - `backend/tests/test_fyers_stream.py`: Updated cache patch targets to module level.
+  - `backend/api/auth.py`: Initialized `logger = get_logger(__name__)`.
+  - `docs/AI_HANDOFF.md`: Updated latest verified checks and deployment commands.
+  - `docs/SESSION_INTERACTION_AUDIT.md`: Appended Session Entry 58.
+- **Verification Evidence**:
+  - Backend Pytest Full 11-Suite: **78 of 78 PASSED in 146.72s (100% green, exit code 0)**.
+  - Email Intelligence & Auth Suite: **17 of 17 PASSED in 18.86s (100% green, exit code 0)**.
+  - Frontend Vitest Suite: **10 of 10 PASSED in 1.49s (100% green, exit code 0)**.
+  - Frontend Production Build: **1,992 modules transformed, 0 errors, built in 14.62s (exit code 0)**.
+- **Exact Next Safe Step**: User runs git commit/push from local, then executes copy-pasteable deploy commands on live server.

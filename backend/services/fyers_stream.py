@@ -35,6 +35,15 @@ from backend.core.config import settings
 
 logger = get_logger(__name__)
 
+# Cache helpers — imported at module level so they can be mocked in tests
+try:
+    from backend.core.cache import cache_get, cache_set  # noqa: F401
+except Exception:  # pragma: no cover
+    async def cache_get(key: str):  # type: ignore[misc]
+        return None
+    async def cache_set(key: str, value, ttl: int = 60) -> None:  # type: ignore[misc]
+        pass
+
 # FyersDataSocket import with graceful fallback
 try:
     from fyers_apiv3.FyersWebsocket import data_ws
@@ -203,7 +212,9 @@ class FyersStreamService:
         self._subscribed_symbols: Set[str] = set()
         self._symbol_map: Dict[str, str] = {}  # Fyers symbol -> Target symbol (e.g. NSE:RELIANCE-EQ -> RELIANCE.NS)
         self.__lock: Optional[asyncio.Lock] = None
+        self.__lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self.__lifecycle_lock: Optional[asyncio.Lock] = None
+        self.__lifecycle_lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self._client_id: Optional[str] = None
         self._access_token: Optional[str] = None
 
@@ -235,15 +246,18 @@ class FyersStreamService:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
-        if self.__lifecycle_lock is None:
+        if self.__lifecycle_lock is None or (loop is not None and self.__lifecycle_lock_loop is not loop):
             self.__lifecycle_lock = asyncio.Lock()
-        elif loop is not None and getattr(self.__lifecycle_lock, "_loop", None) not in (None, loop):
-            self.__lifecycle_lock = asyncio.Lock()
+            self.__lifecycle_lock_loop = loop
         return self.__lifecycle_lock
 
     @_lifecycle_lock.setter
     def _lifecycle_lock(self, val: Any) -> None:
         self.__lifecycle_lock = val
+        try:
+            self.__lifecycle_lock_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.__lifecycle_lock_loop = None
 
     @property
     def _lock(self) -> asyncio.Lock:
@@ -251,15 +265,18 @@ class FyersStreamService:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
-        if self.__lock is None:
+        if self.__lock is None or (loop is not None and self.__lock_loop is not loop):
             self.__lock = asyncio.Lock()
-        elif loop is not None and getattr(self.__lock, "_loop", None) not in (None, loop):
-            self.__lock = asyncio.Lock()
+            self.__lock_loop = loop
         return self.__lock
 
     @_lock.setter
     def _lock(self, val: Any) -> None:
         self.__lock = val
+        try:
+            self.__lock_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.__lock_loop = None
 
     @classmethod
     def get_instance(cls) -> "FyersStreamService":
@@ -326,7 +343,6 @@ class FyersStreamService:
 
         if not access_token or not client_id:
             try:
-                from backend.core.cache import cache_get
                 cached_creds = await cache_get("fyers_creds")
                 if cached_creds:
                     if not client_id and cached_creds.get("client_id"):
@@ -498,7 +514,6 @@ class FyersStreamService:
             # Update in-memory Redis cache asynchronously
             if self._loop and self._loop.is_running():
                 from backend.api.websocket import broadcast_market_update
-                from backend.core.cache import cache_set
 
                 # 1. Dispatch WebSocket broadcast to all connected web clients
                 asyncio.run_coroutine_threadsafe(
@@ -560,7 +575,6 @@ class FyersStreamService:
         missing_in_memory = [s for s in symbols if s not in _HSM_TOKEN_MEMORY_CACHE]
         if missing_in_memory:
             try:
-                from backend.core.cache import cache_get
                 for s in missing_in_memory:
                     val = await cache_get(f"fyers:hsm_token:{s}")
                     if val and isinstance(val, dict) and "fyToken" in val:
@@ -575,7 +589,6 @@ class FyersStreamService:
             resolved = await asyncio.to_thread(self._fetch_hsm_tokens_http, still_missing, auth_header)
             if resolved:
                 try:
-                    from backend.core.cache import cache_set
                     for sym, data_val in resolved.items():
                         _HSM_TOKEN_MEMORY_CACHE[sym] = data_val
                         await cache_set(f"fyers:hsm_token:{sym}", data_val, ttl=86400)

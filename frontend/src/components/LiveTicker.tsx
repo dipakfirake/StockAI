@@ -177,7 +177,7 @@ export default function LiveTicker() {
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       try {
-        ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`)
+        ws = new WebSocket(`${protocol}//${window.location.host}/ws/?token=${token}`)
 
         ws.onopen = () => {
           if (!isMounted) return

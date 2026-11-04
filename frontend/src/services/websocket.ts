@@ -31,7 +31,7 @@ class AlertWebSocket {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${protocol}://${window.location.host}/ws?token=${encodeURIComponent(token)}`
+    const url = `${protocol}://${window.location.host}/ws/?token=${encodeURIComponent(token)}`
 
     try {
       this.ws = new WebSocket(url)

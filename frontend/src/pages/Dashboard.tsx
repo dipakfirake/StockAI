@@ -201,7 +201,7 @@ export default function Dashboard() {
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       try {
-        ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${currentToken}`)
+        ws = new WebSocket(`${protocol}//${window.location.host}/ws/?token=${currentToken}`)
 
         ws.onopen = () => {
           if (!isMounted) return
@@ -257,12 +257,18 @@ export default function Dashboard() {
                         price: newPrice,
                         change: newChange,
                         change_pct: newPct,
+                        timestamp: data.timestamp || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                        data_status: data.data_status || 'realtime',
                       }
                     }
                   }
                   return idx
                 })
-                return hasChanged ? next : prev
+                if (hasChanged) {
+                  setLastUpdated(new Date())
+                  return next
+                }
+                return prev
               })
             }
           } catch (err) {
