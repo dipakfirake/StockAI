@@ -280,10 +280,10 @@ async def poll_market_data():
                             prev_price = last_tick["price"] if last_tick else None
                             elapsed = (now - last_tick["time"]) if last_tick else 999.0
 
-                            # Micro-tick fluidity: If tick pause > 333ms during market hours and price changed >= 0.10
+                            # Micro-tick fluidity: If tick pause > 333ms during market hours and price changed >= 0.05 (NSE tick size)
                             if (
                                 prev_price is not None
-                                and abs(q_price - prev_price) >= 0.10
+                                and abs(q_price - prev_price) >= 0.05
                                 and elapsed >= 0.333
                                 and is_indian_market_open()
                             ):

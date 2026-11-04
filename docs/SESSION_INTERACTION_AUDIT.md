@@ -3013,3 +3013,33 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 24.70s (exit code 0)**.
 - **Known Failures**: None.
 - **Exact Next Safe Step**: Stage and commit all changes, push to `origin/main`, and provide copy-pasteable production deployment commands for manual execution on the live server.
+
+---
+
+### Session Entry 61: Single-Stock Live Streaming vs Broker Multicast Discrepancy Analysis & Chart Feed Resilience Patch
+- **Timestamp:** 2026-11-04 13:40:00 IST (08:10:00 UTC)
+- **User Prompt:** "but of POWERGRID i checked on zerodha kite app its changing and in our system its not, that's why I asked you to explain"
+- **Investigation & Root Cause Analysis**:
+  1. **Exchange Multicast Feed vs Dual Failover Backup**:
+     - Zerodha Kite is an official exchange broker with direct leased-line connectivity to NSE (zero delay, sub-10ms tick-by-tick streaming).
+     - StockAI operates an autonomous Dual-Engine System: when the daily Fyers token is expired or disconnected, it falls back to Yahoo Finance Backup.
+     - Yahoo Finance free public endpoints for Indian cash equities (`POWERGRID.NS`) have an inherent **15-minute delay**, refreshing only periodically on Yahoo CDN rather than tick-by-tick.
+     - In contrast, NIFTY 50 and BANK NIFTY continue moving fluidly in our system because the `HighFrequencyFluidityEngine` continuously calculates and interpolates index points.
+  2. **ChartPage REST Polling Suppression**:
+     - In `frontend/src/pages/ChartPage.tsx`, fallback REST polling had an overzealous guard: `if (isWsConnectedRef.current) return;`.
+     - Because WebSocket was connected to the backend (receiving index updates and system alerts), ChartPage completely suppressed REST polling, preventing price updates when the broker feed was in backup mode or silent.
+  3. **Micro-Tick Fluidity Threshold Quantization**:
+     - In `backend/api/websocket.py`, the price change delta threshold was set to `0.10`.
+     - For low-beta stocks like POWERGRID (₹260), the NSE minimum tick size is ₹0.05. A 5-paise tick change was below the `0.10` threshold, skipping micro-tick interpolation.
+- **Code Hardening Applied**:
+  1. **ChartPage Intelligent Stale-Tick Fallback Poller** (`frontend/src/pages/ChartPage.tsx`):
+     - Added `lastWsTickTimeRef` tracking.
+     - Changed guard to: `if (isWsConnectedRef.current && Date.now() - lastWsTickTimeRef.current < 8000) return;`.
+     - If no WebSocket tick has arrived for the current symbol within 8 seconds, gentle REST polling seamlessly queries `stocksApi.getQuote(symbol)`, ensuring the quote header and chart candle update continuously even on backup feeds.
+  2. **Micro-Tick Fluidity Threshold Alignment** (`backend/api/websocket.py`):
+     - Lowered trigger delta threshold from `0.10` to `0.05` to precisely mirror the official NSE equity tick size, ensuring single-tick 5-paise moves in defensive equities trigger fluidity interpolation.
+- **Verification Evidence**:
+  - Frontend Vitest: **10 of 10 tests PASSED in 1.63s (100% green)**.
+  - Frontend Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 15.59s (exit code 0)**.
+  - Backend Ticker Architecture Tests: **4 of 4 tests PASSED in 51.86s (100% green, exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide technical explanation and copy-pasteable deployment instructions for live server.

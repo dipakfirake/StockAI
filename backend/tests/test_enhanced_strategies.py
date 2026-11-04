@@ -151,3 +151,4 @@ def test_signal_engine_dynamic_atr_targets():
     assert sig["risk_reward_ratio"] == 1.5
     assert sig["risk_quality"] in {"OPTIMAL", "ACCEPTABLE"}
     assert "SuperTrend confirms Bullish trend" in sig["reason"] or "RSI" in sig["reason"]
+

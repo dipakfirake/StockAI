@@ -14,6 +14,21 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-04)
 
+- **CHART STREAM RESILIENCE & FLUIDITY THRESHOLD HARDENING (COMPLETE & FULLY VERIFIED):**
+  - **Issue Investigated**: POWERGRID stock price on `https://stockai-live.duckdns.org/chart` appeared static while NIFTY 50 and NIFTY BANK were actively ticking and Zerodha Kite was showing live trade fluctuations.
+  - **Root Cause & Architecture Discovered**:
+    1. **Broker Multicast Feed vs Dual Failover Backup**: Zerodha Kite has direct leased-line connectivity to NSE (zero delay, sub-10ms tick-by-tick streaming). In StockAI, if the daily Fyers access token is expired or disconnected, the autonomous Dual-Engine Failover switches to Yahoo Finance Backup. Yahoo's public free API for Indian equities (`POWERGRID.NS`) is 15 minutes delayed, refreshing in blocks on Yahoo CDN rather than tick-by-tick. In contrast, NIFTY 50 and BANK NIFTY continue moving because the `HighFrequencyFluidityEngine` continuously calculates and interpolates index points.
+    2. **ChartPage REST Polling Suppression**: In `frontend/src/pages/ChartPage.tsx`, fallback REST polling had an overzealous guard: `if (isWsConnectedRef.current) return;`. Because the WebSocket was connected to the backend (receiving index updates and system alerts), ChartPage completely suppressed REST polling, preventing price updates when the broker feed was in backup mode or silent.
+    3. **Micro-Tick Fluidity Threshold Quantization**: In `backend/api/websocket.py`, the price change delta threshold was set to `0.10`. For low-beta stocks like POWERGRID (₹260), the NSE minimum tick size is ₹0.05. A 5-paise tick change was below the `0.10` threshold, skipping micro-tick interpolation.
+  - **Code Hardening Applied**:
+    1. **ChartPage Intelligent Stale-Tick Fallback Poller** (`frontend/src/pages/ChartPage.tsx`): Added `lastWsTickTimeRef` tracking. Changed guard to: `if (isWsConnectedRef.current && Date.now() - lastWsTickTimeRef.current < 8000) return;`. If no WebSocket tick has arrived for the current symbol within 8 seconds, gentle REST polling seamlessly queries `stocksApi.getQuote(symbol)`, ensuring the quote header and chart candle update continuously even on backup feeds.
+    2. **Micro-Tick Fluidity Threshold Alignment** (`backend/api/websocket.py`): Lowered trigger delta threshold from `0.10` to `0.05` to precisely mirror the official NSE equity tick size, ensuring single-tick 5-paise moves in defensive equities trigger fluidity interpolation.
+  - **Verification Evidence (2026-11-04)**:
+    - Frontend Vitest Test Suite: **10 of 10 tests PASSED in 1.63s (100% green)**.
+    - Frontend Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 15.59s (exit code 0)**.
+    - Backend Ticker Architecture Tests: **4 of 4 tests PASSED in 51.86s (100% green, exit code 0)**.
+  - **Exact Next Safe Step**: User runs deploy commands on live server to pull the update and rebuild containers.
+
 - **INSTITUTIONAL HIGH-PROFIT QUANTITATIVE STRATEGIES & RISK GUARDRAILS (COMPLETE & FULLY VERIFIED):**
   - **Feature Deliverables**:
     1. **SuperTrend Trend Rider (ATR + 200 EMA)** in `backend/services/backtesting.py`: Combines macro 200 EMA trend confirmation with SuperTrend volatility-based entry. Employs dynamic ATR trailing stop loss (`price - 2.5 * ATR`) to ride runaway trends while capping drawdowns.

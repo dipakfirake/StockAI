@@ -130,6 +130,7 @@ export default function ChartPage() {
   
   const compareSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const isWsConnectedRef = useRef(false)
+  const lastWsTickTimeRef = useRef<number>(0)
   
   const tradePriceLinesRef = useRef<any[]>([])
 
@@ -997,8 +998,8 @@ export default function ChartPage() {
     if (!symbol) return
 
     const pollTimer = setInterval(async () => {
-      // Skip REST polling if WebSocket is actively receiving real-time ticks to protect Fyers API quota
-      if (isWsConnectedRef.current) return
+      // Skip REST polling if WebSocket has actively received real-time ticks for this symbol within 8 seconds
+      if (isWsConnectedRef.current && Date.now() - lastWsTickTimeRef.current < 8000) return
 
       try {
         const res = await stocksApi.getQuote(symbol)
@@ -1116,6 +1117,7 @@ export default function ChartPage() {
             const cleanMsg = (data.symbol || '').replace(/\.NS$/, '').replace(/\.BO$/, '').toUpperCase()
 
             if (data.type === 'market_update' && (cleanMsg === cleanParam || cleanMsg === symbol.toUpperCase())) {
+              lastWsTickTimeRef.current = Date.now()
               const newPrice = Number(data.price)
               if (Number.isFinite(newPrice) && newPrice > 0) {
                 quoteRef.current = {
