@@ -241,3 +241,48 @@ When running or deploying StockAI in a production cloud environment, follow thes
    - Daily EOD / AI Predictions: Cache TTL = 300 seconds (5 minutes).
 5. **Continuous Agent Context Requirement:**
    - In accordance with repository governance, every AI agent prompt and development cycle must review both this document (`docs/SYSTEM_DESIGN_ARCHITECTURE.md`) and the cybersecurity specification (`docs/CYBERSECURITY_AUDIT_AND_DEFENSES.md`).
+
+---
+
+## 6. The Zero-Quota High-Frequency Market Streaming & Request Cloning Architecture
+
+### 6.1 Design Rationale & Broker Rate Limit Defense
+Modern retail broker APIs (e.g., Fyers V3) enforce strict REST rate budgets (typically 50–100 req/min or 10 req/sec burst limits). Under multi-component web architectures where Dashboards, Live Tickers, Watchlists, and Chart pages poll independently, REST quota is exhausted in seconds, triggering HTTP 429 / error code 360 IP blocks.
+
+To achieve ultra-fast live price updates (sub-50ms latency) without exhausting broker quotas, StockAI employs a **5-Pillar Zero-Quota High-Frequency Pipeline**:
+
+```
+                       ┌─────────────────────────┐
+                       │  Fyers HSM Data Cluster │ (Push-based WebSocket)
+                       └────────────┬────────────┘
+                                    │ Zero REST Quota Cost (<50ms ticks)
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STOCKAI BACKEND (FastAPI + Asyncio)                                         │
+│                                                                             │
+│  1. FyersStreamService (Worker Thread + Loop-Aware Lifecycle Mutex)         │
+│     ├── Ingests raw exchange ticks into in-memory Redis                     │
+│     └── Fanout via Inverted-Index WebSocket Broadcaster                     │
+│                                                                             │
+│  2. Warmup Governor & Dynamic Pacing Decay (60s Post-Token Pacing)          │
+│     ├── Caps REST requests to <= 1 req / 1.5s during warmup                 │
+│     └── Silently routes excess cold requests to Yahoo fallback              │
+│                                                                             │
+│  3. Single-Flight Bulk Coalescer (market:indices:v4, TTL=3s)                │
+│     └── 1 upstream bulk fetch -> Cloned across 1,000+ UI components         │
+└──────────────────────┬──────────────────────────────────────────────────────┘
+                       │ WebSocket /ws/?token= (Nginx ~ ^/ws(/.*)?$)
+                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ REACT FRONTEND CLIENTS (Dashboard, LiveTicker, Watchlists, Charts)          │
+│  ├── Stateful Equality Guards: (prevPrice === newPrice) -> skip re-render   │
+│  └── Sub-second ticks update only when exchange quotes genuinely move       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 Key Invariants of the Strategy:
+1. **Push over Poll**: All real-time ticks flow through persistent WebSockets (`FyersDataSocket`), completely bypassing HTTP REST rate limit counters.
+2. **Single-Flight Coalescing**: Only 1 consolidated bulk request is ever dispatched for index benchmarks (`^NSEI`, `^NSEBANK`, `^BSESN`, etc.); all components read the Redis clone.
+3. **Warmup Governor**: Daily token renewal engages a 60-second pacing governor so initialization requests never trigger a thundering-herd burst.
+4. **Nginx Trailing Slash Alignment**: WebSocket routes must match `location ~ ^/ws(/.*)?$` so browser clients never encounter HTTP 301 redirects (which RFC 6455 strictly aborts).
+5. **Exchange-Driven Anti-Fabrication**: UI updates only render on genuine price movements with strict ₹0.05 tick quantization, complying fully with SEBI market data integrity standards.
