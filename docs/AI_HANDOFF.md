@@ -32,6 +32,13 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
        - **Fix**: Added `-E` and `-n celery@stockcelery` flags to `celery_worker` in `docker-compose.yml`, passed `--broker=redis://redis:6379/1` to `flower`, enabled `worker_send_task_events=True` and `task_send_sent_event=True` in `backend/celery_app.py`, adjusted ingestion frequency to 180s, batched ingestion in groups of 5 with `asyncio.gather` in `market_tasks.py` (runtime reduced from ~125s to ~15s), and registered `swing_audit_tasks`.
     3. **Auth Import Alignment**:
        - In `backend/api/swing_audit.py` and `backend/tests/test_swing_audit.py`, corrected import of `get_current_user` and `get_current_user_optional` from `backend.core.auth`.
+    4. **Redis Authentication Lockdown & Cloud Port Isolation**:
+       - Discovered `redis.exceptions.AuthenticationError: Authentication required` when Celery inspected worker ping on live server.
+       - Discovered Redis port 6379 was bound to `0.0.0.0:6379`, exposing it to public internet scanners.
+       - Restricted Redis port to `127.0.0.1:6379:6379` and PostgreSQL port to `127.0.0.1:5432:5432`.
+       - Enforced `--requirepass "${REDIS_PASSWORD:-StockAI2026SecureRedisPass}"` in `docker-compose.yml`, updating healthchecks and all service connection strings across backend, worker, beat, and flower.
+       - Documented `REDIS_PASSWORD` in `.env.example`.
+       - Provided live server disk reclamation command `docker builder prune -af && docker system prune -af` to resolve BuildKit `no space left on device`.
   - **Verification Evidence (2026-11-10)**:
     - Backend Pytest Suite (`backend/tests/test_swing_audit.py`): **7 of 7 PASSED in 18.97s (100% green, exit code 0)**.
     - Screener Single-Stock Verification (`POWERGRID.NS`): Returned `Action: BUY`, `Total Score: 63.8`, `Error: None`.
@@ -71,6 +78,13 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
        - Added `swingAuditApi` to `frontend/src/services/api.ts`.
        - Integrated 3 action buttons on Swing Trade Analysis card: `[Track in Audit]`, `[🛒 I Bought @ ₹...]`, and `[📥 Audit Excel (.xlsx)]`.
        - Wired `1-Click Paper BUY` button to auto-record into 11-day audit with `user_bought=True`.
+    4. **Redis Authentication Lockdown & Cloud Port Isolation**:
+       - Discovered `redis.exceptions.AuthenticationError: Authentication required` when Celery inspected worker ping on live server.
+       - Discovered Redis port 6379 was bound to `0.0.0.0:6379`, exposing it to public internet scanners.
+       - Restricted Redis port to `127.0.0.1:6379:6379` and PostgreSQL port to `127.0.0.1:5432:5432`.
+       - Enforced `--requirepass "${REDIS_PASSWORD:-StockAI2026SecureRedisPass}"` in `docker-compose.yml`, updating healthchecks and all service connection strings across backend, worker, beat, and flower.
+       - Documented `REDIS_PASSWORD` in `.env.example`.
+       - Provided live server disk reclamation command `docker builder prune -af && docker system prune -af` to resolve BuildKit `no space left on device`.
   - **Verification Evidence (2026-11-10)**:
     - Backend Pytest Suite (`backend/tests/test_swing_audit.py`): **7 of 7 PASSED in 19.15s (100% green, exit code 0)**.
     - Frontend Vitest Test Suite (`npm --prefix frontend run test -- --run`): **10 of 10 PASSED in 4.65s (100% green, exit code 0)**.

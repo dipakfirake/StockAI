@@ -3135,9 +3135,14 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
      - In `backend/celery_app.py`, enabled `worker_send_task_events = True` and `task_send_sent_event = True`. Added `"backend.tasks.swing_audit_tasks"` to `include=[...]`.
      - In `backend/celery_app.py`, adjusted `ingest-market-data` schedule from 60s to 180s (3 minutes) to avoid task queue backlogs.
      - In `backend/tasks/market_tasks.py` (`ingest_watchlist_stocks`), batched candle ingestion in groups of 5 with `asyncio.gather`, reducing execution runtime from ~125s down to ~15s.
-  3. **Auth Dependency Alignment**:
+  3. **Redis Authentication Lockdown & Cloud Port Isolation**:
+     - Discovered `redis.exceptions.AuthenticationError: Authentication required` on live server when inspecting Celery worker.
+     - Changed Redis port from `0.0.0.0:6379` to `127.0.0.1:6379:6379` and PostgreSQL port from `0.0.0.0:5432` to `127.0.0.1:5432:5432` to isolate services from public internet scanning.
+     - Added `--requirepass "${REDIS_PASSWORD:-StockAI2026SecureRedisPass}"` in `docker-compose.yml`, updated healthchecks and internal service URLs (`redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/...`) across backend, worker, beat, and flower.
+     - Documented `REDIS_PASSWORD` in `.env.example`.
+  4. **Auth Dependency Alignment**:
      - In `backend/api/swing_audit.py` and `backend/tests/test_swing_audit.py`, corrected import of `get_current_user` and `get_current_user_optional` from `backend.core.auth`.
-  4. **Repository Hygiene**:
+  5. **Repository Hygiene**:
      - Added `audits/` and `*.xlsx` to `.gitignore`.
 - **Verification Evidence**:
   - Backend Pytest Suite (`backend/tests/test_swing_audit.py`): **7 of 7 PASSED in 18.97s (100% green, exit code 0)**.

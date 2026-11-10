@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: stockuser
       POSTGRES_PASSWORD: stockpass
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./backend/init_db.sql:/docker-entrypoint-initdb.d/init.sql
@@ -22,12 +22,13 @@ services:
   redis:
     image: redis:7-alpine
     container_name: stockredis
+    command: redis-server --requirepass "${REDIS_PASSWORD:-StockAI2026SecureRedisPass}"
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-StockAI2026SecureRedisPass}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -42,9 +43,9 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://stockuser:stockpass@db:5432/stockdb
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/2
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       DEBUG: ${DEBUG:-false}
       PYTHONPATH: /app
@@ -73,9 +74,9 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://stockuser:stockpass@db:5432/stockdb
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/2
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -102,9 +103,9 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://stockuser:stockpass@db:5432/stockdb
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/2
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -126,11 +127,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: stockflower
-    command: celery -A backend.celery_app flower --port=5555 --url_prefix=flower --broker=redis://redis:6379/1 --basic_auth=${FLOWER_BASIC_AUTH:-headadmin:HeadAdmin@2003StockAI}
+    command: celery -A backend.celery_app flower --port=5555 --url_prefix=flower --broker=redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/1 --basic_auth=${FLOWER_BASIC_AUTH:-headadmin:HeadAdmin@2003StockAI}
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/2
+      REDIS_URL: redis://:${REDIS_PASSWORD:-StockAI2026SecureRedisPass}@redis:6379/0
       PYTHONPATH: /app
       FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:-headadmin:HeadAdmin@2003StockAI}
     volumes:
