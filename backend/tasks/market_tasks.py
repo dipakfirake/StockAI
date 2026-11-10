@@ -22,9 +22,14 @@ def ingest_watchlist_stocks(self):
         from backend.data.ingestion.candle_ingestion import ingest_candles, NSE_NIFTY50_SYMBOLS
         async def _run_all():
             total_inserted = 0
-            for sym in NSE_NIFTY50_SYMBOLS:
-                total_inserted += await ingest_candles(sym, "1d", period="5d")
-                await asyncio.sleep(1.5)  # Rate limiting delay for yfinance
+            batch_size = 5
+            for i in range(0, len(NSE_NIFTY50_SYMBOLS), batch_size):
+                batch = NSE_NIFTY50_SYMBOLS[i:i + batch_size]
+                results = await asyncio.gather(*[ingest_candles(sym, "1d", period="5d") for sym in batch], return_exceptions=True)
+                for r in results:
+                    if isinstance(r, int):
+                        total_inserted += r
+                await asyncio.sleep(0.5)
             return total_inserted
         total = asyncio.run(_run_all())
         logger.info(f"Ingestion task: {total} candles updated")

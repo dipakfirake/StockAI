@@ -320,7 +320,7 @@ class AIEngineService:
                 "close": "Close", "volume": "Volume"
             })
             if "timestamp" in df.columns:
-                df["Date"] = pd.to_datetime(df["timestamp"])
+                df["Date"] = pd.to_datetime(df["timestamp"], format="mixed")
                 df = df.set_index("Date")
 
             df_feat = engineer_features(df)

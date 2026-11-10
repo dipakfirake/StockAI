@@ -74,7 +74,7 @@ class MarketDataService:
                 # Form new active session candle if market is live and candle series hasn't incorporated today
                 open_p = float(quote.get("open") or live_price)
                 new_candle = {
-                    "timestamp": now_ist.isoformat(),
+                    "timestamp": now_ist.replace(microsecond=0).isoformat(),
                     "open": open_p,
                     "high": max(open_p, live_price, quote_high),
                     "low": min(open_p, live_price, quote_low),

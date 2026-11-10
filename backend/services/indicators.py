@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 def candles_to_df(candles: list[dict]) -> pd.DataFrame:
     """Convert list of candle dicts to a pandas DataFrame."""
     df = pd.DataFrame(candles)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="mixed")
     df = df.set_index("timestamp").sort_index()
     df = df.rename(columns={
         "open": "Open", "high": "High", "low": "Low",

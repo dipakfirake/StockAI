@@ -49,6 +49,8 @@ fyersApi.log
 generate_fyers_token.bat
 scratch/
 .agents/teamwork/
+audits/
+*.xlsx
 
 # Security, Keys, Credentials & Dumps (Never upload to Git)
 *.key

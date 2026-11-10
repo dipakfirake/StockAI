@@ -14,6 +14,29 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-10)
 
+- **CELERY FLOWER OFFLINE WORKER STATUS & SWING SCREENER 0-STOCKS FIX (COMPLETE & FULLY VERIFIED):**
+  - **Issues Investigated**:
+    1. *Flower Monitoring (`https://stockai-live.duckdns.org/flower/`)*: Worker `celery@stockcelery` reported as **Offline** despite having processed 12,666 tasks with 1 active task.
+    2. *AI Swing Screener (`https://stockai-live.duckdns.org/screener`)*: Displayed 0 stocks across all categories (`0 / 25 Active`, `BUY SETUPS 0 Stocks`, `SELL SETUPS 0 Stocks`, `RANGE-BOUND 0 Stocks`).
+  - **Root Causes Discovered & Resolved**:
+    1. **Screener 0-Stocks Timestamp Clashing**:
+       - During live market hours (`is_indian_market_open() == True`), `MarketDataService.synchronize_candle_tip` appended the active session tip with `now_ist.isoformat()`, which included microseconds (e.g., `2026-11-10T11:55:28.057692+05:30`).
+       - Downstream in `backend/services/indicators.py:34` (`candles_to_df`) and `backend/services/ai_engine.py`, `pd.to_datetime(df["timestamp"])` without `format="mixed"` raised a fatal `ValueError: time data '...' doesn't match format '%Y-%m-%dT%H:%M:%S%z'` at index 494 because historical candles lacked microseconds.
+       - Consequently, `indicator_service.compute_all(candles)` crashed for every stock during market hours, returning `{"error": "...", "total_score": 0.0}`. The screener omitted all errored stocks, resulting in 0 matches.
+       - **Fix**: Formatted live candle timestamp with `.replace(microsecond=0).isoformat()`, and enabled `format="mixed"` in `pd.to_datetime(df["timestamp"], format="mixed")` across indicator and AI engine services.
+    2. **Flower "Offline" Worker Heartbeat Absence**:
+       - In `docker-compose.yml`, `celery_worker` was invoked without the `-E` (`--events`) flag, and `worker_send_task_events` / `task_send_sent_event` were disabled in `backend/celery_app.py`. Flower requires worker event broadcasting to monitor worker presence.
+       - In `backend/celery_app.py`, `ingest-market-data` was scheduled every 60 seconds with a sequential loop over 50 stocks with 1.5s sleep per stock (~125s total runtime), permanently tying up 1 of the 2 concurrency slots (`Active: 1`), while `backend.tasks.swing_audit_tasks` was missing from `include=[...]`.
+       - **Fix**: Added `-E` flag to `celery_worker` command in `docker-compose.yml`, enabled `worker_send_task_events=True` and `task_send_sent_event=True` in `backend/celery_app.py`, adjusted ingestion frequency to 180s, batched ingestion in groups of 5 with `asyncio.gather` in `market_tasks.py` (runtime reduced from ~125s to ~15s), and registered `swing_audit_tasks`.
+    3. **Auth Import Alignment**:
+       - In `backend/api/swing_audit.py` and `backend/tests/test_swing_audit.py`, corrected import of `get_current_user` and `get_current_user_optional` from `backend.core.auth`.
+  - **Verification Evidence (2026-11-10)**:
+    - Backend Pytest Suite (`backend/tests/test_swing_audit.py`): **7 of 7 PASSED in 18.97s (100% green, exit code 0)**.
+    - Screener Single-Stock Verification (`POWERGRID.NS`): Returned `Action: BUY`, `Total Score: 63.8`, `Error: None`.
+    - Screener Multi-Stock Verification (`POWERGRID.NS`, `RELIANCE.NS`): Scanned 2, returned 1 Buy setup and 1 Valid result without timestamp parsing exceptions.
+    - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 17.08s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs deploy commands on live server to pull the update and restart Celery worker, beat, Flower, and backend.
+
 - **AUTOMATED 11-DAY SWING TRADE AUDIT & EXCEL SHEET TRACKING SYSTEM (COMPLETE & FULLY VERIFIED):**
   - **Feature Deliverables**:
     1. **Dual Storage: High-Integrity PostgreSQL Ledger + Institutional Excel Spreadsheet Generation**:

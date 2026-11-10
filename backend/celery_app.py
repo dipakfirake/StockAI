@@ -20,7 +20,12 @@ celery_app = Celery(
     "ai_stock_research",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["backend.tasks.market_tasks", "backend.tasks.alert_tasks", "backend.tasks.trading_tasks"],
+    include=[
+        "backend.tasks.market_tasks",
+        "backend.tasks.alert_tasks",
+        "backend.tasks.trading_tasks",
+        "backend.tasks.swing_audit_tasks",
+    ],
 )
 
 celery_app.conf.update(
@@ -32,15 +37,17 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    worker_send_task_events=True,
+    task_send_sent_event=True,
 )
 
 # Beat schedule — periodic tasks
 celery_app.conf.beat_schedule = {
-    # Data ingestion: every 1 minute, Mon–Fri 09:15–15:30 IST
+    # Data ingestion: every 3 minutes, Mon–Fri 09:15–15:30 IST
     "ingest-market-data": {
         "task": "backend.tasks.market_tasks.ingest_watchlist_stocks",
-        "schedule": 60.0,  # every 60 seconds
-        "options": {"expires": 55},
+        "schedule": 180.0,  # every 3 minutes
+        "options": {"expires": 160},
     },
     # Alert evaluation: every 30 seconds
     "evaluate-alerts": {

@@ -3105,3 +3105,41 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend Vitest Test Suite (`npm --prefix frontend run test -- --run`): **10 of 10 PASSED in 4.65s (100% green, exit code 0)**.
   - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 25.27s (exit code 0)**.
 - **Exact Next Safe Step**: User runs deploy commands on live server to pull the update and rebuild frontend & backend containers.
+
+
+---
+
+### Session Entry 63: Celery Flower Worker Offline Resolution & Swing Screener 0-Stocks Mixed Timestamp Fix
+- **Timestamp:** 2026-11-10 17:40:00 IST (12:10:00 UTC)
+- **User Prompt:**
+  `"Flower: celery@stockcelery Offline, Active: 1, Processed: 12666 ... and AI Swing Screener: 0 stocks across all categories (BUY 0, SELL 0, HOLD 0, 0 / 25 Active) ... No stocks match the current filter"`
+- **Investigation & Root Cause Analysis**:
+  1. **AI Swing Screener 0-Stocks Root Cause Discovered**:
+     - During live market hours (`is_indian_market_open() == True`), `MarketDataService.synchronize_candle_tip` formed the active session candle tip using `now_ist.isoformat()`, which produced timestamps with microsecond precision (e.g., `"2026-11-10T11:55:28.057692+05:30"`).
+     - Downstream in `backend/services/indicators.py:34` (`candles_to_df`) and `backend/services/ai_engine.py`, `pd.to_datetime(df["timestamp"])` without `format="mixed"` threw a fatal `ValueError: time data '2026-11-10T11:55:28.057692+05:30' doesn't match format '%Y-%m-%dT%H:%M:%S%z'` at position 494 because historical candles lacked microseconds while the appended live tip had them.
+     - As a result, `indicator_service.compute_all(candles)` crashed for every stock during live market hours, returning `{"error": "...", "total_score": 0.0}`.
+     - `ScreenerService.run_screener` excluded all errored stocks, causing the UI to display `0 / 25 Active` and 0 stocks in Buy, Sell, and Hold categories.
+  2. **Celery Flower "Offline" Status Root Cause Discovered**:
+     - In `docker-compose.yml`, the `celery_worker` service was started with `command: celery -A backend.celery_app worker --loglevel=info --concurrency=2` without the `-E` (`--events`) flag.
+     - In `backend/celery_app.py`, `worker_send_task_events` and `task_send_sent_event` were omitted.
+     - Without event broadcasting enabled, the Celery worker never published worker heartbeat and task lifecycle events to Redis (`celeryev`), causing Flower to register `celery@stockcelery` as **Offline**.
+     - Furthermore, `ingest-market-data` was scheduled every 60 seconds with a sequential loop over 50 stocks with 1.5s sleep per stock (~125s total runtime), permanently tying up 1 of the 2 concurrency slots (`Active: 1`), while `backend.tasks.swing_audit_tasks` was missing from `include=[...]`.
+- **Code Hardening Applied**:
+  1. **Timestamp Normalization & Robust Parsing**:
+     - In `backend/services/market_data.py` (`synchronize_candle_tip`), replaced `now_ist.isoformat()` with `now_ist.replace(microsecond=0).isoformat()` to maintain uniform ISO-8601 formatting.
+     - In `backend/services/indicators.py` (`candles_to_df`) and `backend/services/ai_engine.py`, added `format="mixed"` to `pd.to_datetime(df["timestamp"], format="mixed")` for resilient multi-format date parsing.
+  2. **Celery Flower Worker Event Broadcasting & Ingestion Optimization**:
+     - In `docker-compose.yml`, added `-E` flag to `celery_worker` (`celery -A backend.celery_app worker -E --loglevel=info --concurrency=2`).
+     - In `backend/celery_app.py`, enabled `worker_send_task_events = True` and `task_send_sent_event = True`. Added `"backend.tasks.swing_audit_tasks"` to `include=[...]`.
+     - In `backend/celery_app.py`, adjusted `ingest-market-data` schedule from 60s to 180s (3 minutes) to avoid task queue backlogs.
+     - In `backend/tasks/market_tasks.py` (`ingest_watchlist_stocks`), batched candle ingestion in groups of 5 with `asyncio.gather`, reducing execution runtime from ~125s down to ~15s.
+  3. **Auth Dependency Alignment**:
+     - In `backend/api/swing_audit.py` and `backend/tests/test_swing_audit.py`, corrected import of `get_current_user` and `get_current_user_optional` from `backend.core.auth`.
+  4. **Repository Hygiene**:
+     - Added `audits/` and `*.xlsx` to `.gitignore`.
+- **Verification Evidence**:
+  - Backend Pytest Suite (`backend/tests/test_swing_audit.py`): **7 of 7 PASSED in 18.97s (100% green, exit code 0)**.
+  - Screener Single-Stock Verification (`POWERGRID.NS`): Scanned cleanly without timestamp errors, returning `Action: BUY`, `Total Score: 63.8`.
+  - Screener Multi-Stock Verification (`POWERGRID.NS`, `RELIANCE.NS`): Scanned 2, returned 1 Buy setup and 1 Valid result without timestamp parsing exceptions.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 17.08s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide technical explanation and copy-pasteable deployment instructions for live server.
