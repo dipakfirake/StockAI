@@ -3129,7 +3129,9 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
      - In `backend/services/market_data.py` (`synchronize_candle_tip`), replaced `now_ist.isoformat()` with `now_ist.replace(microsecond=0).isoformat()` to maintain uniform ISO-8601 formatting.
      - In `backend/services/indicators.py` (`candles_to_df`) and `backend/services/ai_engine.py`, added `format="mixed"` to `pd.to_datetime(df["timestamp"], format="mixed")` for resilient multi-format date parsing.
   2. **Celery Flower Worker Event Broadcasting & Ingestion Optimization**:
-     - In `docker-compose.yml`, added `-E` flag to `celery_worker` (`celery -A backend.celery_app worker -E --loglevel=info --concurrency=2`).
+     - In `docker-compose.yml`, added `-E` and `-n celery@stockcelery` flags to `celery_worker` (`celery -A backend.celery_app worker -E --loglevel=info --concurrency=2 -n celery@stockcelery`).
+     - In `docker-compose.yml`, added explicit `--broker=redis://redis:6379/1` to `flower` command and passed `CELERY_RESULT_BACKEND`, `REDIS_URL`, and `depends_on: redis`.
+     - In `backend/requirements.txt`, added `openpyxl>=3.1.5` for consistent container dependencies.
      - In `backend/celery_app.py`, enabled `worker_send_task_events = True` and `task_send_sent_event = True`. Added `"backend.tasks.swing_audit_tasks"` to `include=[...]`.
      - In `backend/celery_app.py`, adjusted `ingest-market-data` schedule from 60s to 180s (3 minutes) to avoid task queue backlogs.
      - In `backend/tasks/market_tasks.py` (`ingest_watchlist_stocks`), batched candle ingestion in groups of 5 with `asyncio.gather`, reducing execution runtime from ~125s down to ~15s.
