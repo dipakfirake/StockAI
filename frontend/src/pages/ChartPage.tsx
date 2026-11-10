@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate, useLocation, useParams, Link } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, HistogramData, LineData } from 'lightweight-charts'
-import { stocksApi, aiApi } from '../services/api'
+import { stocksApi, aiApi, swingAuditApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
-import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info } from 'lucide-react'
+import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info, FileSpreadsheet, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
 import { toast } from '../components/Toast'
@@ -164,6 +164,9 @@ export default function ChartPage() {
   const [risk, setRisk] = useState<any>(null)
   const [swingTrade, setSwingTrade] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const [isTrackingAudit, setIsTrackingAudit] = useState(false)
+  const [auditTracked, setAuditTracked] = useState(false)
+  const [userBoughtThis, setUserBoughtThis] = useState(false)
 
   const [rawCandles, setRawCandles] = useState<any[]>([])
 
@@ -959,6 +962,8 @@ export default function ChartPage() {
 
   async function loadChartData() {
     setLoading(true)
+    setAuditTracked(false)
+    setUserBoughtThis(false)
     try {
       const [insightRes, sentimentRes, infoRes] = await Promise.allSettled([
         stocksApi.getInsight(symbol, timeframe, anchorDate),
@@ -990,6 +995,45 @@ export default function ChartPage() {
       console.error('Chart load error:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleTrackInAudit = async (asUserBought = false) => {
+    if (!swingTrade || !swingTrade.trade_plan) return
+    setIsTrackingAudit(true)
+    try {
+      const entryVal = Number(swingTrade.trade_plan.entry_price || info?.currentPrice || quote?.price || 0)
+      const payload = {
+        symbol: symbol,
+        buy_price: entryVal,
+        target_price: Number(swingTrade.trade_plan.target_price || 0),
+        stop_loss: Number(swingTrade.trade_plan.stop_loss || 0),
+        target_1: swingTrade.trade_plan.targets?.[0]?.price ? Number(swingTrade.trade_plan.targets[0].price) : undefined,
+        target_2: swingTrade.trade_plan.targets?.[1]?.price ? Number(swingTrade.trade_plan.targets[1].price) : undefined,
+        target_3: swingTrade.trade_plan.targets?.[2]?.price ? Number(swingTrade.trade_plan.targets[2].price) : undefined,
+        reward_to_risk: Number(swingTrade.trade_plan.reward_to_risk || 2.0),
+        total_score: Number(swingTrade.total_score || 0),
+        company_name: info?.shortName || info?.longName || symbol,
+        allocated_capital: 100000.0,
+        user_bought: asUserBought,
+        user_buy_price: asUserBought ? entryVal : undefined,
+        notes: asUserBought
+          ? `User explicitly bought @ ₹${entryVal.toFixed(2)} from Chart Swing Analysis`
+          : `Cataloged from ChartPage Swing Analysis. Action: ${swingTrade.action}`,
+      }
+      await swingAuditApi.track(payload)
+      setAuditTracked(true)
+      if (asUserBought) {
+        setUserBoughtThis(true)
+        toast.success(`Trade logged! You bought ${symbol} @ ₹${entryVal.toFixed(2)}. Tracking in 11-Day Excel audit!`)
+      } else {
+        toast.success(`${symbol} successfully tracked in 11-Day Swing Trade Audit!`)
+      }
+    } catch (err: any) {
+      console.error('Audit track error:', err)
+      toast.error(err.response?.data?.detail || 'Failed to track in 11-Day Swing Audit')
+    } finally {
+      setIsTrackingAudit(false)
     }
   }
 
@@ -1691,6 +1735,28 @@ export default function ChartPage() {
                       target_price: liveSetup.target,
                     })
                     toast.success(`Paper ${liveSetup.action} order placed!`, `${symbol} @ ${formatINR(liveSetup.entry)} | SL: ${formatINR(liveSetup.sl)} | Target: ${formatINR(liveSetup.target)}`)
+                    
+                    // Auto-record into 11-Day Swing Audit Excel with User Bought = YES
+                    if (liveSetup.action === 'BUY') {
+                      try {
+                        await swingAuditApi.track({
+                          symbol: symbol,
+                          buy_price: Number(liveSetup.entry || quote?.price || 0),
+                          target_price: Number(liveSetup.target || 0),
+                          stop_loss: Number(liveSetup.sl || 0),
+                          reward_to_risk: 2.0,
+                          total_score: 75.0,
+                          user_bought: true,
+                          user_buy_price: Number(liveSetup.entry || quote?.price || 0),
+                          company_name: info?.shortName || info?.longName || symbol,
+                          notes: 'Executed via 1-Click Paper BUY on Chart',
+                        })
+                        setUserBoughtThis(true)
+                        setAuditTracked(true)
+                      } catch (auditErr) {
+                        console.warn('Auto-audit tracking error:', auditErr)
+                      }
+                    }
                   } catch (err: any) {
                     toast.error('Trade failed', err?.response?.data?.detail || 'Could not place paper trade. Check positions page.')
                   }
@@ -1946,9 +2012,104 @@ export default function ChartPage() {
                   View Market-Wide Buy/Sell Screener →
                 </Link>
               </div>
-              <span className={`badge ${swingTrade.action === 'BUY' ? 'badge-buy' : swingTrade.action === 'SELL' ? 'badge-sell' : 'badge-hold'}`} style={{ fontSize: 14, padding: '4px 12px' }}>
-                {swingTrade.action || 'HOLD'} (Score: {(swingTrade.total_score ?? 50).toFixed(1)})
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {/* Track in Audit Button */}
+                <button
+                  type="button"
+                  onClick={() => handleTrackInAudit(false)}
+                  disabled={isTrackingAudit || auditTracked}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: auditTracked && !userBoughtThis ? '#10b981' : 'var(--color-text-primary)',
+                    background: auditTracked && !userBoughtThis ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                    border: `1px solid ${auditTracked && !userBoughtThis ? 'rgba(16, 185, 129, 0.3)' : 'var(--color-border)'}`,
+                    borderRadius: 6,
+                    padding: '4px 10px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    cursor: auditTracked ? 'default' : 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                  title="Queue and evaluate this recommendation in the 11-day audit cycle"
+                >
+                  {auditTracked && !userBoughtThis ? (
+                    <>
+                      <CheckCircle2 size={14} color="#10b981" />
+                      Tracked in Audit
+                    </>
+                  ) : (
+                    <>
+                      <FileSpreadsheet size={14} color="#38bdf8" />
+                      {isTrackingAudit ? 'Tracking...' : 'Track in Audit'}
+                    </>
+                  )}
+                </button>
+
+                {/* User Bought / Executed Button */}
+                <button
+                  type="button"
+                  onClick={() => handleTrackInAudit(true)}
+                  disabled={isTrackingAudit || userBoughtThis}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: userBoughtThis ? '#10b981' : '#ec4899',
+                    background: userBoughtThis ? 'rgba(16, 185, 129, 0.12)' : 'rgba(236, 72, 153, 0.1)',
+                    border: `1px solid ${userBoughtThis ? 'rgba(16, 185, 129, 0.3)' : 'rgba(236, 72, 153, 0.3)'}`,
+                    borderRadius: 6,
+                    padding: '4px 10px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    cursor: userBoughtThis ? 'default' : 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                  title="Record that you bought this stock at current price and track Day 1..11 PnL in Excel"
+                >
+                  {userBoughtThis ? (
+                    <>
+                      <CheckCircle2 size={14} color="#10b981" />
+                      Bought &amp; Tracked (Day 1..11)
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingCart size={14} />
+                      I Bought @ ₹{(swingTrade.trade_plan?.entry_price || info?.currentPrice || quote?.price || 0).toFixed(2)}
+                    </>
+                  )}
+                </button>
+
+                {/* Download Audit Excel */}
+                <a
+                  href="/api/swing-audit/download-latest"
+                  download
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#38bdf8',
+                    textDecoration: 'none',
+                    background: 'rgba(56, 189, 248, 0.1)',
+                    border: '1px solid rgba(56, 189, 248, 0.25)',
+                    borderRadius: 6,
+                    padding: '4px 10px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                  title="Download institutional multi-sheet Excel spreadsheet tracking Day 1..11 performance, PnL & booked trades"
+                >
+                  <Download size={14} />
+                  Audit Excel (.xlsx)
+                </a>
+
+                <span className={`badge ${swingTrade.action === 'BUY' ? 'badge-buy' : swingTrade.action === 'SELL' ? 'badge-sell' : 'badge-hold'}`} style={{ fontSize: 14, padding: '4px 12px' }}>
+                  {swingTrade.action || 'HOLD'} (Score: {(swingTrade.total_score ?? 50).toFixed(1)})
+                </span>
+              </div>
             </div>
 
             {/* Actionable Guidance Banner */}

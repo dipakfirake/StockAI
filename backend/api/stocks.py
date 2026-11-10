@@ -136,6 +136,31 @@ async def get_stock_insight(
             ]
         except Exception:
             patterns = []
+
+    # Auto-catalog high-conviction swing recommendations into 11-day audit ledger
+    if swing_trade and isinstance(swing_trade, dict) and swing_trade.get("action") == "BUY" and swing_trade.get("trade_plan"):
+        try:
+            total_sc = float(swing_trade.get("total_score", 0.0) or 0.0)
+            if total_sc >= 70.0:
+                async def _auto_track_task():
+                    try:
+                        from backend.services.swing_audit_service import swing_audit_service
+                        from backend.core.database import AsyncSessionLocal
+                        async with AsyncSessionLocal() as audit_db:
+                            await swing_audit_service.track_swing_trade(
+                                db=audit_db,
+                                symbol=safe_symbol,
+                                trade_plan=swing_trade["trade_plan"],
+                                company_name=quote.get("name") if isinstance(quote, dict) else safe_symbol,
+                                total_score=total_sc
+                            )
+                    except Exception as ex:
+                        pass
+                import asyncio
+                asyncio.create_task(_auto_track_task())
+        except Exception:
+            pass
+
     return {
         "symbol": quote["symbol"],
         "timeframe": safe_tf,

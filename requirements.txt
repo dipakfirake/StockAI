@@ -32,3 +32,4 @@ beautifulsoup4==4.12.3
 lxml==5.2.2
 huggingface_hub==0.23.2
 spaces
+openpyxl>=3.1.5

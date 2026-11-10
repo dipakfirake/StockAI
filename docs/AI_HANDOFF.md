@@ -12,6 +12,46 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-11-10)
+
+- **AUTOMATED 11-DAY SWING TRADE AUDIT & EXCEL SHEET TRACKING SYSTEM (COMPLETE & FULLY VERIFIED):**
+  - **Feature Deliverables**:
+    1. **Dual Storage: High-Integrity PostgreSQL Ledger + Institutional Excel Spreadsheet Generation**:
+       - Created `backend/models/swing_audit.py` with `SwingTradeAuditCycle`, `SwingTradeAudit`, and `SwingTradeAuditPrice` models.
+       - Tracks recommendations, entry buy price, stop loss, target, 11-day price progression, exit day, exit price, percentage return, and realized PnL.
+       - Added user execution tracking: `user_bought` (Boolean), `user_buy_price` (Numeric), and `user_buy_time` (DateTime).
+    2. **Institutional Quantitative Audit Engine (`backend/services/swing_audit_service.py`)**:
+       - `get_or_create_active_cycle`: Calculates 11 trading days (skipping weekends). Automatically completes cycle on Day 11 and rotates to a new `.xlsx` workbook.
+       - `track_swing_trade`: Idempotently catalogs swing setups. If user enters trade later, updates `user_bought=True` and locks in `user_buy_price`.
+       - `update_daily_prices`: Evaluates daily price milestones across Day 1 through Day 11.
+         - *Stop Loss Breach*: Immediate sale executed at SL or gap down open, loss booked, subsequent tracking halted.
+         - *Target Hit*: Target profit booked immediately.
+         - *Day 11 Horizon*: Square-off at Day 11 market close.
+         - Computes PnL on user's actual buy price when `user_bought=True`.
+       - `generate_excel_workbook`: Generates an institutional multi-sheet Excel spreadsheet (`openpyxl`):
+         - *Sheet 1: Audit Scorecard* (KPI cards: Win rate, total return %, realized PnL in ₹).
+         - *Sheet 2: 11-Day Price Tracking* (27 columns: `Rec #`, `Symbol`, `Company Name`, `Date Recommended`, `Buy Price (₹)`, `User Bought`, `User Buy Price (₹)`, `Target Price (₹)`, `Stop Loss (₹)`, `R:R`, `Day 1..5 Prices`, `Day 6 Price (Check)`, `Day 7..10 Prices`, `Day 11 Price (Check)`, `Audit Status`, `Exit Date`, `Exit Price (₹)`, `Gain / Loss %`, `Realized P&L (₹)`, `Holding Days`).
+         - *Sheet 3: Booked Trades* (Closed trades ledger with realized PnL).
+         - Saved in dedicated folder: `backend/data/audits/Swing_Trade_Audit_<FROM_DATE>_to_<TO_DATE>.xlsx`.
+    3. **REST API Endpoints (`backend/api/swing_audit.py`)**:
+       - `POST /api/swing-audit/track`: Catalogs recommendation / user purchase into audit ledger.
+       - `GET /api/swing-audit/current-cycle`: Returns active cycle scorecard and tracked trades.
+       - `POST /api/swing-audit/sync`: Manually triggers daily price sync, SL/Target evaluations, and Excel regeneration.
+       - `GET /api/swing-audit/download-latest`: Streams the latest `.xlsx` workbook directly for instant opening in Microsoft Excel or Google Sheets.
+    4. **Post-Market Automated Scheduling (`backend/tasks/swing_audit_tasks.py` & `backend/celery_app.py`)**:
+       - Celery Beat schedule `sync-swing-trade-audits` running every weekday Mon–Fri at 15:45 IST (10:15 UTC) to evaluate closing prices and refresh Excel file automatically.
+    5. **Auto-Cataloging Hook (`backend/api/stocks.py`)**:
+       - Analyzed stocks with qualified BUY setups (score >= 70) in `GET /stocks/{symbol}/insight` are automatically added to the audit.
+    6. **Frontend UI Integration (`frontend/src/pages/ChartPage.tsx` & `frontend/src/services/api.ts`)**:
+       - Added `swingAuditApi` to `frontend/src/services/api.ts`.
+       - Integrated 3 action buttons on Swing Trade Analysis card: `[Track in Audit]`, `[🛒 I Bought @ ₹...]`, and `[📥 Audit Excel (.xlsx)]`.
+       - Wired `1-Click Paper BUY` button to auto-record into 11-day audit with `user_bought=True`.
+  - **Verification Evidence (2026-11-10)**:
+    - Backend Pytest Suite (`backend/tests/test_swing_audit.py`): **7 of 7 PASSED in 19.15s (100% green, exit code 0)**.
+    - Frontend Vitest Test Suite (`npm --prefix frontend run test -- --run`): **10 of 10 PASSED in 4.65s (100% green, exit code 0)**.
+    - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 25.27s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs deploy commands on live server to pull the update and rebuild frontend & backend containers.
+
 ## Latest verified checks (2026-11-04)
 
 - **CHART STREAM RESILIENCE & FLUIDITY THRESHOLD HARDENING (COMPLETE & FULLY VERIFIED):**

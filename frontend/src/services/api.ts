@@ -310,4 +310,28 @@ export const healthApi = {
   getReady: () => api.get('/health/ready'),
 }
 
+// ===== 11-Day Swing Trade Audit & Excel Tracker endpoints =====
+export const swingAuditApi = {
+  getCurrentCycle: () => api.get('/swing-audit/current-cycle'),
+  track: (data: {
+    symbol: string;
+    buy_price: number;
+    target_price: number;
+    stop_loss: number;
+    target_1?: number;
+    target_2?: number;
+    target_3?: number;
+    reward_to_risk?: number;
+    total_score?: number;
+    company_name?: string;
+    recommendation_date?: string;
+    allocated_capital?: number;
+    user_bought?: boolean;
+    user_buy_price?: number;
+    notes?: string;
+  }) => api.post('/swing-audit/track', data),
+  sync: () => api.post('/swing-audit/sync'),
+  downloadLatestUrl: () => '/api/swing-audit/download-latest',
+}
+
 export default api

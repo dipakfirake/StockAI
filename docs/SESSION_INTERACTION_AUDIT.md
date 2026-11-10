@@ -3043,3 +3043,65 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 15.59s (exit code 0)**.
   - Backend Ticker Architecture Tests: **4 of 4 tests PASSED in 51.86s (100% green, exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide technical explanation and copy-pasteable deployment instructions for live server.
+
+---
+
+### Session Entry 62: Automated 11-Day Swing Trade Audit & Excel Sheet Tracking System with User Execution Logging
+- **Timestamp:** 2026-11-10 10:55:00 IST (05:25:00 UTC)
+- **User Prompt:**
+  `"i want to track the systems audits so you have to do one thing create an excel sheet and maintain these following for swing trades you give and like if you update 1 stock in swing trade analysis component then add it in excel and check and maintain the prices and values in excel sheet. and check all loke yours 6 working days and 11 working days prices and following and also add that how mich real profit booked or bear loss by that stocks in wing trade and again if any stock dds the n it want to add in that list like that do this every 11th day new sheet and save it in 1 folder with from date and to date name.: recommended stockai, date if recommendation, buy price, target price, stop loss, price for next 11 days after recommendation, target/stoploss achieved, percentage and if stoploss then sell it and give me a total percentage gains or total loss ains in 11 days . and honestly tell if you have any suggestions or updations regarding this tell me first i will check and and I will tell you have to go for it or not."`
+  User Plan Feedback & Enhancement:
+  `"but i want excel file too or only excel file is sufficient instead of postresql"`
+  `"i want option A and some optimizations in it like add in it that when i click buy the also it want to be seen at that price till 11th day and 6th day for it add 1 column also for user buyed like that."`
+- **Technical Architecture & Deliverables Built**:
+  1. **Dual Storage: High-Integrity PostgreSQL Ledger + Institutional Excel Spreadsheet Generation**:
+     - Created `backend/models/swing_audit.py` with `SwingTradeAuditCycle`, `SwingTradeAudit`, and `SwingTradeAuditPrice` models.
+     - Tracks recommendation details, entry buy price, stop loss, target, 11-day price progression, exit day, exit price, percentage return, and realized PnL.
+     - Added user execution columns: `user_bought` (Boolean), `user_buy_price` (Numeric), and `user_buy_time` (DateTime).
+  2. **Institutional Quantitative Audit Engine (`backend/services/swing_audit_service.py`)**:
+     - `get_or_create_active_cycle`: Dynamically computes 11 trading days (skipping Saturdays & Sundays). Every 11th trading day, automatically completes the cycle and generates a new active cycle and new `.xlsx` file.
+     - `track_swing_trade`: Idempotently catalogs swing trade setups from Swing Trade Analysis or manual user action. If user enters the trade later, updates `user_bought=True` and locks in `user_buy_price`.
+     - `update_daily_prices`: Evaluates daily price milestones for Day 1 through Day 11.
+       - **Execution Rule 1 (Stop Loss Breach)**: If daily low drops below stop loss, marks `STOPLOSS_HIT`, executes immediate exit (selling at SL or gap down open), books loss, and terminates subsequent day tracking.
+       - **Execution Rule 2 (Target Hit)**: If daily high reaches target price, marks `TARGET_ACHIEVED`, books profit immediately, and locks in return.
+       - **Execution Rule 3 (Day 11 Time Horizon)**: If 11 trading days elapse without hitting target or SL, squares off at Day 11 close price (`DAY_11_EXIT`).
+       - Calculates PnL using user's bought price when `user_bought=True`, or system recommended price when `False`.
+     - `generate_excel_workbook`: Generates an institutional multi-sheet Excel spreadsheet via `openpyxl`:
+       - **Sheet 1: Audit Scorecard** (Cycle period, total recommendations, win rate, total cycle return %, realized net PnL in ₹).
+       - **Sheet 2: 11-Day Price Tracking** (27 columns: `Rec #`, `Symbol`, `Company Name`, `Date Recommended`, `Buy Price (₹)`, `User Bought`, `User Buy Price (₹)`, `Target Price (₹)`, `Stop Loss (₹)`, `R:R`, `Day 1 Price` .. `Day 5 Price`, `Day 6 Price (Check)`, `Day 7 Price` .. `Day 10 Price`, `Day 11 Price (Check)`, `Audit Status`, `Exit Date`, `Exit Price (₹)`, `Gain / Loss %`, `Realized P&L (₹)`, `Holding Days`).
+       - **Sheet 3: Booked Trades** (Historical journal of closed trades with outcome, holding days, realized PnL).
+       - Saves files to dedicated folder: `backend/data/audits/Swing_Trade_Audit_<FROM_DATE>_to_<TO_DATE>.xlsx`.
+  3. **REST API Endpoints (`backend/api/swing_audit.py`)**:
+     - `POST /api/swing-audit/track`: Catalogs recommendation / user purchase into active audit ledger.
+     - `GET /api/swing-audit/current-cycle`: Returns active cycle scorecard and tracked trades.
+     - `POST /api/swing-audit/sync`: Manually triggers daily price sync, SL/Target evaluations, and Excel regeneration.
+     - `GET /api/swing-audit/download-latest`: Streams the latest `.xlsx` workbook directly for instant opening in Microsoft Excel or Google Sheets.
+  4. **Post-Market Automated Scheduling (`backend/tasks/swing_audit_tasks.py` & `backend/celery_app.py`)**:
+     - Configured Celery Beat schedule `sync-swing-trade-audits` running every weekday Mon–Fri at 15:45 IST (10:15 UTC) to evaluate closing prices and refresh the Excel report automatically.
+  5. **Auto-Cataloging Hook (`backend/api/stocks.py`)**:
+     - Any stock analyzed in `GET /stocks/{symbol}/insight` that yields a qualified BUY swing setup (score >= 70) is automatically queued into the 11-day audit ledger.
+  6. **Frontend UI Integration (`frontend/src/pages/ChartPage.tsx` & `frontend/src/services/api.ts`)**:
+     - Added `swingAuditApi` to `frontend/src/services/api.ts`.
+     - In the Chart Page Swing Trade Analysis card header, integrated 3 actions:
+       - `[Track in Audit]`: Tracks recommendation in active 11-day audit cycle.
+       - `[🛒 I Bought @ ₹...]`: Logs user purchase at entry price, marking `User Bought = YES` and locking price in Excel.
+       - `[📥 Audit Excel (.xlsx)]`: 1-click download of the real institutional multi-sheet Excel spreadsheet.
+     - Wired the `1-Click Paper BUY` button to auto-record the trade into the 11-day audit with `user_bought=True`.
+- **Files Modified / Created**:
+  - `requirements.txt` (added openpyxl)
+  - `backend/models/swing_audit.py` (new model)
+  - `backend/models/__init__.py` (exported models)
+  - `backend/services/swing_audit_service.py` (new service)
+  - `backend/api/swing_audit.py` (new API router)
+  - `backend/main.py` (registered router)
+  - `backend/tasks/swing_audit_tasks.py` (new Celery task)
+  - `backend/celery_app.py` (added 15:45 IST post-market beat schedule)
+  - `backend/api/stocks.py` (auto-catalog hook)
+  - `backend/tests/test_swing_audit.py` (new test suite)
+  - `frontend/src/services/api.ts` (added swingAuditApi)
+  - `frontend/src/pages/ChartPage.tsx` (added Audit controls, Buy tracking, and Excel download)
+- **Verification Evidence**:
+  - Backend Pytest Suite (`backend/tests/test_swing_audit.py`): **7 of 7 PASSED in 19.15s (100% green, exit code 0)**.
+  - Frontend Vitest Test Suite (`npm --prefix frontend run test -- --run`): **10 of 10 PASSED in 4.65s (100% green, exit code 0)**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 25.27s (exit code 0)**.
+- **Exact Next Safe Step**: User runs deploy commands on live server to pull the update and rebuild frontend & backend containers.

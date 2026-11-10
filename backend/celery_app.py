@@ -69,4 +69,9 @@ celery_app.conf.beat_schedule = {
         "task": "backend.tasks.trading_tasks.square_off_intraday",
         "schedule": crontab(hour=9, minute=50),  # 15:20 IST = 09:50 UTC
     },
+    # Daily 11-Day Swing Trade Audit Sync: 15:45 IST (10:15 UTC) Mon-Fri
+    "sync-swing-trade-audits": {
+        "task": "backend.tasks.swing_audit_tasks.sync_swing_trade_audits",
+        "schedule": crontab(hour=10, minute=15, day_of_week="1-5"),
+    },
 }
