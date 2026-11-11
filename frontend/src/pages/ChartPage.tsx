@@ -1638,19 +1638,25 @@ export default function ChartPage() {
                 }} 
               />
             </div>
-            {showVolumeProfile && volumeProfile && volumeProfile.bins && (
+            {showVolumeProfile && volumeProfile && Array.isArray(volumeProfile.bins) && volumeProfile.bins.length > 0 && (
               <div style={{ width: 160, background: 'var(--color-bg-secondary)', borderLeft: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column-reverse', padding: '10px 0', zIndex: 10 }}>
                 <div style={{ padding: '4px 8px', fontSize: 11, color: '#fbbf24', textAlign: 'center', borderTop: '1px solid var(--color-border)', marginTop: 4 }}>
-                  VAH: {volumeProfile.vah.toFixed(1)}<br/>VAL: {volumeProfile.val.toFixed(1)}
+                  VAH: {typeof volumeProfile.vah === 'number' ? volumeProfile.vah.toFixed(1) : (volumeProfile.vah ?? 'N/A')}<br/>
+                  VAL: {typeof volumeProfile.val === 'number' ? volumeProfile.val.toFixed(1) : (volumeProfile.val ?? 'N/A')}
                 </div>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column-reverse', width: '100%' }}>
                   {volumeProfile.bins.map((bin: any, idx: number) => {
-                    const maxVol = Math.max(...volumeProfile.bins.map((b: any) => b.total_volume));
-                    const widthPct = (bin.total_volume / maxVol) * 100;
-                    const buyPct = (bin.buy_volume / bin.total_volume) * 100 || 0;
-                    const isPOC = bin.price_level === volumeProfile.poc_price;
+                    const maxVol = Math.max(...volumeProfile.bins.map((b: any) => Number(b.total_volume) || 0), 1);
+                    const totalVol = Number(bin.total_volume) || 0;
+                    const buyVol = Number(bin.buy_volume) || 0;
+                    const widthPct = maxVol > 0 ? (totalVol / maxVol) * 100 : 0;
+                    const buyPct = totalVol > 0 ? (buyVol / totalVol) * 100 : 50;
+                    const rawPrice = bin.price_level ?? bin.price_mid ?? bin.price_low ?? 0;
+                    const priceLevel = Number(rawPrice) || 0;
+                    const pocPrice = volumeProfile.poc_price ?? volumeProfile.poc;
+                    const isPOC = pocPrice != null && Math.abs(priceLevel - Number(pocPrice)) < 0.01;
                     return (
-                      <div key={idx} title={`Price: ${bin.price_level.toFixed(2)} | Vol: ${bin.total_volume}`} style={{ flex: 1, display: 'flex', position: 'relative', minHeight: 2, borderBottom: isPOC ? '1px solid rgba(251, 191, 36, 0.4)' : 'none', borderTop: isPOC ? '1px solid rgba(251, 191, 36, 0.4)' : 'none', opacity: isPOC ? 1 : 0.7 }}>
+                      <div key={idx} title={`Price: ₹${priceLevel.toFixed(2)} | Vol: ${totalVol.toLocaleString()}`} style={{ flex: 1, display: 'flex', position: 'relative', minHeight: 2, borderBottom: isPOC ? '1px solid rgba(251, 191, 36, 0.4)' : 'none', borderTop: isPOC ? '1px solid rgba(251, 191, 36, 0.4)' : 'none', opacity: isPOC ? 1 : 0.7 }}>
                         <div style={{ width: `${widthPct}%`, display: 'flex', height: '100%' }}>
                           <div style={{ width: `${buyPct}%`, background: '#10b981' }} />
                           <div style={{ width: `${100 - buyPct}%`, background: '#ef4444' }} />
@@ -2235,10 +2241,10 @@ export default function ChartPage() {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                           <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                            ₹{Number(tgt.price).toFixed(2)}
+                            ₹{Number(tgt.price || 0).toFixed(2)}
                           </span>
                           <span style={{ fontSize: 12, fontWeight: 600, color: swingTrade.action === 'SELL' ? 'var(--color-bearish)' : 'var(--color-bullish)' }}>
-                            {swingTrade.action === 'SELL' ? '-' : '+'}{Number(tgt.gain_pct).toFixed(1)}%
+                            {swingTrade.action === 'SELL' ? '-' : '+'}{Number(tgt.gain_pct || 0).toFixed(1)}%
                           </span>
                         </div>
                         {tgt.reward_to_risk > 0 && (
@@ -2278,15 +2284,15 @@ export default function ChartPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
                <div style={{ textAlign: 'center' }}>
                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Technical Score</div>
-                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.technical?.toFixed(1)} / 100</div>
+                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.technical != null ? Number(swingTrade.scores.technical).toFixed(1) : '50.0'} / 100</div>
                </div>
                <div style={{ textAlign: 'center', borderLeft: '1px solid var(--color-border)', borderRight: '1px solid var(--color-border)' }}>
                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Fundamental Score</div>
-                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.fundamental?.toFixed(1)} / 100</div>
+                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.fundamental != null ? Number(swingTrade.scores.fundamental).toFixed(1) : '50.0'} / 100</div>
                </div>
                <div style={{ textAlign: 'center' }}>
                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>News Sentiment</div>
-                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.sentiment?.toFixed(1)} / 100</div>
+                 <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.sentiment != null ? Number(swingTrade.scores.sentiment).toFixed(1) : '50.0'} / 100</div>
                </div>
             </div>
           </div>

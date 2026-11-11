@@ -3141,6 +3141,33 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 67: ChartPage Volume Profile toFixed TypeError Resolution & Defensive Hardening
+- **Timestamp:** 2026-11-11 21:35:00 IST (16:05:00 UTC)
+- **User Prompt:**
+  `"ChartPage.tsx:1653 Uncaught TypeError: Cannot read properties of undefined (reading 'toFixed') at ChartPage.tsx:1653:71 at Array.map (<anonymous>) at ChartPage (ChartPage.tsx:1647:39)"`
+- **Root Cause Analysis & Forensic Discoveries**:
+  1. **Volume Profile Bin Key Mismatch**:
+     - When Volume Profile was activated (`showVolumeProfile = true`), `stocksApi.getVolumeProfile` returned price bins structured as `[{price_low, price_high, price_mid, buy_volume, sell_volume, total_volume}]`.
+     - In `ChartPage.tsx` line 1653, the JSX title attribute attempted `bin.price_level.toFixed(2)` and line 1651 evaluated `bin.price_level === volumeProfile.poc_price`.
+     - Because the backend key was `price_mid` (and `poc`), `bin.price_level` was undefined. Invoking `.toFixed(2)` on undefined threw `Uncaught TypeError: Cannot read properties of undefined (reading 'toFixed')`, unmounting the React `<ChartPage>` component.
+- **Code Hardening Applied**:
+  1. **Frontend Defensive Fallbacks (`ChartPage.tsx`)**:
+     - At line 1641, ensured `Array.isArray(volumeProfile.bins) && volumeProfile.bins.length > 0`.
+     - Formatted VAH/VAL defensively using `typeof volumeProfile.vah === 'number' ? volumeProfile.vah.toFixed(1) : (volumeProfile.vah ?? 'N/A')`.
+     - Extracted price level with full fallback chain:
+       `const rawPrice = bin.price_level ?? bin.price_mid ?? bin.price_low ?? 0;`
+       `const priceLevel = Number(rawPrice) || 0;`
+     - Evaluated POC match safely with `pocPrice != null && Math.abs(priceLevel - Number(pocPrice)) < 0.01`.
+     - Protected swing target prices and technical/fundamental/sentiment scores against null/undefined in lines 2235-2295.
+  2. **Backend Dual-Key Compatibility (`backend/services/volume_profile.py`)**:
+     - Extended `calculate_volume_profile` to include both `"price_level"` and `"poc_price"` alongside `"price_mid"` and `"poc"`.
+- **Verification Evidence**:
+  - Python Syntax Verification (`py_compile`): **0 syntax/type errors, exit code 0**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 53.06s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands for the user.
+
+---
+
 ### Session Entry 62: Automated 11-Day Swing Trade Audit & Excel Sheet Tracking System with User Execution Logging
 - **Timestamp:** 2026-11-10 10:55:00 IST (05:25:00 UTC)
 - **User Prompt:**
@@ -3340,3 +3367,30 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 - **Verification Evidence**:
   - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 48.20s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push to `origin/main`, explain the 3 ways to access the Excel file (Web UI 1-click download, direct browser URL, and host server terminal/SCP path).
+
+---
+
+### Session Entry 67: ChartPage Volume Profile toFixed TypeError Resolution & Defensive Hardening
+- **Timestamp:** 2026-11-11 21:35:00 IST (16:05:00 UTC)
+- **User Prompt:**
+  `"ChartPage.tsx:1653 Uncaught TypeError: Cannot read properties of undefined (reading 'toFixed') at ChartPage.tsx:1653:71 at Array.map (<anonymous>) at ChartPage (ChartPage.tsx:1647:39)"`
+- **Root Cause Analysis & Forensic Discoveries**:
+  1. **Volume Profile Bin Key Mismatch**:
+     - When Volume Profile was activated (`showVolumeProfile = true`), `stocksApi.getVolumeProfile` returned price bins structured as `[{price_low, price_high, price_mid, buy_volume, sell_volume, total_volume}]`.
+     - In `ChartPage.tsx` line 1653, the JSX title attribute attempted `bin.price_level.toFixed(2)` and line 1651 evaluated `bin.price_level === volumeProfile.poc_price`.
+     - Because the backend key was `price_mid` (and `poc`), `bin.price_level` was undefined. Invoking `.toFixed(2)` on undefined threw `Uncaught TypeError: Cannot read properties of undefined (reading 'toFixed')`, unmounting the React `<ChartPage>` component.
+- **Code Hardening Applied**:
+  1. **Frontend Defensive Fallbacks (`ChartPage.tsx`)**:
+     - At line 1641, ensured `Array.isArray(volumeProfile.bins) && volumeProfile.bins.length > 0`.
+     - Formatted VAH/VAL defensively using `typeof volumeProfile.vah === 'number' ? volumeProfile.vah.toFixed(1) : (volumeProfile.vah ?? 'N/A')`.
+     - Extracted price level with full fallback chain:
+       `const rawPrice = bin.price_level ?? bin.price_mid ?? bin.price_low ?? 0;`
+       `const priceLevel = Number(rawPrice) || 0;`
+     - Evaluated POC match safely with `pocPrice != null && Math.abs(priceLevel - Number(pocPrice)) < 0.01`.
+     - Protected swing target prices and technical/fundamental/sentiment scores against null/undefined in lines 2235-2295.
+  2. **Backend Dual-Key Compatibility (`backend/services/volume_profile.py`)**:
+     - Extended `calculate_volume_profile` to include both `"price_level"` and `"poc_price"` alongside `"price_mid"` and `"poc"`.
+- **Verification Evidence**:
+  - Python Syntax Verification (`py_compile`): **0 syntax/type errors, exit code 0**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 53.06s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands for the user.

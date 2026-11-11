@@ -123,6 +123,7 @@ def calculate_volume_profile(
             "price_low": round(float(bin_edges[b]), 2),
             "price_high": round(float(bin_edges[b + 1]), 2),
             "price_mid": round(float(bin_mids[b]), 2),
+            "price_level": round(float(bin_mids[b]), 2),
             "buy_volume": round(float(buy_volumes[b]), 0),
             "sell_volume": round(float(sell_volumes[b]), 0),
             "total_volume": round(float(total_volumes[b]), 0),
@@ -133,6 +134,7 @@ def calculate_volume_profile(
     return {
         "bins": bins,
         "poc": round(poc_price, 2),
+        "poc_price": round(poc_price, 2),
         "vah": round(vah, 2),
         "val": round(val, 2),
         "total_volume": bin_total,
