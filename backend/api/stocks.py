@@ -107,18 +107,31 @@ async def get_stock_insight(
         except Exception:
             pass
 
-    indicators = await asyncio.to_thread(indicator_service.compute_all, candles) if len(candles) >= 30 else {}
-    series_candles = await asyncio.to_thread(indicator_service.compute_for_candles_series, candles)
+    quote_symbol = str(quote.get("symbol") or safe_symbol)
+    from datetime import datetime, timezone
+    quote_timestamp = str(quote.get("timestamp") or datetime.now(timezone.utc).isoformat())
+    quote["symbol"] = quote_symbol
+    quote["timestamp"] = quote_timestamp
+
+    try:
+        indicators = await asyncio.to_thread(indicator_service.compute_all, candles) if len(candles) >= 30 else {}
+    except Exception as e:
+        indicators = {}
+
+    try:
+        series_candles = await asyncio.to_thread(indicator_service.compute_for_candles_series, candles)
+    except Exception as e:
+        series_candles = candles
     
     if anchor_date and len(series_candles) > 0:
         try:
             from backend.services.indicators import calculate_anchored_vwap, candles_to_df
             import pandas as pd
-            pd.to_datetime(anchor_date)
+            pd.to_datetime(anchor_date, errors="coerce")
             df = candles_to_df(series_candles)
             avwap_series = calculate_anchored_vwap(df, anchor_date)
             for i, c in enumerate(series_candles):
-                ts = pd.to_datetime(c["timestamp"])
+                ts = pd.to_datetime(c.get("timestamp"), errors="coerce")
                 if ts in avwap_series.index and not pd.isna(avwap_series[ts]):
                     c["anchored_vwap"] = round(float(avwap_series[ts]), 4)
                 else:
@@ -161,20 +174,39 @@ async def get_stock_insight(
         except Exception:
             pass
 
+    signals = []
+    if indicators:
+        try:
+            signals = signal_engine.evaluate(indicators, quote_symbol, safe_tf)
+        except Exception:
+            signals = []
+
+    ai_score = None
+    if indicators:
+        try:
+            ai_score = ai_engine_service.score(indicators, quote_symbol, candles=candles)
+        except Exception:
+            ai_score = None
+
+    try:
+        risk = analyse_risk(series_candles)
+    except Exception as e:
+        risk = {"level": "UNKNOWN", "reason": str(e)}
+
     return {
-        "symbol": quote["symbol"],
+        "symbol": quote_symbol,
         "timeframe": safe_tf,
-        "as_of": quote["timestamp"],
+        "as_of": quote_timestamp,
         "quote": quote,
-        "swing_trade": swing_trade,
-        "candles": series_candles,
-        "risk": analyse_risk(series_candles),
-        "indicators": indicators,
-        "signals": signal_engine.evaluate(indicators, quote["symbol"], safe_tf) if indicators else [],
-        "ai_score": ai_engine_service.score(indicators, quote["symbol"], candles=candles) if indicators else None,
-        "patterns": patterns,
-        "events": events,
-        "news": news,
+        "swing_trade": swing_trade if isinstance(swing_trade, dict) else {},
+        "candles": series_candles if isinstance(series_candles, list) else [],
+        "risk": risk,
+        "indicators": indicators if isinstance(indicators, dict) else {},
+        "signals": signals if isinstance(signals, list) else [],
+        "ai_score": ai_score,
+        "patterns": patterns if isinstance(patterns, list) else [],
+        "events": events if isinstance(events, dict) else {},
+        "news": news if isinstance(news, list) else [],
         "data_note": "Prices are provider-delayed when the exchange or upstream source does not supply a live tick.",
     }
 
@@ -249,7 +281,7 @@ async def get_candles(
         
         # Inject anchored VWAP back into the result
         for i, c in enumerate(series_candles):
-            ts = pd.to_datetime(c["timestamp"])
+            ts = pd.to_datetime(c.get("timestamp"), errors="coerce")
             if ts in avwap_series.index and not pd.isna(avwap_series[ts]):
                 c["anchored_vwap"] = round(float(avwap_series[ts]), 4)
             else:

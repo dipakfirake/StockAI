@@ -1148,6 +1148,9 @@ export default function ChartPage() {
               window.clearTimeout(reconnectTimerRef.current)
               reconnectTimerRef.current = null
             }
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('auth_session_expired'))
+            }
             return
           }
           scheduleReconnect()

@@ -116,19 +116,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // FIX 3: Listen for the auth_session_expired custom event dispatched by the Axios
-  // response interceptor on a genuine 401. This replaces window.location.href='/login'
-  // (which causes a hard page reload, wiping the SPA and making the NavBar appear ghost)
-  // with a graceful in-memory state reset and React Router SPA navigation.
+  // response interceptor on a genuine 401. This performs a clean redirection to /login
+  // with redirect target and expired flag, ensuring background sockets and polling halt cleanly.
   useEffect(() => {
     const handleSessionExpired = () => {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_user_cache');
       setUser(null);
       setPreferences({});
-      // SPA navigation — no page reload, no bundle re-download, no name flash
-      if (window.location.pathname !== '/login') {
-        window.history.pushState({}, '', '/login');
-        window.dispatchEvent(new PopStateEvent('popstate'));
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        const currentPath = window.location.pathname + window.location.search;
+        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}&expired=1`;
       }
     };
     window.addEventListener('auth_session_expired', handleSessionExpired);

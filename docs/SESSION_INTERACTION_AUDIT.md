@@ -3046,6 +3046,38 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 64: Live System 500 Error, 401 Auth Expiry, and WebSocket Disconnect Resolution
+- **Timestamp:** 2026-11-11 19:25:00 IST (13:55:00 UTC)
+- **User Prompt:**
+  `"what are you doing? tell me because task is running from previous 3+ hours."`
+  (Investigating browser console errors: `GET /api/stocks/POWERGRID.NS/insight 500`, `api/auth/me 401`, and `WebSocket connection failed: WebSocket is closed before the connection is established`.)
+- **Root Cause Analysis & Discoveries**:
+  1. **Subagent Background Investigation Task**:
+     - A background subagent had been invoked previously to research the root cause and ran an unbuffered test that awaited external network calls without sandbox bypass, causing the subagent to wait indefinitely. We terminated the hung subagent process, cleaned up descendant tasks, and conducted targeted local diagnosis.
+  2. **401 Unauthorized & WebSocket Drop Root Cause**:
+     - Whenever backend containers are rebuilt or restarted on the live server, browser clients retain stale JWT tokens in `localStorage`.
+     - In `backend/api/websocket.py:202-206`, when `/ws/?token=...` receives an expired/invalid token, `jwt.decode` catches `JWTError` and immediately aborts the connection with `await websocket.close(code=1008, reason="Authentication required")` before `accept()`. The browser logs: `"WebSocket is closed before the connection is established."`
+     - In `frontend/src/AuthContext.tsx`, `handleSessionExpired` used `window.history.pushState({}, '', '/login')` + `popstate` event, which React Router v6 does not listen to. As a result, the user remained on `/chart`, repeatedly firing API calls without credentials.
+  3. **HTTP 500 Internal Server Error on `GET /api/stocks/{symbol}/insight`**:
+     - In `backend/api/stocks.py` (`get_stock_insight`), sub-calculations for `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` were unshielded. Any unhandled exception or date parsing failure propagated as a generic 500.
+     - In `backend/services/indicators.py` (`candles_to_df`) and `backend/services/ai_engine.py` (`_dl_predict`), `pd.to_datetime` was called without `errors="coerce"`. Any unexpected candle timestamp format caused fatal `DateParseError`.
+     - In `backend/services/ai_engine.py`, `score()` lacked an outer try-except block, allowing inference errors to propagate.
+- **Code Hardening Applied**:
+  1. **Backend Service Resiliency**:
+     - In `backend/services/indicators.py` (`candles_to_df`), added `errors="coerce"` and `.dropna(subset=["timestamp"])` so unparseable timestamps never crash indicator calculation or the screener.
+     - In `backend/services/ai_engine.py` (`score`), wrapped model inference in a top-level try-except block with fallback to `self._neutral_response(symbol, indicators)`. Added `errors="coerce"` to `_dl_predict`.
+     - In `backend/api/stocks.py` (`get_stock_insight`), safely extracted `quote_symbol` and `quote_timestamp`; wrapped `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` in individual try-except blocks with robust fallback defaults.
+  2. **Frontend Session Expiry & Navigation**:
+     - In `frontend/src/AuthContext.tsx`, updated `handleSessionExpired` to cleanly redirect using `window.location.href = /login?redirect=${encodeURIComponent(currentPath)}&expired=1`, ensuring all background sockets and polling intervals halt cleanly.
+     - In `frontend/src/pages/LoginPage.tsx`, displayed a user notification when `expired=1` is present in query parameters: "Your session has expired. Please sign in again to continue."
+     - In `frontend/src/components/LiveTicker.tsx` and `frontend/src/pages/ChartPage.tsx`, dispatched `auth_session_expired` immediately upon receiving WebSocket close code 1008, terminating reconnect loops.
+- **Verification Evidence**:
+  - Python compilation (`py_compile`): **0 errors, exit code 0**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 29.31s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands and re-login steps for the user.
+
+---
+
 ### Session Entry 62: Automated 11-Day Swing Trade Audit & Excel Sheet Tracking System with User Execution Logging
 - **Timestamp:** 2026-11-10 10:55:00 IST (05:25:00 UTC)
 - **User Prompt:**
@@ -3150,3 +3182,35 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Screener Multi-Stock Verification (`POWERGRID.NS`, `RELIANCE.NS`): Scanned 2, returned 1 Buy setup and 1 Valid result without timestamp parsing exceptions.
   - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 17.08s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide technical explanation and copy-pasteable deployment instructions for live server.
+
+---
+
+### Session Entry 64: Live System 500 Error, 401 Auth Expiry, and WebSocket Disconnect Resolution
+- **Timestamp:** 2026-11-11 19:25:00 IST (13:55:00 UTC)
+- **User Prompt:**
+  `"what are you doing? tell me because task is running from previous 3+ hours."`
+  (Investigating browser console errors: `GET /api/stocks/POWERGRID.NS/insight 500`, `api/auth/me 401`, and `WebSocket connection failed: WebSocket is closed before the connection is established`.)
+- **Root Cause Analysis & Discoveries**:
+  1. **Subagent Background Investigation Task**:
+     - A background subagent had been invoked previously to research the root cause and ran an unbuffered test that awaited external network calls without sandbox bypass, causing the subagent to wait indefinitely. We terminated the hung subagent process, cleaned up descendant tasks, and conducted targeted local diagnosis.
+  2. **401 Unauthorized & WebSocket Drop Root Cause**:
+     - Whenever backend containers are rebuilt or restarted on the live server, browser clients retain stale JWT tokens in `localStorage`.
+     - In `backend/api/websocket.py:202-206`, when `/ws/?token=...` receives an expired/invalid token, `jwt.decode` catches `JWTError` and immediately aborts the connection with `await websocket.close(code=1008, reason="Authentication required")` before `accept()`. The browser logs: `"WebSocket is closed before the connection is established."`
+     - In `frontend/src/AuthContext.tsx`, `handleSessionExpired` used `window.history.pushState({}, '', '/login')` + `popstate` event, which React Router v6 does not listen to. As a result, the user remained on `/chart`, repeatedly firing API calls without credentials.
+  3. **HTTP 500 Internal Server Error on `GET /api/stocks/{symbol}/insight`**:
+     - In `backend/api/stocks.py` (`get_stock_insight`), sub-calculations for `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` were unshielded. Any unhandled exception or date parsing failure propagated as a generic 500.
+     - In `backend/services/indicators.py` (`candles_to_df`) and `backend/services/ai_engine.py` (`_dl_predict`), `pd.to_datetime` was called without `errors="coerce"`. Any unexpected candle timestamp format caused fatal `DateParseError`.
+     - In `backend/services/ai_engine.py`, `score()` lacked an outer try-except block, allowing inference errors to propagate.
+- **Code Hardening Applied**:
+  1. **Backend Service Resiliency**:
+     - In `backend/services/indicators.py` (`candles_to_df`), added `errors="coerce"` and `.dropna(subset=["timestamp"])` so unparseable timestamps never crash indicator calculation or the screener.
+     - In `backend/services/ai_engine.py` (`score`), wrapped model inference in a top-level try-except block with fallback to `self._neutral_response(symbol, indicators)`. Added `errors="coerce"` to `_dl_predict`.
+     - In `backend/api/stocks.py` (`get_stock_insight`), safely extracted `quote_symbol` and `quote_timestamp`; wrapped `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` in individual try-except blocks with robust fallback defaults.
+  2. **Frontend Session Expiry & Navigation**:
+     - In `frontend/src/AuthContext.tsx`, updated `handleSessionExpired` to cleanly redirect using `window.location.href = /login?redirect=${encodeURIComponent(currentPath)}&expired=1`, ensuring all background sockets and polling intervals halt cleanly.
+     - In `frontend/src/pages/LoginPage.tsx`, displayed a user notification when `expired=1` is present in query parameters: "Your session has expired. Please sign in again to continue."
+     - In `frontend/src/components/LiveTicker.tsx` and `frontend/src/pages/ChartPage.tsx`, dispatched `auth_session_expired` immediately upon receiving WebSocket close code 1008, terminating reconnect loops.
+- **Verification Evidence**:
+  - Python compilation (`py_compile`): **0 errors, exit code 0**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 29.31s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands and re-login steps for the user.

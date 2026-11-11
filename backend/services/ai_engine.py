@@ -138,31 +138,35 @@ class AIEngineService:
         ):
             self._load_models()
 
-        # ── Step 1: LightGBM tabular prediction ──────────────────────────────
-        lgb_probs, explanations = self._lgb_predict(
-            indicators, symbol, market_cap, compute_shap
-        )
+        try:
+            # ── Step 1: LightGBM tabular prediction ──────────────────────────────
+            lgb_probs, explanations = self._lgb_predict(
+                indicators, symbol, market_cap, compute_shap
+            )
 
-        # ── Step 2: DL sequence predictions (if candles provided) ─────────────
-        lstm_probs = None
-        transformer_probs = None
-        if candles and len(candles) >= SEQUENCE_LENGTH + 50:
-            lstm_probs, transformer_probs = self._dl_predict(candles)
+            # ── Step 2: DL sequence predictions (if candles provided) ─────────────
+            lstm_probs = None
+            transformer_probs = None
+            if candles and len(candles) >= SEQUENCE_LENGTH + 50:
+                lstm_probs, transformer_probs = self._dl_predict(candles)
 
-        # ── Step 3: Ensemble ──────────────────────────────────────────────────
-        model_keys = []
-        if lgb_probs is not None:
-            model_keys.append("lgb")
-        if lstm_probs is not None:
-            model_keys.append("lstm")
-        if transformer_probs is not None:
-            model_keys.append("tfm")
+            # ── Step 3: Ensemble ──────────────────────────────────────────────────
+            model_keys = []
+            if lgb_probs is not None:
+                model_keys.append("lgb")
+            if lstm_probs is not None:
+                model_keys.append("lstm")
+            if transformer_probs is not None:
+                model_keys.append("tfm")
 
-        if not model_keys:
+            if not model_keys:
+                return self._neutral_response(symbol, indicators)
+
+            ensemble_probs = ensemble_predictor.predict(lgb_probs, lstm_probs, transformer_probs)
+            return ensemble_predictor.format_result(symbol, ensemble_probs, model_keys, explanations)
+        except Exception as e:
+            logger.warning("AI model inference error for %s: %s; using neutral response fallback.", symbol, e)
             return self._neutral_response(symbol, indicators)
-
-        ensemble_probs = ensemble_predictor.predict(lgb_probs, lstm_probs, transformer_probs)
-        return ensemble_predictor.format_result(symbol, ensemble_probs, model_keys, explanations)
 
     # ──────────────────────────────────────────────────────────────────────────
     def _lgb_predict(
@@ -320,7 +324,8 @@ class AIEngineService:
                 "close": "Close", "volume": "Volume"
             })
             if "timestamp" in df.columns:
-                df["Date"] = pd.to_datetime(df["timestamp"], format="mixed")
+                df["Date"] = pd.to_datetime(df["timestamp"], format="mixed", errors="coerce")
+                df = df.dropna(subset=["Date"])
                 df = df.set_index("Date")
 
             df_feat = engineer_features(df)

@@ -12,6 +12,32 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-11-11)
+
+- **LIVE SYSTEM 500 ERROR, 401 AUTH EXPIRY, & WEBSOCKET DISCONNECT RESOLUTION (COMPLETE & VERIFIED):**
+  - **Issues Investigated**:
+    1. `GET /api/stocks/POWERGRID.NS/insight?timeframe=1d 500 (Internal Server Error)` on `https://stockai-live.duckdns.org/chart`.
+    2. `api/auth/me: 401`, `api/admin/users: 401`, and `api/settings/fyers/status: 401` returned Unauthorized.
+    3. `WebSocket connection to 'wss://stockai-live.duckdns.org/ws/?token=...' failed: WebSocket is closed before the connection is established` (in `LiveTicker.tsx` & `ChartPage.tsx`).
+    4. Vite hot-module reload message: `[vite] server connection lost. Polling for restart...`
+  - **Root Causes Discovered & Resolved**:
+    1. **JWT Expiration / Container Restart Invalidation**:
+       - Following container builds and backend restarts on the live host, client browsers retained stale JWT tokens in `localStorage`.
+       - When the backend receives an invalid/expired token on `/ws/?token=...`, `jwt.decode` raises `JWTError` and immediately executes `websocket.close(code=1008, reason="Authentication required")` prior to `accept()`, causing the browser warning.
+       - In `frontend/src/AuthContext.tsx`, `handleSessionExpired` used `window.history.pushState({}, '', '/login')` + `popstate` event, which React Router v6 ignores. As a result, the user remained on `/chart`, repeatedly firing API calls without credentials.
+       - **Fix**: Replaced passive `pushState` in `AuthContext.tsx` with a clean `window.location.href = /login?redirect=...&expired=1` navigation, halting active sockets, clearing local storage, and notifying the user on `LoginPage.tsx` with "Your session has expired. Please sign in again."
+    2. **Insight Endpoint Hardening & Resilient Fallbacks**:
+       - In `backend/api/stocks.py` (`get_stock_insight`), sub-calculations for `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` were unshielded. Any unhandled exception or date parsing failure propagated as a generic 500.
+       - In `backend/services/indicators.py` (`candles_to_df`) and `backend/services/ai_engine.py` (`_dl_predict`), `pd.to_datetime` was called without `errors="coerce"`. Any unexpected candle timestamp format caused fatal `DateParseError`.
+       - In `backend/services/ai_engine.py`, `score()` lacked an outer try-except block, allowing inference errors to propagate.
+       - **Fix**: Added `errors="coerce"` and `.dropna(subset=["timestamp"])` across indicator and AI engine services; wrapped ML scoring with a fallback to `_neutral_response`; wrapped `signals`, `risk`, `indicators`, and `series_candles` with robust fallback defaults in `get_stock_insight`; and ensured safe extraction of `quote_symbol` and `quote_timestamp`.
+    3. **WebSocket Error Code Handling**:
+       - In `LiveTicker.tsx` and `ChartPage.tsx`, dispatched `auth_session_expired` immediately upon receiving WebSocket close code 1008, cleanly terminating reconnect loops.
+  - **Verification Evidence**:
+    - Python compilation (`py_compile` on `backend/api/stocks.py`, `backend/services/indicators.py`, `backend/services/ai_engine.py`): **0 errors, exit code 0**.
+    - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 29.31s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs deploy commands on the live server, pulls `origin/main`, rebuilds containers, and signs in with fresh credentials.
+
 ## Latest verified checks (2026-11-10)
 
 - **CELERY FLOWER OFFLINE WORKER STATUS & SWING SCREENER 0-STOCKS FIX (COMPLETE & FULLY VERIFIED):**

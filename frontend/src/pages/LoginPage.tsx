@@ -46,6 +46,12 @@ export default function LoginPage() {
   const redirectTarget = searchParams.get('redirect') || '/dashboard'
   const { login } = useAuth()
 
+  useEffect(() => {
+    if (searchParams.get('expired') === '1') {
+      setError('Your session has expired. Please sign in again to continue.')
+    }
+  }, [searchParams])
+
   // 1. Fetch public Google Client ID configuration
   useEffect(() => {
     let isMounted = true

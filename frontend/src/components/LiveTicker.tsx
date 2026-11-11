@@ -209,6 +209,9 @@ export default function LiveTicker() {
               reconnectTimerRef.current = null
             }
             console.warn('WebSocket authentication rejected (code ' + event.code + '). Halting reconnect loop.')
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('auth_session_expired'))
+            }
             return
           }
           scheduleReconnect()
