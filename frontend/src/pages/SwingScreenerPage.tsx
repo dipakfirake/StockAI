@@ -4,7 +4,7 @@ import { marketApi, paperTradingApi, alertsApi } from '../services/api'
 import { 
   TrendingUp, TrendingDown, Minus, RefreshCw, Search, Filter, 
   ExternalLink, Briefcase, Bell, CheckCircle2, ShieldAlert, 
-  ArrowUpRight, ArrowDownRight, Layers, LayoutGrid, List, Sparkles, AlertCircle, Target
+  ArrowUpRight, ArrowDownRight, Layers, LayoutGrid, List, Sparkles, AlertCircle, Target, Download
 } from 'lucide-react'
 import { toast } from '../components/Toast'
 
@@ -222,6 +222,29 @@ export default function SwingScreenerPage() {
             <RefreshCw size={15} className={refreshing ? 'spin' : ''} />
             <span>{refreshing ? 'Scanning...' : 'Run Fresh Scan'}</span>
           </button>
+
+          <a 
+            href="/api/swing-audit/download-latest" 
+            download
+            className="btn btn-secondary no-shrink"
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              gap: 8, 
+              height: 38, 
+              whiteSpace: 'nowrap', 
+              flex: '0 0 auto',
+              textDecoration: 'none',
+              color: '#38bdf8',
+              borderColor: 'rgba(56, 189, 248, 0.3)',
+              background: 'rgba(56, 189, 248, 0.08)'
+            }}
+            title="Download the institutional 11-Day Swing Audit Excel spreadsheet (.xlsx) with PnL and Price Tracking"
+          >
+            <Download size={15} />
+            <span>Audit Excel (.xlsx)</span>
+          </a>
         </div>
       </div>
 

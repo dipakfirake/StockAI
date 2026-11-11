@@ -3122,6 +3122,25 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 66: Swing Screener Excel Audit Report Accessibility & Host Volume Mount
+- **Timestamp:** 2026-11-11 21:20:00 IST (15:50:00 UTC)
+- **User Prompt:**
+  `"and tell me were i can i see tat swing screeeners excel file because it is stored in server not on local host tats why"`
+- **Forensic Inspection & Enhancements**:
+  1. **UI Download Entrypoints**:
+     - Previously, the `[📥 Audit Excel (.xlsx)]` button was exclusively placed on the Chart Page (`ChartPage.tsx:2096`) within the Swing Trade Analysis card.
+     - Added an explicit `[📥 Audit Excel (.xlsx)]` button directly to the header of `frontend/src/pages/SwingScreenerPage.tsx` next to `Run Fresh Scan`, linking to `/api/swing-audit/download-latest`.
+  2. **Browser Endpoint Direct Access**:
+     - Verified `GET /api/swing-audit/download-latest` in `backend/api/swing_audit.py:115`. This route does not require header tokens; visiting `https://stockai-live.duckdns.org/api/swing-audit/download-latest` directly triggers an instant `.xlsx` spreadsheet download in any browser.
+  3. **Host Server Filesystem Persistence**:
+     - In `docker-compose.yml`, mapped `./audits:/app/audits` for `backend`, `celery_worker`, and `celery_beat`.
+     - Whenever the backend or Celery worker generates an audit spreadsheet, it is persisted to the host filesystem under `~/StockAI/audits/swing_trades/Swing_Trade_Audit_<FROM_DATE>_to_<TO_DATE>.xlsx`, viewable via SSH and transferable via SCP.
+- **Verification Evidence**:
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 48.20s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push to `origin/main`, explain the 3 ways to access the Excel file (Web UI 1-click download, direct browser URL, and host server terminal/SCP path).
+
+---
+
 ### Session Entry 62: Automated 11-Day Swing Trade Audit & Excel Sheet Tracking System with User Execution Logging
 - **Timestamp:** 2026-11-10 10:55:00 IST (05:25:00 UTC)
 - **User Prompt:**
@@ -3302,3 +3321,22 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Python Syntax Verification (`py_compile`): **0 errors, exit code 0**.
   - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 49.45s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands for the user.
+
+---
+
+### Session Entry 66: Swing Screener Excel Audit Report Accessibility & Host Volume Mount
+- **Timestamp:** 2026-11-11 21:20:00 IST (15:50:00 UTC)
+- **User Prompt:**
+  `"and tell me were i can i see tat swing screeeners excel file because it is stored in server not on local host tats why"`
+- **Forensic Inspection & Enhancements**:
+  1. **UI Download Entrypoints**:
+     - Previously, the `[📥 Audit Excel (.xlsx)]` button was exclusively placed on the Chart Page (`ChartPage.tsx:2096`) within the Swing Trade Analysis card.
+     - Added an explicit `[📥 Audit Excel (.xlsx)]` button directly to the header of `frontend/src/pages/SwingScreenerPage.tsx` next to `Run Fresh Scan`, linking to `/api/swing-audit/download-latest`.
+  2. **Browser Endpoint Direct Access**:
+     - Verified `GET /api/swing-audit/download-latest` in `backend/api/swing_audit.py:115`. This route does not require header tokens; visiting `https://stockai-live.duckdns.org/api/swing-audit/download-latest` directly triggers an instant `.xlsx` spreadsheet download in any browser.
+  3. **Host Server Filesystem Persistence**:
+     - In `docker-compose.yml`, mapped `./audits:/app/audits` for `backend`, `celery_worker`, and `celery_beat`.
+     - Whenever the backend or Celery worker generates an audit spreadsheet, it is persisted to the host filesystem under `~/StockAI/audits/swing_trades/Swing_Trade_Audit_<FROM_DATE>_to_<TO_DATE>.xlsx`, viewable via SSH and transferable via SCP.
+- **Verification Evidence**:
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 48.20s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push to `origin/main`, explain the 3 ways to access the Excel file (Web UI 1-click download, direct browser URL, and host server terminal/SCP path).
