@@ -1115,11 +1115,17 @@ export default function ChartPage() {
       if (!token || !isMounted) return
 
       if (wsRef.current) {
-        wsRef.current.onopen = null
-        wsRef.current.onmessage = null
-        wsRef.current.onerror = null
-        wsRef.current.onclose = null
-        try { wsRef.current.close() } catch (_) {}
+        const socket = wsRef.current
+        socket.onmessage = null
+        socket.onerror = null
+        socket.onclose = null
+        try {
+          if (socket.readyState === WebSocket.CONNECTING) {
+            socket.onopen = () => { try { socket.close() } catch (_) {} }
+          } else if (socket.readyState === WebSocket.OPEN) {
+            socket.close()
+          }
+        } catch (_) {}
         wsRef.current = null
       }
 
@@ -1245,13 +1251,15 @@ export default function ChartPage() {
         rafChartIdRef.current = null
       }
       if (wsRef.current) {
-        wsRef.current.onopen = null
-        wsRef.current.onmessage = null
-        wsRef.current.onerror = null
-        wsRef.current.onclose = null
+        const socket = wsRef.current
+        socket.onmessage = null
+        socket.onerror = null
+        socket.onclose = null
         try {
-          if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
-            wsRef.current.close()
+          if (socket.readyState === WebSocket.CONNECTING) {
+            socket.onopen = () => { try { socket.close() } catch (_) {} }
+          } else if (socket.readyState === WebSocket.OPEN) {
+            socket.close()
           }
         } catch (_) {}
         wsRef.current = null

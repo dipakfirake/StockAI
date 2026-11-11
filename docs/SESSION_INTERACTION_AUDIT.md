@@ -3046,34 +3046,41 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
-### Session Entry 64: Live System 500 Error, 401 Auth Expiry, and WebSocket Disconnect Resolution
-- **Timestamp:** 2026-11-11 19:25:00 IST (13:55:00 UTC)
+### Session Entry 64: Live System Flower 0-Workers, Insight 500, and WebSocket Lifecycle Resolution
+- **Timestamp:** 2026-11-11 20:10:00 IST (14:40:00 UTC)
 - **User Prompt:**
   `"what are you doing? tell me because task is running from previous 3+ hours."`
-  (Investigating browser console errors: `GET /api/stocks/POWERGRID.NS/insight 500`, `api/auth/me 401`, and `WebSocket connection failed: WebSocket is closed before the connection is established`.)
-- **Root Cause Analysis & Discoveries**:
+  (Investigating browser console errors: `GET /api/stocks/POWERGRID.NS/insight 500`, `api/auth/me 401`, `WebSocket connection failed: WebSocket is closed before the connection is established`, and Flower showing `No data available in table (Showing 0 to 0 of 0 entries)`.)
+- **Root Cause Analysis & Forensic Discoveries**:
   1. **Subagent Background Investigation Task**:
      - A background subagent had been invoked previously to research the root cause and ran an unbuffered test that awaited external network calls without sandbox bypass, causing the subagent to wait indefinitely. We terminated the hung subagent process, cleaned up descendant tasks, and conducted targeted local diagnosis.
-  2. **401 Unauthorized & WebSocket Drop Root Cause**:
-     - Whenever backend containers are rebuilt or restarted on the live server, browser clients retain stale JWT tokens in `localStorage`.
-     - In `backend/api/websocket.py:202-206`, when `/ws/?token=...` receives an expired/invalid token, `jwt.decode` catches `JWTError` and immediately aborts the connection with `await websocket.close(code=1008, reason="Authentication required")` before `accept()`. The browser logs: `"WebSocket is closed before the connection is established."`
-     - In `frontend/src/AuthContext.tsx`, `handleSessionExpired` used `window.history.pushState({}, '', '/login')` + `popstate` event, which React Router v6 does not listen to. As a result, the user remained on `/chart`, repeatedly firing API calls without credentials.
-  3. **HTTP 500 Internal Server Error on `GET /api/stocks/{symbol}/insight`**:
+  2. **Flower 0 Workers Root Cause**:
+     - Flower displays worker cards strictly by iterating `events.counter.items()`. When Flower restarted, all previous worker events were wiped from its in-memory event store.
+     - In `scripts/setup_duckdns_routes.sh:17`, the container restart command was `sudo docker compose up -d --build backend flower`, completely omitting `celery_worker` and `celery_beat`. When Redis `--requirepass` was enforced in commit `f2e473f`, the Celery worker process crashed with `AuthenticationError: Authentication required` and was never restarted by deployment. Because `celery_worker` was down/exited on the live server, zero worker heartbeat/task events were emitted, causing Flower's worker table to display 0 entries.
+     - In `docker-compose.yml`, `--broker=...` was placed after `flower` rather than before, causing Celery Click argument parser warnings and discarding the broker option, and `flower` lacked `env_file: - .env`.
+  3. **WebSocket Abrupt Closure in React useEffect Teardown**:
+     - Token analysis confirmed the JWT was valid (`exp: 1794476593`, >19h remaining); `GET /quote` succeeded with it.
+     - The warning `WebSocket is closed before the connection is established` originated at `LiveTicker.tsx:307` and `ChartPage.tsx:1254` inside React's `useEffect` cleanup handler. Under React 18 component mount/unmount cycles, the cleanup ran while `ws.readyState === WebSocket.CONNECTING` (`0`), calling `ws.close()` on a connecting socket and triggering browser console errors.
+  4. **HTTP 500 Internal Server Error on `GET /api/stocks/{symbol}/insight`**:
      - In `backend/api/stocks.py` (`get_stock_insight`), sub-calculations for `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` were unshielded. Any unhandled exception or date parsing failure propagated as a generic 500.
      - In `backend/services/indicators.py` (`candles_to_df`) and `backend/services/ai_engine.py` (`_dl_predict`), `pd.to_datetime` was called without `errors="coerce"`. Any unexpected candle timestamp format caused fatal `DateParseError`.
-     - In `backend/services/ai_engine.py`, `score()` lacked an outer try-except block, allowing inference errors to propagate.
 - **Code Hardening Applied**:
-  1. **Backend Service Resiliency**:
+  1. **Deployment & Flower Orchestration**:
+     - In `scripts/setup_duckdns_routes.sh`, added `celery_worker` and `celery_beat` to the restart command: `sudo docker compose up -d --build backend celery_worker celery_beat flower`.
+     - In `docker-compose.yml`, placed `--broker` before `flower`, added `--inspect_timeout=5000`, and added `env_file: - .env` to the `flower` service.
+  2. **WebSocket Graceful Teardown**:
+     - In `frontend/src/components/LiveTicker.tsx` and `frontend/src/pages/ChartPage.tsx`, updated socket cleanup: if `readyState === WebSocket.CONNECTING`, an `onopen` listener is attached to defer `.close()` until after connection establishment, eliminating handshake cancellation errors.
+  3. **Backend Service Resiliency**:
      - In `backend/services/indicators.py` (`candles_to_df`), added `errors="coerce"` and `.dropna(subset=["timestamp"])` so unparseable timestamps never crash indicator calculation or the screener.
      - In `backend/services/ai_engine.py` (`score`), wrapped model inference in a top-level try-except block with fallback to `self._neutral_response(symbol, indicators)`. Added `errors="coerce"` to `_dl_predict`.
      - In `backend/api/stocks.py` (`get_stock_insight`), safely extracted `quote_symbol` and `quote_timestamp`; wrapped `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` in individual try-except blocks with robust fallback defaults.
-  2. **Frontend Session Expiry & Navigation**:
+  4. **Frontend Session Expiry & Navigation**:
      - In `frontend/src/AuthContext.tsx`, updated `handleSessionExpired` to cleanly redirect using `window.location.href = /login?redirect=${encodeURIComponent(currentPath)}&expired=1`, ensuring all background sockets and polling intervals halt cleanly.
      - In `frontend/src/pages/LoginPage.tsx`, displayed a user notification when `expired=1` is present in query parameters: "Your session has expired. Please sign in again to continue."
      - In `frontend/src/components/LiveTicker.tsx` and `frontend/src/pages/ChartPage.tsx`, dispatched `auth_session_expired` immediately upon receiving WebSocket close code 1008, terminating reconnect loops.
 - **Verification Evidence**:
   - Python compilation (`py_compile`): **0 errors, exit code 0**.
-  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 29.31s (exit code 0)**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 1m 5s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands and re-login steps for the user.
 
 ---
@@ -3185,32 +3192,39 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
-### Session Entry 64: Live System 500 Error, 401 Auth Expiry, and WebSocket Disconnect Resolution
-- **Timestamp:** 2026-11-11 19:25:00 IST (13:55:00 UTC)
+### Session Entry 64: Live System Flower 0-Workers, Insight 500, and WebSocket Lifecycle Resolution
+- **Timestamp:** 2026-11-11 20:10:00 IST (14:40:00 UTC)
 - **User Prompt:**
   `"what are you doing? tell me because task is running from previous 3+ hours."`
-  (Investigating browser console errors: `GET /api/stocks/POWERGRID.NS/insight 500`, `api/auth/me 401`, and `WebSocket connection failed: WebSocket is closed before the connection is established`.)
-- **Root Cause Analysis & Discoveries**:
+  (Investigating browser console errors: `GET /api/stocks/POWERGRID.NS/insight 500`, `api/auth/me 401`, `WebSocket connection failed: WebSocket is closed before the connection is established`, and Flower showing `No data available in table (Showing 0 to 0 of 0 entries)`.)
+- **Root Cause Analysis & Forensic Discoveries**:
   1. **Subagent Background Investigation Task**:
      - A background subagent had been invoked previously to research the root cause and ran an unbuffered test that awaited external network calls without sandbox bypass, causing the subagent to wait indefinitely. We terminated the hung subagent process, cleaned up descendant tasks, and conducted targeted local diagnosis.
-  2. **401 Unauthorized & WebSocket Drop Root Cause**:
-     - Whenever backend containers are rebuilt or restarted on the live server, browser clients retain stale JWT tokens in `localStorage`.
-     - In `backend/api/websocket.py:202-206`, when `/ws/?token=...` receives an expired/invalid token, `jwt.decode` catches `JWTError` and immediately aborts the connection with `await websocket.close(code=1008, reason="Authentication required")` before `accept()`. The browser logs: `"WebSocket is closed before the connection is established."`
-     - In `frontend/src/AuthContext.tsx`, `handleSessionExpired` used `window.history.pushState({}, '', '/login')` + `popstate` event, which React Router v6 does not listen to. As a result, the user remained on `/chart`, repeatedly firing API calls without credentials.
-  3. **HTTP 500 Internal Server Error on `GET /api/stocks/{symbol}/insight`**:
+  2. **Flower 0 Workers Root Cause**:
+     - Flower displays worker cards strictly by iterating `events.counter.items()`. When Flower restarted, all previous worker events were wiped from its in-memory event store.
+     - In `scripts/setup_duckdns_routes.sh:17`, the container restart command was `sudo docker compose up -d --build backend flower`, completely omitting `celery_worker` and `celery_beat`. When Redis `--requirepass` was enforced in commit `f2e473f`, the Celery worker process crashed with `AuthenticationError: Authentication required` and was never restarted by deployment. Because `celery_worker` was down/exited on the live server, zero worker heartbeat/task events were emitted, causing Flower's worker table to display 0 entries.
+     - In `docker-compose.yml`, `--broker=...` was placed after `flower` rather than before, causing Celery Click argument parser warnings and discarding the broker option, and `flower` lacked `env_file: - .env`.
+  3. **WebSocket Abrupt Closure in React useEffect Teardown**:
+     - Token analysis confirmed the JWT was valid (`exp: 1794476593`, >19h remaining); `GET /quote` succeeded with it.
+     - The warning `WebSocket is closed before the connection is established` originated at `LiveTicker.tsx:307` and `ChartPage.tsx:1254` inside React's `useEffect` cleanup handler. Under React 18 component mount/unmount cycles, the cleanup ran while `ws.readyState === WebSocket.CONNECTING` (`0`), calling `ws.close()` on a connecting socket and triggering browser console errors.
+  4. **HTTP 500 Internal Server Error on `GET /api/stocks/{symbol}/insight`**:
      - In `backend/api/stocks.py` (`get_stock_insight`), sub-calculations for `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` were unshielded. Any unhandled exception or date parsing failure propagated as a generic 500.
      - In `backend/services/indicators.py` (`candles_to_df`) and `backend/services/ai_engine.py` (`_dl_predict`), `pd.to_datetime` was called without `errors="coerce"`. Any unexpected candle timestamp format caused fatal `DateParseError`.
-     - In `backend/services/ai_engine.py`, `score()` lacked an outer try-except block, allowing inference errors to propagate.
 - **Code Hardening Applied**:
-  1. **Backend Service Resiliency**:
+  1. **Deployment & Flower Orchestration**:
+     - In `scripts/setup_duckdns_routes.sh`, added `celery_worker` and `celery_beat` to the restart command: `sudo docker compose up -d --build backend celery_worker celery_beat flower`.
+     - In `docker-compose.yml`, placed `--broker` before `flower`, added `--inspect_timeout=5000`, and added `env_file: - .env` to the `flower` service.
+  2. **WebSocket Graceful Teardown**:
+     - In `frontend/src/components/LiveTicker.tsx` and `frontend/src/pages/ChartPage.tsx`, updated socket cleanup: if `readyState === WebSocket.CONNECTING`, an `onopen` listener is attached to defer `.close()` until after connection establishment, eliminating handshake cancellation errors.
+  3. **Backend Service Resiliency**:
      - In `backend/services/indicators.py` (`candles_to_df`), added `errors="coerce"` and `.dropna(subset=["timestamp"])` so unparseable timestamps never crash indicator calculation or the screener.
      - In `backend/services/ai_engine.py` (`score`), wrapped model inference in a top-level try-except block with fallback to `self._neutral_response(symbol, indicators)`. Added `errors="coerce"` to `_dl_predict`.
      - In `backend/api/stocks.py` (`get_stock_insight`), safely extracted `quote_symbol` and `quote_timestamp`; wrapped `indicators`, `series_candles`, `signals`, `ai_score`, and `risk` in individual try-except blocks with robust fallback defaults.
-  2. **Frontend Session Expiry & Navigation**:
+  4. **Frontend Session Expiry & Navigation**:
      - In `frontend/src/AuthContext.tsx`, updated `handleSessionExpired` to cleanly redirect using `window.location.href = /login?redirect=${encodeURIComponent(currentPath)}&expired=1`, ensuring all background sockets and polling intervals halt cleanly.
      - In `frontend/src/pages/LoginPage.tsx`, displayed a user notification when `expired=1` is present in query parameters: "Your session has expired. Please sign in again to continue."
      - In `frontend/src/components/LiveTicker.tsx` and `frontend/src/pages/ChartPage.tsx`, dispatched `auth_session_expired` immediately upon receiving WebSocket close code 1008, terminating reconnect loops.
 - **Verification Evidence**:
   - Python compilation (`py_compile`): **0 errors, exit code 0**.
-  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 29.31s (exit code 0)**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 1m 5s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands and re-login steps for the user.

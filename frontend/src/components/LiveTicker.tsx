@@ -167,11 +167,16 @@ export default function LiveTicker() {
 
       // Ensure any existing socket is completely dismantled before opening a new one
       if (ws) {
-        ws.onopen = null
         ws.onmessage = null
         ws.onerror = null
         ws.onclose = null
-        try { ws.close() } catch (_) {}
+        try {
+          if (ws.readyState === WebSocket.CONNECTING) {
+            ws.onopen = () => { try { ws?.close() } catch (_) {} }
+          } else if (ws.readyState === WebSocket.OPEN) {
+            ws.close()
+          }
+        } catch (_) {}
         ws = null
       }
 
@@ -298,12 +303,13 @@ export default function LiveTicker() {
         rafTickerIdRef.current = null
       }
       if (ws) {
-        ws.onopen = null
         ws.onmessage = null
         ws.onerror = null
         ws.onclose = null
         try {
-          if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          if (ws.readyState === WebSocket.CONNECTING) {
+            ws.onopen = () => { try { ws?.close() } catch (_) {} }
+          } else if (ws.readyState === WebSocket.OPEN) {
             ws.close()
           }
         } catch (_) {}

@@ -14,7 +14,7 @@ cd /home/opc/StockAI || cd ~/StockAI
 git pull origin main
 
 echo "=== [2/4] Restarting Backend & Celery Flower Containers ==="
-sudo docker compose up -d --build backend flower
+sudo docker compose up -d --build backend celery_worker celery_beat flower
 
 echo "=== [3/4] Detecting Nginx Configuration File ==="
 CONF_FILE=""
