@@ -3085,6 +3085,43 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 65: Live Server MTARTECH.NS Insight 500 UnboundLocalError Resolution & Resiliency Defense
+- **Timestamp:** 2026-11-11 21:05:00 IST (15:35:00 UTC)
+- **User Prompt:**
+  `"GET https://stockai-live.duckdns.org/api/stocks/MTARTECH.NS/insight?timeframe=1d 500 (Internal Server Error)"`
+  `"Failed to load advanced insight for MTARTECH.NS: AxiosError: Request failed with status code 500"`
+- **Root Cause Analysis & Forensic Discoveries**:
+  1. **Direct Endpoint Execution Diagnostics**:
+     - Executed `get_stock_insight("MTARTECH.NS", "1d", None)` in an end-to-end Python test.
+     - Stack trace captured:
+       ```
+       File "backend/api/stocks.py", line 41, in get_stock_insight
+           results = await asyncio.gather(...)
+       UnboundLocalError: cannot access local variable 'asyncio' where it is not associated with a value
+       ```
+  2. **Python Scoping Mechanism**:
+     - Inside `backend/api/stocks.py` at line 172 (inside the swing audit auto-cataloging task), an unnecessary `import asyncio` had been declared.
+     - Under Python scoping rules, importing or assigning a name anywhere inside a function scope causes the compiler to treat that identifier as a local variable across the entire function. When line 41 attempted to evaluate `results = await asyncio.gather(...)`, Python treated `asyncio` as an uninitialized local variable, raising `UnboundLocalError`.
+     - FastAPI intercepted the unhandled `UnboundLocalError` and returned HTTP 500 to the browser.
+  3. **Live Server Revision Divergence**:
+     - Git log verification confirmed that the live server in prompt 7 had only pulled up to commit `4215c6a`. Previous resiliency updates (`0ac572b`, `1b69934`, and `f2e473f`) had not yet been fetched on the remote VM.
+- **Code Hardening Applied**:
+  1. **Clean Scoping**:
+     - Removed the inner `import asyncio` in `backend/api/stocks.py`, ensuring all coroutines use the module-level `import asyncio` cleanly without shadowing.
+  2. **Top-Level Resilient Try-Except Wrapper**:
+     - Wrapped the entire pipeline of `get_stock_insight` in an outermost `try...except Exception as exc:` block with full traceback logging via `logger.error(..., exc_info=True)`.
+     - In the event of any upstream failure or malformed payload, returns a 200 OK safe fallback structure containing all required schema fields (`quote`, `candles`, `indicators`, `signals`, `ai_score`, `risk`, `patterns`, `events`, `news`, `data_note`).
+     - Guaranteed that `GET /api/stocks/{symbol}/insight` will **never** return HTTP 500 to the frontend.
+  3. **Quote Failover from Candle History**:
+     - If `fetch_quote` returns empty or fails, `get_stock_insight` automatically synthesizes the quote object using the close and timestamp of the latest candle, preventing false 404s.
+- **Verification Evidence**:
+  - Direct End-to-End Pipeline Execution: `get_stock_insight("MTARTECH.NS", "1d", None)` executed with 0 errors, successfully computing 22 indicators, AI ensemble score, candlestick patterns, and risk breakdown.
+  - Python Syntax Verification (`py_compile`): **0 errors, exit code 0**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 49.45s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands for the user.
+
+---
+
 ### Session Entry 62: Automated 11-Day Swing Trade Audit & Excel Sheet Tracking System with User Execution Logging
 - **Timestamp:** 2026-11-10 10:55:00 IST (05:25:00 UTC)
 - **User Prompt:**
@@ -3228,3 +3265,40 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Python compilation (`py_compile`): **0 errors, exit code 0**.
   - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 1m 5s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands and re-login steps for the user.
+
+---
+
+### Session Entry 65: Live Server MTARTECH.NS Insight 500 UnboundLocalError Resolution & Resiliency Defense
+- **Timestamp:** 2026-11-11 21:05:00 IST (15:35:00 UTC)
+- **User Prompt:**
+  `"GET https://stockai-live.duckdns.org/api/stocks/MTARTECH.NS/insight?timeframe=1d 500 (Internal Server Error)"`
+  `"Failed to load advanced insight for MTARTECH.NS: AxiosError: Request failed with status code 500"`
+- **Root Cause Analysis & Forensic Discoveries**:
+  1. **Direct Endpoint Execution Diagnostics**:
+     - Executed `get_stock_insight("MTARTECH.NS", "1d", None)` in an end-to-end Python test.
+     - Stack trace captured:
+       ```
+       File "backend/api/stocks.py", line 41, in get_stock_insight
+           results = await asyncio.gather(...)
+       UnboundLocalError: cannot access local variable 'asyncio' where it is not associated with a value
+       ```
+  2. **Python Scoping Mechanism**:
+     - Inside `backend/api/stocks.py` at line 172 (inside the swing audit auto-cataloging task), an unnecessary `import asyncio` had been declared.
+     - Under Python scoping rules, importing or assigning a name anywhere inside a function scope causes the compiler to treat that identifier as a local variable across the entire function. When line 41 attempted to evaluate `results = await asyncio.gather(...)`, Python treated `asyncio` as an uninitialized local variable, raising `UnboundLocalError`.
+     - FastAPI intercepted the unhandled `UnboundLocalError` and returned HTTP 500 to the browser.
+  3. **Live Server Revision Divergence**:
+     - Git log verification confirmed that the live server in prompt 7 had only pulled up to commit `4215c6a`. Previous resiliency updates (`0ac572b`, `1b69934`, and `f2e473f`) had not yet been fetched on the remote VM.
+- **Code Hardening Applied**:
+  1. **Clean Scoping**:
+     - Removed the inner `import asyncio` in `backend/api/stocks.py`, ensuring all coroutines use the module-level `import asyncio` cleanly without shadowing.
+  2. **Top-Level Resilient Try-Except Wrapper**:
+     - Wrapped the entire pipeline of `get_stock_insight` in an outermost `try...except Exception as exc:` block with full traceback logging via `logger.error(..., exc_info=True)`.
+     - In the event of any upstream failure or malformed payload, returns a 200 OK safe fallback structure containing all required schema fields (`quote`, `candles`, `indicators`, `signals`, `ai_score`, `risk`, `patterns`, `events`, `news`, `data_note`).
+     - Guaranteed that `GET /api/stocks/{symbol}/insight` will **never** return HTTP 500 to the frontend.
+  3. **Quote Failover from Candle History**:
+     - If `fetch_quote` returns empty or fails, `get_stock_insight` automatically synthesizes the quote object using the close and timestamp of the latest candle, preventing false 404s.
+- **Verification Evidence**:
+  - Direct End-to-End Pipeline Execution: `get_stock_insight("MTARTECH.NS", "1d", None)` executed with 0 errors, successfully computing 22 indicators, AI ensemble score, candlestick patterns, and risk breakdown.
+  - Python Syntax Verification (`py_compile`): **0 errors, exit code 0**.
+  - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 49.45s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands for the user.

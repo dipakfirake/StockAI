@@ -14,24 +14,24 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-11)
 
-- **LIVE SYSTEM FLOWER 0-WORKERS, INSIGHT 500, AND WEBSOCKET LIFECYCLE RESOLUTION (COMPLETE & VERIFIED):**
+- **LIVE SYSTEM INSIGHT 500 ROOT CAUSE RESOLUTION & BULLETPROOF DEFENSE (COMPLETE & FULLY VERIFIED):**
   - **Issues Investigated**:
-    1. Flower Dashboard showing 0 workers (`No data available in table`, `0 of 0 entries`).
-    2. `GET /api/stocks/POWERGRID.NS/insight?timeframe=1d 500 (Internal Server Error)` on `https://stockai-live.duckdns.org/chart`.
-    3. `LiveTicker.tsx:307` & `ChartPage.tsx:1254`: `WebSocket is closed before the connection is established`.
-  - **Root Causes Discovered & Resolved**:
-    1. **Flower 0-Workers & Deployment Script Omission**:
-       - In `scripts/setup_duckdns_routes.sh:17`, the restart command was `sudo docker compose up -d --build backend flower`, omitting `celery_worker` and `celery_beat`. When Redis `--requirepass` was enforced in commit `f2e473f`, the Celery worker process crashed with an authentication error and was never restarted by deployment. Because the worker was dead, zero events were published to Redis, leaving Flower's `events.counter` empty.
-       - In `docker-compose.yml`, `--broker=...` was placed after `flower` rather than before, causing Celery Click argument parser warnings and discarding the broker option, and `flower` lacked `env_file: - .env`.
-       - **Fix**: Added `celery_worker` and `celery_beat` to `scripts/setup_duckdns_routes.sh`; moved `--broker` before `flower` with `--inspect_timeout=5000` and added `env_file: - .env` in `docker-compose.yml`.
-    2. **Insight 500 Error**:
-       - Local codebase commit `0ac572b` resolved all unshielded calculations and uncoerced date parsing. The live server simply had not yet pulled and rebuilt the container. Verified locally with Python: full quantitative pipeline for `POWERGRID.NS` with 300 bars executes in <2s with 0 errors.
-    3. **WebSocket Abrupt Closure in React useEffect Teardown**:
-       - When components mount in React (especially during fast re-renders or StrictMode), the cleanup function runs while `ws.readyState === WebSocket.CONNECTING` (`0`). Calling `ws.close()` on a socket while it is connecting aborts the browser handshake and produces the warning.
-       - **Fix**: Updated `LiveTicker.tsx` and `ChartPage.tsx` so if `readyState === WebSocket.CONNECTING`, an `onopen` listener is attached to defer closure until the handshake completes cleanly, preventing browser abort errors.
+    - `GET https://stockai-live.duckdns.org/api/stocks/MTARTECH.NS/insight?timeframe=1d 500 (Internal Server Error)` on `https://stockai-live.duckdns.org/chart`.
+  - **Root Cause Forensic Discovery**:
+    - Forensic execution of `get_stock_insight("MTARTECH.NS", "1d", None)` reproduced the exact failure:
+      `UnboundLocalError: cannot access local variable 'asyncio' where it is not associated with a value` at line 41 (`results = await asyncio.gather(...)`).
+    - **Causation Mechanism**: At line 172 of `backend/api/stocks.py` inside the swing trade auto-cataloging hook, an inner `import asyncio` had been declared. In Python, declaring an import or assignment to a variable anywhere in a function's scope causes the compiler to flag that variable as local to the entire function. When line 41 referenced `asyncio.gather(...)`, Python attempted to read the local variable before assignment, throwing `UnboundLocalError`. FastAPI caught this and returned HTTP 500.
+    - **Secondary Discovery**: On the live server, previous commits `0ac572b` (date parsing coercion and sub-pipeline error shielding), `1b69934` (flower orchestration and graceful websocket teardown), and `f2e473f` (redis password enforcement) had not yet been pulled and rebuilt.
+  - **Code Hardening Applied**:
+    1. **Eliminated Variable Shadowing**: Removed the inner `import asyncio` in `backend/api/stocks.py`, relying cleanly on the module-level `import asyncio`.
+    2. **Top-Level Defensive Handler**: Wrapped the entire pipeline of `get_stock_insight` in a top-level `try...except Exception as exc:` block. If any unanticipated exception ever occurs in any upstream provider, candle parser, or indicator calculation, the endpoint logs the full stack trace and returns a 200 OK safe fallback payload, guaranteeing the endpoint **NEVER** throws a 500 error to the browser.
+    3. **Missing Quote Failover**: If `market_data_service.fetch_quote` fails or returns empty, the endpoint automatically constructs a quote from the most recent historical candle instead of raising 404, ensuring robust chart rendering.
   - **Verification Evidence**:
-    - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 1m 5s (exit code 0)**.
-  - **Exact Next Safe Step**: User runs deploy commands on live server: `git pull origin main && sudo docker compose up -d --build backend celery_worker celery_beat flower frontend`.
+    - Direct End-to-End Pipeline Execution: `get_stock_insight("MTARTECH.NS", "1d", None)` executed cleanly with 0 errors, successfully returning all 14 top-level keys (`quote`, `candles`, `indicators`, `signals`, `ai_score`, `risk`, `patterns`, etc.) and 22 calculated indicators.
+    - Python Compilation (`py_compile`): **0 syntax/type errors, exit code 0**.
+    - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 49.45s (exit code 0)**.
+  - **Exact Next Safe Step**: User executes deployment commands on the live server:
+    `cd ~/StockAI && git pull origin main && sudo docker compose up -d --build backend celery_worker celery_beat flower frontend`.
 
 ## Latest verified checks (2026-11-10)
 

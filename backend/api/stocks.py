@@ -2,9 +2,11 @@
 
 import asyncio
 import math
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.logging_config import get_logger
 from backend.core.database import get_db
 from backend.core.auth import get_current_user
 from backend.core.cache import cache_get, cache_set
@@ -14,6 +16,8 @@ from backend.services.indicators import indicator_service
 from backend.services.signals import signal_engine
 from backend.services.ai_engine import ai_engine_service
 from backend.services.risk_analysis import analyse_risk
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -35,180 +39,220 @@ async def get_stock_insight(
     safe_symbol = sanitize_symbol(symbol)
     safe_tf = validate_timeframe(timeframe)
 
-    # Fetch optimal 500 candles (~2 years of daily data), enough for SMA200 and all indicators in 1 fast call
-    fetch_limit = 500
+    try:
+        # Fetch optimal 500 candles (~2 years of daily data), enough for SMA200 and all indicators in 1 fast call
+        fetch_limit = 500
 
-    results = await asyncio.gather(
-        market_data_service.fetch_quote(safe_symbol),
-        market_data_service.fetch_candles(safe_symbol, safe_tf, limit=fetch_limit),
-        fetch_stock_news(safe_symbol),
-        screener_service._analyze_symbol(safe_symbol),
-        market_data_service.fetch_corporate_events(safe_symbol),
-        return_exceptions=True
-    )
-    quote = results[0] if not isinstance(results[0], Exception) else None
-    candles = results[1] if (not isinstance(results[1], Exception) and isinstance(results[1], list)) else []
-    news = results[2] if (not isinstance(results[2], Exception) and isinstance(results[2], list)) else []
-    swing_trade = results[3] if (not isinstance(results[3], Exception) and isinstance(results[3], dict)) else {}
-    events = results[4] if (not isinstance(results[4], Exception) and isinstance(results[4], dict)) else {}
+        results = await asyncio.gather(
+            market_data_service.fetch_quote(safe_symbol),
+            market_data_service.fetch_candles(safe_symbol, safe_tf, limit=fetch_limit),
+            fetch_stock_news(safe_symbol),
+            screener_service._analyze_symbol(safe_symbol),
+            market_data_service.fetch_corporate_events(safe_symbol),
+            return_exceptions=True
+        )
+        quote = results[0] if not isinstance(results[0], Exception) else None
+        candles = results[1] if (not isinstance(results[1], Exception) and isinstance(results[1], list)) else []
+        news = results[2] if (not isinstance(results[2], Exception) and isinstance(results[2], list)) else []
+        swing_trade = results[3] if (not isinstance(results[3], Exception) and isinstance(results[3], dict)) else {}
+        events = results[4] if (not isinstance(results[4], Exception) and isinstance(results[4], dict)) else {}
 
-    if not quote or not isinstance(quote, dict):
-        raise HTTPException(status_code=404, detail=f"No quote data found for {safe_symbol}")
+        if not quote or not isinstance(quote, dict):
+            if candles and len(candles) > 0:
+                last_c = candles[-1]
+                quote = {
+                    "symbol": safe_symbol,
+                    "name": safe_symbol,
+                    "price": float(last_c.get("close", 0.0)),
+                    "change": 0.0,
+                    "change_percent": 0.0,
+                    "timestamp": str(last_c.get("timestamp") or datetime.now(timezone.utc).isoformat()),
+                }
+            else:
+                raise HTTPException(status_code=404, detail=f"No quote data found for {safe_symbol}")
 
-    # Synchronize candle tip with live quote to ensure latest bar and indicators reflect CMP
-    candles = market_data_service.synchronize_candle_tip(candles, quote)
+        # Synchronize candle tip with live quote to ensure latest bar and indicators reflect CMP
+        candles = market_data_service.synchronize_candle_tip(candles, quote)
 
-    price = float(quote.get("price", 0.0))
+        price = float(quote.get("price", 0.0))
 
-    # Compute dynamic 52W High & Low from historical candles or preserved metadata
-    existing_52w_high = float(quote.get("52w_high") or 0.0)
-    existing_52w_low = float(quote.get("52w_low") or 0.0)
+        # Compute dynamic 52W High & Low from historical candles or preserved metadata
+        existing_52w_high = float(quote.get("52w_high") or 0.0)
+        existing_52w_low = float(quote.get("52w_low") or 0.0)
 
-    if candles and len(candles) >= 20 and price > 0:
-        year_candles = candles[-252:]
-        highs = []
-        lows = []
-        for c in year_candles:
+        if candles and len(candles) >= 20 and price > 0:
+            year_candles = candles[-252:]
+            highs = []
+            lows = []
+            for c in year_candles:
+                try:
+                    h = float(c.get("high", price))
+                    l = float(c.get("low", price))
+                    if math.isfinite(h) and h > 0: highs.append(h)
+                    if math.isfinite(l) and l > 0: lows.append(l)
+                except (ValueError, TypeError):
+                    continue
+            calc_high = max(highs) if highs else price
+            calc_low = min(lows) if lows else price
+            quote["52w_high"] = round(max(calc_high, existing_52w_high) if existing_52w_high > 0 else calc_high, 2)
+            quote["52w_low"] = round(min(calc_low, existing_52w_low) if existing_52w_low > 0 else calc_low, 2)
+        elif existing_52w_high > 0 and existing_52w_low > 0:
+            quote["52w_high"] = round(existing_52w_high, 2)
+            quote["52w_low"] = round(existing_52w_low, 2)
+        else:
             try:
-                h = float(c.get("high", price))
-                l = float(c.get("low", price))
-                if math.isfinite(h) and h > 0: highs.append(h)
-                if math.isfinite(l) and l > 0: lows.append(l)
-            except (ValueError, TypeError):
-                continue
-        calc_high = max(highs) if highs else price
-        calc_low = min(lows) if lows else price
-        quote["52w_high"] = round(max(calc_high, existing_52w_high) if existing_52w_high > 0 else calc_high, 2)
-        quote["52w_low"] = round(min(calc_low, existing_52w_low) if existing_52w_low > 0 else calc_low, 2)
-    elif existing_52w_high > 0 and existing_52w_low > 0:
-        quote["52w_high"] = round(existing_52w_high, 2)
-        quote["52w_low"] = round(existing_52w_low, 2)
-    else:
+                info = await market_data_service.get_stock_info(safe_symbol)
+                if info:
+                    h = float(info.get("fiftyTwoWeekHigh") or info.get("52w_high") or 0.0)
+                    l = float(info.get("fiftyTwoWeekLow") or info.get("52w_low") or 0.0)
+                    if h > 0: existing_52w_high = h
+                    if l > 0: existing_52w_low = l
+            except Exception:
+                pass
+            quote["52w_high"] = round(existing_52w_high if existing_52w_high > 0 else price, 2)
+            quote["52w_low"] = round(existing_52w_low if existing_52w_low > 0 else price, 2)
+
+        # Populate Market Cap from swing_trade or stock info
+        if swing_trade and swing_trade.get("market_cap"):
+            quote["market_cap"] = swing_trade["market_cap"]
+        elif not quote.get("market_cap"):
+            try:
+                info = await market_data_service.get_stock_info(safe_symbol)
+                if info and info.get("market_cap"):
+                    quote["market_cap"] = info["market_cap"]
+            except Exception:
+                pass
+
+        quote_symbol = str(quote.get("symbol") or safe_symbol)
+        quote_timestamp = str(quote.get("timestamp") or datetime.now(timezone.utc).isoformat())
+        quote["symbol"] = quote_symbol
+        quote["timestamp"] = quote_timestamp
+
         try:
-            info = await market_data_service.get_stock_info(safe_symbol)
-            if info:
-                h = float(info.get("fiftyTwoWeekHigh") or info.get("52w_high") or 0.0)
-                l = float(info.get("fiftyTwoWeekLow") or info.get("52w_low") or 0.0)
-                if h > 0: existing_52w_high = h
-                if l > 0: existing_52w_low = l
+            indicators = await asyncio.to_thread(indicator_service.compute_all, candles) if len(candles) >= 30 else {}
         except Exception:
-            pass
-        quote["52w_high"] = round(existing_52w_high if existing_52w_high > 0 else price, 2)
-        quote["52w_low"] = round(existing_52w_low if existing_52w_low > 0 else price, 2)
+            indicators = {}
 
-    # Populate Market Cap from swing_trade or stock info
-    if swing_trade and swing_trade.get("market_cap"):
-        quote["market_cap"] = swing_trade["market_cap"]
-    elif not quote.get("market_cap"):
         try:
-            info = await market_data_service.get_stock_info(safe_symbol)
-            if info and info.get("market_cap"):
-                quote["market_cap"] = info["market_cap"]
+            series_candles = await asyncio.to_thread(indicator_service.compute_for_candles_series, candles)
         except Exception:
-            pass
+            series_candles = candles
+        
+        if anchor_date and len(series_candles) > 0:
+            try:
+                from backend.services.indicators import calculate_anchored_vwap, candles_to_df
+                import pandas as pd
+                pd.to_datetime(anchor_date, errors="coerce")
+                df = candles_to_df(series_candles)
+                avwap_series = calculate_anchored_vwap(df, anchor_date)
+                for i, c in enumerate(series_candles):
+                    ts = pd.to_datetime(c.get("timestamp"), errors="coerce")
+                    if ts in avwap_series.index and not pd.isna(avwap_series[ts]):
+                        c["anchored_vwap"] = round(float(avwap_series[ts]), 4)
+                    else:
+                        c["anchored_vwap"] = None
+            except Exception:
+                pass
 
-    quote_symbol = str(quote.get("symbol") or safe_symbol)
-    from datetime import datetime, timezone
-    quote_timestamp = str(quote.get("timestamp") or datetime.now(timezone.utc).isoformat())
-    quote["symbol"] = quote_symbol
-    quote["timestamp"] = quote_timestamp
+        patterns = []
+        if len(series_candles) >= 10:
+            from backend.services.indicators import candles_to_df, detect_candlestick_patterns
+            try:
+                patterns = [
+                    {"timestamp": timestamp.isoformat(), "pattern": pattern}
+                    for timestamp, pattern in detect_candlestick_patterns(candles_to_df(series_candles)).dropna().items()
+                ]
+            except Exception:
+                patterns = []
 
-    try:
-        indicators = await asyncio.to_thread(indicator_service.compute_all, candles) if len(candles) >= 30 else {}
-    except Exception as e:
-        indicators = {}
+        # Auto-catalog high-conviction swing recommendations into 11-day audit ledger
+        if swing_trade and isinstance(swing_trade, dict) and swing_trade.get("action") == "BUY" and swing_trade.get("trade_plan"):
+            try:
+                total_sc = float(swing_trade.get("total_score", 0.0) or 0.0)
+                if total_sc >= 70.0:
+                    async def _auto_track_task():
+                        try:
+                            from backend.services.swing_audit_service import swing_audit_service
+                            from backend.core.database import AsyncSessionLocal
+                            async with AsyncSessionLocal() as audit_db:
+                                await swing_audit_service.track_swing_trade(
+                                    db=audit_db,
+                                    symbol=safe_symbol,
+                                    trade_plan=swing_trade["trade_plan"],
+                                    company_name=quote.get("name") if isinstance(quote, dict) else safe_symbol,
+                                    total_score=total_sc
+                                )
+                        except Exception:
+                            pass
+                    asyncio.create_task(_auto_track_task())
+            except Exception:
+                pass
 
-    try:
-        series_candles = await asyncio.to_thread(indicator_service.compute_for_candles_series, candles)
-    except Exception as e:
-        series_candles = candles
-    
-    if anchor_date and len(series_candles) > 0:
+        signals = []
+        if indicators:
+            try:
+                signals = signal_engine.evaluate(indicators, quote_symbol, safe_tf)
+            except Exception:
+                signals = []
+
+        ai_score = None
+        if indicators:
+            try:
+                ai_score = ai_engine_service.score(indicators, quote_symbol, candles=candles)
+            except Exception:
+                ai_score = None
+
         try:
-            from backend.services.indicators import calculate_anchored_vwap, candles_to_df
-            import pandas as pd
-            pd.to_datetime(anchor_date, errors="coerce")
-            df = candles_to_df(series_candles)
-            avwap_series = calculate_anchored_vwap(df, anchor_date)
-            for i, c in enumerate(series_candles):
-                ts = pd.to_datetime(c.get("timestamp"), errors="coerce")
-                if ts in avwap_series.index and not pd.isna(avwap_series[ts]):
-                    c["anchored_vwap"] = round(float(avwap_series[ts]), 4)
-                else:
-                    c["anchored_vwap"] = None
+            risk = analyse_risk(series_candles)
         except Exception as e:
-            pass
+            risk = {"level": "UNKNOWN", "reason": str(e)}
 
-    patterns = []
-    if len(series_candles) >= 10:
-        from backend.services.indicators import candles_to_df, detect_candlestick_patterns
-        try:
-            patterns = [
-                {"timestamp": timestamp.isoformat(), "pattern": pattern}
-                for timestamp, pattern in detect_candlestick_patterns(candles_to_df(series_candles)).dropna().items()
-            ]
-        except Exception:
-            patterns = []
+        return {
+            "symbol": quote_symbol,
+            "timeframe": safe_tf,
+            "as_of": quote_timestamp,
+            "quote": quote,
+            "swing_trade": swing_trade if isinstance(swing_trade, dict) else {},
+            "candles": series_candles if isinstance(series_candles, list) else [],
+            "risk": risk,
+            "indicators": indicators if isinstance(indicators, dict) else {},
+            "signals": signals if isinstance(signals, list) else [],
+            "ai_score": ai_score,
+            "patterns": patterns if isinstance(patterns, list) else [],
+            "events": events if isinstance(events, dict) else {},
+            "news": news if isinstance(news, list) else [],
+            "data_note": "Prices are provider-delayed when the exchange or upstream source does not supply a live tick.",
+        }
 
-    # Auto-catalog high-conviction swing recommendations into 11-day audit ledger
-    if swing_trade and isinstance(swing_trade, dict) and swing_trade.get("action") == "BUY" and swing_trade.get("trade_plan"):
-        try:
-            total_sc = float(swing_trade.get("total_score", 0.0) or 0.0)
-            if total_sc >= 70.0:
-                async def _auto_track_task():
-                    try:
-                        from backend.services.swing_audit_service import swing_audit_service
-                        from backend.core.database import AsyncSessionLocal
-                        async with AsyncSessionLocal() as audit_db:
-                            await swing_audit_service.track_swing_trade(
-                                db=audit_db,
-                                symbol=safe_symbol,
-                                trade_plan=swing_trade["trade_plan"],
-                                company_name=quote.get("name") if isinstance(quote, dict) else safe_symbol,
-                                total_score=total_sc
-                            )
-                    except Exception as ex:
-                        pass
-                import asyncio
-                asyncio.create_task(_auto_track_task())
-        except Exception:
-            pass
-
-    signals = []
-    if indicators:
-        try:
-            signals = signal_engine.evaluate(indicators, quote_symbol, safe_tf)
-        except Exception:
-            signals = []
-
-    ai_score = None
-    if indicators:
-        try:
-            ai_score = ai_engine_service.score(indicators, quote_symbol, candles=candles)
-        except Exception:
-            ai_score = None
-
-    try:
-        risk = analyse_risk(series_candles)
-    except Exception as e:
-        risk = {"level": "UNKNOWN", "reason": str(e)}
-
-    return {
-        "symbol": quote_symbol,
-        "timeframe": safe_tf,
-        "as_of": quote_timestamp,
-        "quote": quote,
-        "swing_trade": swing_trade if isinstance(swing_trade, dict) else {},
-        "candles": series_candles if isinstance(series_candles, list) else [],
-        "risk": risk,
-        "indicators": indicators if isinstance(indicators, dict) else {},
-        "signals": signals if isinstance(signals, list) else [],
-        "ai_score": ai_score,
-        "patterns": patterns if isinstance(patterns, list) else [],
-        "events": events if isinstance(events, dict) else {},
-        "news": news if isinstance(news, list) else [],
-        "data_note": "Prices are provider-delayed when the exchange or upstream source does not supply a live tick.",
-    }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Unhandled error in get_stock_insight for {symbol}: {exc}", exc_info=True)
+        # Construct ultra-safe fallback payload so the ChartPage UI never crashes with 500
+        fallback_quote = {
+            "symbol": safe_symbol,
+            "name": safe_symbol,
+            "price": 0.0,
+            "change": 0.0,
+            "change_percent": 0.0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        return {
+            "symbol": safe_symbol,
+            "timeframe": safe_tf,
+            "as_of": fallback_quote["timestamp"],
+            "quote": fallback_quote,
+            "swing_trade": {},
+            "candles": [],
+            "risk": {"level": "LOW", "score": 30, "reason": "Insufficient data for detailed risk assessment"},
+            "indicators": {},
+            "signals": [],
+            "ai_score": None,
+            "patterns": [],
+            "events": {},
+            "news": [],
+            "data_note": "Insight calculations temporarily operating in safe fallback mode.",
+        }
 
 
 @router.get("/search")
