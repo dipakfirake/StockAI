@@ -159,6 +159,21 @@ class ScreenerService:
             "all_results": all_results
         }
 
+        # Automatically catalog high-conviction BUY setups into active 11-day audit ledger & Excel
+        if buy_stocks:
+            async def _auto_catalog_screener_buys(stocks_to_catalog):
+                try:
+                    from backend.services.swing_audit_service import SwingAuditService
+                    from backend.core.database import AsyncSessionLocal
+                    async with AsyncSessionLocal() as audit_db:
+                        await SwingAuditService.track_batch_swing_trades(
+                            db=audit_db,
+                            stocks=stocks_to_catalog
+                        )
+                except Exception as ex:
+                    logger.warning(f"Failed to auto-catalog screener buys into audit: {ex}")
+            asyncio.create_task(_auto_catalog_screener_buys(list(buy_stocks)))
+
         # Dynamic market-hours cache (60s open, 1 hour closed)
         await cache_set(cache_key, output, ttl=get_dynamic_screener_ttl())
         return output

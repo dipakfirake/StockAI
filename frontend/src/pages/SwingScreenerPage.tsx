@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { marketApi, paperTradingApi, alertsApi } from '../services/api'
+import { marketApi, paperTradingApi, alertsApi, swingAuditApi } from '../services/api'
 import { 
   TrendingUp, TrendingDown, Minus, RefreshCw, Search, Filter, 
   ExternalLink, Briefcase, Bell, CheckCircle2, ShieldAlert, 
@@ -99,7 +99,24 @@ export default function SwingScreenerPage() {
   const [data, setData] = useState<ScreenerResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [syncingAudit, setSyncingAudit] = useState(false)
   const [tradingSymbol, setTradingSymbol] = useState<string | null>(null)
+
+  const handleSyncAudit = async () => {
+    setSyncingAudit(true)
+    try {
+      const res = await swingAuditApi.sync()
+      toast.success(
+        '11-Day Audit Synced!',
+        `Evaluated ${res.data.updated_count || 0} stocks | Win Rate: ${res.data.win_rate ?? 0}% | P&L: ₹${res.data.total_pnl_rupees ?? 0}`
+      )
+    } catch (err: any) {
+      console.error('Audit sync failed:', err)
+      toast.error('Audit sync failed', err?.response?.data?.detail || err.message)
+    } finally {
+      setSyncingAudit(false)
+    }
+  }
 
   const fetchScreener = async (forceRefresh = false) => {
     if (forceRefresh) setRefreshing(true)
@@ -221,6 +238,28 @@ export default function SwingScreenerPage() {
           >
             <RefreshCw size={15} className={refreshing ? 'spin' : ''} />
             <span>{refreshing ? 'Scanning...' : 'Run Fresh Scan'}</span>
+          </button>
+
+          <button 
+            onClick={handleSyncAudit} 
+            disabled={syncingAudit}
+            className="btn btn-secondary no-shrink"
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              gap: 8, 
+              height: 38, 
+              whiteSpace: 'nowrap', 
+              flex: '0 0 auto',
+              color: '#34d399',
+              borderColor: 'rgba(52, 211, 153, 0.3)',
+              background: 'rgba(52, 211, 153, 0.08)'
+            }}
+            title="Fetch today's closing prices for all tracked stocks, check SL/Targets, and update Excel spreadsheet"
+          >
+            <RefreshCw size={15} className={syncingAudit ? 'spin' : ''} />
+            <span>{syncingAudit ? 'Syncing...' : 'Sync 11-Day Prices'}</span>
           </button>
 
           <a 

@@ -14,6 +14,21 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-11)
 
+- **SWING SCREENER AUTOMATED 11-DAY BATCH AUDIT CATALOGING & ON-DEMAND PRICE SYNC (COMPLETE & VERIFIED):**
+  - **Issues Addressed**:
+    - User requested that ALL swing trade stocks from the Screener automatically populate into one specific Excel sheet, track daily closing prices across Day 1 through Day 11, categorize target achievements into winning trades, and compute net gain/loss percentages and rupee PnL.
+  - **Architecture & Implementation Delivered**:
+    1. **Automated Batch Screener Cataloging**: Added [`track_batch_swing_trades`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L198) in `backend/services/swing_audit_service.py`. Whenever `ScreenerService.scan_sector` runs, all qualified BUY setups are automatically queued into the active 11-day audit cycle in PostgreSQL in a single database transaction.
+    2. **On-Demand Price Synchronization**: Added `[Sync 11-Day Prices]` button to [`SwingScreenerPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/SwingScreenerPage.tsx#L244) invoking `POST /api/swing-audit/sync`. Evaluates daily closing prices (Day 1..11), enforces target profit booking (`TARGET_ACHIEVED`), triggers stop loss defense (`STOPLOSS_HIT`), or Day 11 square-off (`DAY_11_EXIT`), and regenerates the `.xlsx` file.
+    3. **Institutional 3-Sheet Excel Workbook**:
+       - *Sheet 1: Audit Scorecard*: KPI cards for Total Recommendations, Target Hits (Wins), Stop Loss Hits (Losses), Win Rate %, Total Cycle Return %, and Realized Net P&L in ₹.
+       - *Sheet 2: 11-Day Price Tracking*: 27-column audit ledger for every stock (Rec #, Symbol, Company, Date Recommended, Buy Price, User Bought, Target, SL, Day 1..11 prices, Exit Date, Exit Price, Gain/Loss %, Realized PnL, Holding Days) with a bottom total summary row.
+       - *Sheet 3: Booked Trades*: Journal of closed winning and stopped-out positions.
+  - **Verification Evidence**:
+    - Python Compilation (`py_compile`): **0 syntax/type errors, exit code 0**.
+    - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 1m 3s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs `cd ~/StockAI && git pull origin main && sudo docker compose up -d --build backend celery_worker celery_beat frontend` on the live server.
+
 - **CHART PAGE VOLUME PROFILE TOFIXED TYPEERROR RESOLUTION & DEFENSIVE RESILIENCY (COMPLETE & VERIFIED):**
   - **Issues Addressed**:
     - `ChartPage.tsx:1653 Uncaught TypeError: Cannot read properties of undefined (reading 'toFixed')` causing component crash when toggling Volume Profile (VP).

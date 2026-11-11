@@ -195,6 +195,85 @@ class SwingAuditService:
         return audit
 
     @staticmethod
+    async def track_batch_swing_trades(
+        db: AsyncSession,
+        stocks: list[dict],
+        recommendation_date: Optional[date] = None,
+    ) -> int:
+        """
+        Catalogs a batch of recommended swing trade setups into the active 11-day audit cycle.
+        Idempotent: skips existing recommendations for the same symbol on the same date.
+        Updates daily prices and generates Excel report once after the batch is added.
+        """
+        if not stocks:
+            return 0
+
+        rec_date = recommendation_date or date.today()
+        cycle = await SwingAuditService.get_or_create_active_cycle(db, rec_date)
+
+        added_count = 0
+        for stock_data in stocks:
+            symbol = stock_data.get("symbol", "")
+            trade_plan = stock_data.get("trade_plan")
+            if not symbol or not trade_plan or not isinstance(trade_plan, dict):
+                continue
+
+            norm_symbol = symbol.strip().upper()
+            if not norm_symbol.endswith(".NS") and not norm_symbol.endswith(".BO") and not norm_symbol.startswith("^"):
+                norm_symbol = f"{norm_symbol}.NS"
+
+            # Check for duplicate
+            existing_stmt = select(SwingTradeAudit).where(
+                and_(
+                    SwingTradeAudit.cycle_id == cycle.id,
+                    SwingTradeAudit.symbol == norm_symbol,
+                    SwingTradeAudit.recommendation_date == rec_date
+                )
+            )
+            existing = (await db.execute(existing_stmt)).scalars().first()
+            if existing:
+                continue
+
+            buy_price = Decimal(str(round(float(trade_plan.get("entry_price") or trade_plan.get("current_price") or 0.0), 2)))
+            target_price = Decimal(str(round(float(trade_plan.get("target_price") or trade_plan.get("target_2") or (float(buy_price) * 1.06)), 2)))
+            stop_loss = Decimal(str(round(float(trade_plan.get("stop_loss") or (float(buy_price) * 0.96)), 2)))
+
+            t1 = Decimal(str(round(float(trade_plan.get("target_1")), 2))) if trade_plan.get("target_1") else None
+            t2 = Decimal(str(round(float(trade_plan.get("target_2")), 2))) if trade_plan.get("target_2") else target_price
+            t3 = Decimal(str(round(float(trade_plan.get("target_3")), 2))) if trade_plan.get("target_3") else None
+            rr = Decimal(str(round(float(trade_plan.get("reward_to_risk") or 2.0), 2)))
+            total_sc = stock_data.get("total_score")
+            score_dec = Decimal(str(round(float(total_sc), 1))) if total_sc is not None else None
+
+            audit = SwingTradeAudit(
+                cycle_id=cycle.id,
+                symbol=norm_symbol,
+                company_name=stock_data.get("name") or norm_symbol.replace(".NS", ""),
+                recommendation_date=rec_date,
+                buy_price=buy_price,
+                target_price=target_price,
+                stop_loss=stop_loss,
+                target_1=t1,
+                target_2=t2,
+                target_3=t3,
+                reward_to_risk=rr,
+                total_score=score_dec,
+                status="IN_PROGRESS",
+                allocated_capital=Decimal("100000.00"),
+                user_bought=False,
+                notes=f"Auto-cataloged from Swing Trade Screener (Score: {total_sc or 'N/A'})"
+            )
+            db.add(audit)
+            added_count += 1
+
+        if added_count > 0:
+            await db.commit()
+            logger.info(f"Batch cataloged {added_count} swing recommendations into Cycle #{cycle.cycle_number}")
+            await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
+
+        return added_count
+
+    @staticmethod
     async def update_daily_prices(db: AsyncSession, cycle_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
         """
         Evaluates daily price progression (Day 1..11) for all audited stocks in the cycle.
