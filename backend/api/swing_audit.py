@@ -127,6 +127,13 @@ async def download_latest_audit_excel(
         excel_path_obj = await swing_audit_service.generate_excel_workbook(db, cycle.id)
         excel_path = str(excel_path_obj) if excel_path_obj else None
 
+    # Defensive fallback: check target filename directly in audit directory
+    if not excel_path or not os.path.exists(excel_path):
+        filename = f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
+        fallback_file = swing_audit_service.get_audit_dir() / filename
+        if fallback_file.exists():
+            excel_path = str(fallback_file)
+
     if not excel_path or not os.path.exists(excel_path):
         raise HTTPException(status_code=404, detail="Audit Excel file has not been generated yet.")
 

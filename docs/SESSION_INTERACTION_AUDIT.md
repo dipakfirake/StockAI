@@ -3486,3 +3486,24 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Python Syntax Verification (`py_compile`): **0 syntax/type errors, exit code 0**.
   - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 1m 3s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide transparent architectural clarification to the user explaining how the system works, where the files are stored, and how to use it.
+
+
+---
+
+### Session Entry 69: Server Audits Directory Resolution, Automatic Path Anchoring, and Complete System Walkthrough
+- **Timestamp:** 2026-11-11 23:20:00 IST (17:50:00 UTC)
+- **User Prompt:**
+  `"[opc@stockai-server StockAI]$ cd ~/StockAI\nls -lh ~/StockAI/audits/swing_trades/\nls: cannot access '/home/opc/StockAI/audits/swing_trades/': No such file or directory"`
+- **Root Cause Analysis & Forensic Discoveries**:
+  1. **Folder Absence on Host**:
+     - Git natively does not commit empty folders. Therefore, `audits/swing_trades/` was not automatically created on the server upon repository clone or pull.
+     - On the live server, the user ran `ls -lh ~/StockAI/audits/swing_trades/` prior to pulling the latest code and rebuilding the container stack with the `./audits:/app/audits` volume mount.
+  2. **Audit Directory Creation & Tracking Resolution**:
+     - Created `audits/swing_trades/.gitkeep` and modified `.gitignore` (`audits/**/*.xlsx` ignored, `!audits/**/.gitkeep` un-ignored) so Git explicitly tracks and creates the directory on the host when running `git pull origin main`.
+     - In `backend/services/swing_audit_service.py`, guarded the docker path check with `(os.name == "posix" and Path("/app").is_dir())` to avoid Windows SMB network lookup timeouts.
+     - In `generate_excel_workbook`, added explicit `target_path.parent.mkdir(parents=True, exist_ok=True)` and automatic persistence of `cycle.excel_file_path = str(target_path)`.
+     - In `backend/api/swing_audit.py` (`GET /download-latest`), added defensive fallback to locate the file in `get_audit_dir()` if the cycle record has not yet cached the absolute path.
+- **Verification Evidence**:
+  - Frontend TypeScript/Vite Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 53.19s (exit code 0)**.
+  - Python Syntax & Structure: Verified.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide user with step-by-step clarification of the 11-day audit and Excel system, and provide exact copy-pasteable commands for their live server terminal.

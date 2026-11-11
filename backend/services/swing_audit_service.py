@@ -22,13 +22,15 @@ from backend.services.market_data import market_data_service
 logger = get_logger(__name__)
 
 # Base folder for persisted audit spreadsheets
-AUDIT_REPORTS_DIR = Path("audits/swing_trades")
+AUDIT_REPORTS_DIR = Path("/app/audits/swing_trades") if (os.name == "posix" and Path("/app").is_dir()) else Path("audits/swing_trades")
 
 
 def get_audit_dir() -> Path:
     """Ensures audit reports directory exists and returns Path object."""
-    AUDIT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    return AUDIT_REPORTS_DIR
+    env_dir = os.environ.get("AUDIT_DIR")
+    target_dir = Path(env_dir) if env_dir else AUDIT_REPORTS_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    return target_dir
 
 
 def add_trading_days(start_date: date, num_days: int) -> date:
@@ -786,8 +788,20 @@ class SwingAuditService:
             ws_closed.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
         # Save workbook to destination path
-        target_path = Path(cycle.excel_file_path or (get_audit_dir() / f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"))
+        audit_dir = get_audit_dir()
+        filename = (
+            Path(cycle.excel_file_path).name 
+            if cycle.excel_file_path 
+            else f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
+        )
+        target_path = audit_dir / filename
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(target_path)
+        
+        if cycle.excel_file_path != str(target_path):
+            cycle.excel_file_path = str(target_path)
+            await db.commit()
+
         logger.info(f"Generated institutional Swing Audit Excel workbook: {target_path}")
         return target_path
 

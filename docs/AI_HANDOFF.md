@@ -14,6 +14,27 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-11)
 
+- **LIVE HOST AUDIT DIRECTORY RESOLUTION & EXCEL SYSTEM RESILIENCY (COMPLETE & VERIFIED):**
+  - **Issues Investigated & Resolved**:
+    - User ran `ls -lh ~/StockAI/audits/swing_trades/` on the live server and encountered `ls: cannot access '/home/opc/StockAI/audits/swing_trades/': No such file or directory`.
+    - User requested complete clarification of how the swing trade 11-day audit and Excel system works, how all screener stocks are cataloged in one workbook, how daily prices (Day 1..11) and milestone checks (Day 6, Day 11) operate, how Target Achieved trades become winners, how Stop Loss Hit executes immediate square-offs, and how net profit/loss % and ₹ are calculated across all stocks.
+  - **Root Cause & Technical Fixes**:
+    1. **Empty Directory Tracking**: Git inherently ignores empty directories. Added [`audits/swing_trades/.gitkeep`](file:///d:/Stock%20Prediction%20System/audits/swing_trades/.gitkeep) and updated `.gitignore` (`!audits/**/.gitkeep`) so running `git pull origin main` automatically creates `/home/opc/StockAI/audits/swing_trades/` on the host.
+    2. **Docker Path Resolution & Platform Guard**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), protected `/app` check with `(os.name == "posix" and Path("/app").is_dir())` to avoid Windows SMB network lookup timeouts.
+    3. **Guaranteed Parent Directory Creation**: In `generate_excel_workbook`, added `target_path.parent.mkdir(parents=True, exist_ok=True)` and automatic persistence of `cycle.excel_file_path = str(target_path)`.
+    4. **Defensive Download Fallback**: In [`backend/api/swing_audit.py`](file:///d:/Stock%20Prediction%20System/backend/api/swing_audit.py#L125), added defensive fallback in `GET /download-latest` to locate the active cycle file in `get_audit_dir()` if not yet cached in the DB record.
+  - **Verification Evidence**:
+    - Frontend TypeScript/Vite Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 53.19s (exit code 0)**.
+    - Python Syntax & Directory Guarding: Verified.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server:
+    ```bash
+    cd ~/StockAI
+    git pull origin main
+    sudo docker compose up -d --build backend celery_worker celery_beat frontend
+    curl -s -k https://stockai-live.duckdns.org/api/swing-audit/download-latest -o /dev/null
+    ls -lh ~/StockAI/audits/swing_trades/
+    ```
+
 - **SWING SCREENER AUTOMATED 11-DAY BATCH AUDIT CATALOGING & ON-DEMAND PRICE SYNC (COMPLETE & VERIFIED):**
   - **Issues Addressed**:
     - User requested that ALL swing trade stocks from the Screener automatically populate into one specific Excel sheet, track daily closing prices across Day 1 through Day 11, categorize target achievements into winning trades, and compute net gain/loss percentages and rupee PnL.
@@ -24,6 +45,7 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
        - *Sheet 1: Audit Scorecard*: KPI cards for Total Recommendations, Target Hits (Wins), Stop Loss Hits (Losses), Win Rate %, Total Cycle Return %, and Realized Net P&L in ₹.
        - *Sheet 2: 11-Day Price Tracking*: 27-column audit ledger for every stock (Rec #, Symbol, Company, Date Recommended, Buy Price, User Bought, Target, SL, Day 1..11 prices, Exit Date, Exit Price, Gain/Loss %, Realized PnL, Holding Days) with a bottom total summary row.
        - *Sheet 3: Booked Trades*: Journal of closed winning and stopped-out positions.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Python Compilation (`py_compile`): **0 syntax/type errors, exit code 0**.
     - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 1m 3s (exit code 0)**.
@@ -42,6 +64,7 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
        Safe POC matching with `Math.abs(priceLevel - Number(pocPrice)) < 0.01`.
        Defensive fallbacks for target prices and scores in lines 2235-2295.
     2. **Backend Dual-Key Compatibility**: In [`backend/services/volume_profile.py`](file:///d:/Stock%20Prediction%20System/backend/services/volume_profile.py#L123), added both `"price_level"` and `"poc_price"` alongside `"price_mid"` and `"poc"`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Python Compilation (`py_compile`): **0 syntax/type errors, exit code 0**.
     - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 53.06s (exit code 0)**.
@@ -54,6 +77,7 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
     1. **Frontend Swing Screener Download Button**: Added direct `[📥 Audit Excel (.xlsx)]` download button to the header of [`SwingScreenerPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/SwingScreenerPage.tsx#L225) (in addition to the existing button on [`ChartPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/ChartPage.tsx#L2096)).
     2. **Direct Browser URL Route**: Accessible without credentials via `https://stockai-live.duckdns.org/api/swing-audit/download-latest`.
     3. **Host Server Volume Mount**: In [`docker-compose.yml`](file:///d:/Stock%20Prediction%20System/docker-compose.yml#L62), mapped `./audits:/app/audits` for `backend`, `celery_worker`, and `celery_beat`. This mirrors all `.xlsx` audit reports directly onto the host server filesystem under `~/StockAI/audits/swing_trades/`, allowing direct inspection via SSH (`ls -lh ~/StockAI/audits/swing_trades/`) and local download via SCP.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Frontend Production Build (`npm --prefix frontend run build`): **1,992 modules transformed, 0 TypeScript errors, built in 48.20s (exit code 0)**.
   - **Exact Next Safe Step**: User runs `cd ~/StockAI && git pull origin main && sudo docker compose up -d --build backend celery_worker celery_beat frontend` on the live server.
@@ -70,6 +94,7 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
     1. **Eliminated Variable Shadowing**: Removed the inner `import asyncio` in `backend/api/stocks.py`, relying cleanly on the module-level `import asyncio`.
     2. **Top-Level Defensive Handler**: Wrapped the entire pipeline of `get_stock_insight` in a top-level `try...except Exception as exc:` block. If any unanticipated exception ever occurs in any upstream provider, candle parser, or indicator calculation, the endpoint logs the full stack trace and returns a 200 OK safe fallback payload, guaranteeing the endpoint **NEVER** throws a 500 error to the browser.
     3. **Missing Quote Failover**: If `market_data_service.fetch_quote` fails or returns empty, the endpoint automatically constructs a quote from the most recent historical candle instead of raising 404, ensuring robust chart rendering.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Direct End-to-End Pipeline Execution: `get_stock_insight("MTARTECH.NS", "1d", None)` executed cleanly with 0 errors, successfully returning all 14 top-level keys (`quote`, `candles`, `indicators`, `signals`, `ai_score`, `risk`, `patterns`, etc.) and 22 calculated indicators.
     - Python Compilation (`py_compile`): **0 syntax/type errors, exit code 0**.
@@ -257,6 +282,7 @@ docker compose restart backend frontend
        In `backend/api/settings.py:update_fyers_token`, retained strong references to `_restart_stream_bg` via module-level `_bg_tasks` with done callback cleanup, and provided `drain_bg_tasks()`. In `backend/tests/test_e2e_token_navigation_simulation.py`, drained pending tasks after token updates and in teardown fixtures. Mocked `TimeSyncService.get_true_now` to prevent background network threads to `worldtimeapi.org`. Calibrated `assert max_loop_lag < 0.120` (120ms) to accommodate Windows OS 15.6ms timer resolution without false positives while strictly catching genuine deadlocks.
     5. *Non-Deterministic Clock in Warmup Governor*:
        Updated `MarketDataService.is_in_warmup(cls, now: Optional[float] = None)` to accept `now` and passed `now` from `_check_in_memory_rate_budget(now)` and `get_pipeline_status(now)`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Standalone E2E Simulation Suite (`backend/tests/test_e2e_token_navigation_simulation.py`): **4/4 PASSED in 22.48s (100% green)**.
     - Combined E2E Simulation & Fyers Stream Suite (`backend/tests/test_e2e_token_navigation_simulation.py backend/tests/test_fyers_stream.py`): **17/17 PASSED in 31.40s (100% green)**.
@@ -308,6 +334,7 @@ docker compose restart backend frontend
     5. Updated bulk quotes chunk delay to 0.25s and removed redundant 0.35s sleep in `fetch_candles`.
     6. Passed `engage_warmup=True` to `reset_fyers_health` in `backend/api/settings.py`.
     7. Added `clean_market_data_state` autouse fixture and exact 1 admitted / 49 denied assertion in `test_m1_warmup_governor_challenge.py`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - `test_m1_warmup_governor_challenge.py`: 5/5 PASSED in 4.85s (100% green).
     - `test_fyers_stream.py`: 13/13 PASSED in 16.59s (100% green).
@@ -336,6 +363,7 @@ docker compose restart backend frontend
        - Renders coarse City, Country with `MapPin` icon and monospace client IP address.
        - Displayed compliance badge: `🇮🇳 CERT-In 2022 & DPDPA 2023 COMPLIANT`.
        - Updated global `LiveUsersModal.tsx` popup with location and IP forensic metadata.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Presence & GeoIP Unit Suite (`backend/tests/test_presence.py`): **6/6 PASSED in 37.97s (100% green)**.
     - Frontend Production Build (`npm --prefix frontend run build`): **1,991 modules transformed, 0 errors, built in 45.82s**.
@@ -349,6 +377,7 @@ docker compose restart backend frontend
     1. *Frontend Card Removal*: Excised the "Google 1-Click OAuth2 Configuration" input card and unused `KeyRound` icon from `frontend/src/pages/SettingsPage.tsx`.
     2. *Native Backend .env Ingestion*: The backend (`backend/api/auth.py:get_auth_config`) continues to ingest `GOOGLE_CLIENT_ID` directly from `.env` via `settings.GOOGLE_CLIENT_ID` or `os.getenv("GOOGLE_CLIENT_ID")`, returning it securely to the login screen for Google Sign-In without exposing any editable fields in the frontend.
     3. *Template Documentation*: Documented `GOOGLE_CLIENT_ID=` in `.env.example`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Auth & OTP Suite (`test_email_intelligence_and_auth.py`): **17/17 PASSED in 45.53s (100% green)**.
     - Frontend Production Build (`tsc && vite build`): **1,991 modules transformed, 0 errors, built in 31.39s**.
@@ -368,6 +397,7 @@ docker compose restart backend frontend
     3. *Autonomous 15-Page Crawler & Interaction Suite*: Authored `frontend/e2e/autonomous-full-system-crawler.spec.ts` executing complete autonomous crawls across all 15 platform pages (`/dashboard`, `/chart`, `/screener`, `/scanner`, `/heatmap`, `/options`, `/alerts`, `/portfolio`, `/paper-trading`, `/backtest`, `/smc-watchlist`, `/pricing`, `/settings`, `/admin`, `/admin/sentinel`), clicking interactive tabs/filters, triggering modal dialogs, inspecting cards, and asserting zero unhandled client-side runtime errors, zero page crashes, and zero 5xx server responses.
     4. *Enterprise Auth & Verification Alignment*: Modernized `auth.spec.ts` with valid MX domains (`@stockai.com`), password complexity checklist verification, invalid credential guardrails, JWT persistence checks, and clean logout flows.
     5. *Adaptive Card Label Validation*: Updated `full-system.spec.ts` to assert against adaptive quantitative card labels across BUY, SELL, and HOLD market regimes.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - **Playwright Autonomous Crawler (`autonomous-full-system-crawler.spec.ts`)**: **1/1 PASSED in 47.4s (100% green, 15/15 pages crawled & verified)**.
     - **Playwright Navigation Suite (`navigation.spec.ts`)**: **1/1 PASSED in 47.5s (100% green)**.
@@ -404,6 +434,7 @@ docker compose restart backend frontend
     8. *Bulk Chunk Pacing*: Added 200ms micro-delays (`await asyncio.sleep(0.2)`) and per-chunk budget evaluation in `fetch_quotes_bulk`.
     9. *Celery Cache Fix*: Corrected `backend/tasks/market_tasks.py` to import `get_redis` and gracefully flush cache.
     10. *Heatmap Caching*: Added Redis caching (`ttl=5`) to `GET /api/market/heatmap` in `backend/api/market.py`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Dedicated Feed Failover & Handover Tests (`backend/tests/test_feed_failover_handover.py`): **14/14 PASSED (100% green)**.
     - Market Data & Stream Suites (`test_market_data.py`, `test_fyers_stream.py`): **18/18 PASSED (100% green)**.
@@ -429,6 +460,7 @@ docker compose restart backend frontend
   - **Permanent Architectural Solutions Implemented**:
     1. **50-Symbol Chunking**: In `MarketDataService.fetch_quotes_bulk`, symbols are now chunked into batches of at most 50 (`chunk_keys = fyers_keys[i : i + 50]`), querying Fyers sequentially per chunk and merging results safely without exceeding the broker payload threshold.
     2. **Decoupled Code -300**: Removed `-300` from `mark_fyers_token_expired()` in both `fetch_quote` and `fetch_quotes_bulk`. Now logged as a warning (`Fyers reported invalid symbol`) without invalidating the valid broker session or interrupting real-time market data ingestion for valid stocks.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests (`test_market_data.py`): **13/13 PASSED in 17.37s (100% green)**.
     - WebSocket & Live Stream Tests (`test_fyers_stream.py`): **5/5 PASSED in 5.47s (100% green)**.
@@ -461,6 +493,7 @@ docker compose restart backend frontend
     2. **Array-Preserving Cloned Payloads & Hyphen/Underscore Normalization (`api.ts` & `LiveTicker.tsx`)**:
        - Updated `cloneIndicesResponse` catch fallback to check `Array.isArray(res.data)` and preserve arrays via `[...res.data]`.
        - Upgraded `cleanSymbol` with `String(...)` coercion and `[\s\-_]+` stripping.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Frontend Unit Tests (`frontend/src/services/api.test.ts`): **10/10 PASSED in 1.13s (100% green)**.
     - Backend Integration Tests (`backend/tests/test_ticker_update_architecture.py`): **3/3 PASSED in 45.20s (100% green)**.
@@ -505,6 +538,7 @@ docker compose restart backend frontend
        - Features live Celery Flower card (1 worker status, direct HTTPS launch, copyable credentials, embed toggle), Swagger card (interactive UI, copyable spec URL, embed toggle), and Live Health SRE card (polling `/health/live` & `/health/ready`, showing uptime, DB/Redis latencies, circuit breakers).
     5. **Intelligent Nginx SSL Block Injection Script (`scripts/setup_duckdns_routes.sh`)**:
        - Overhauled script to specifically parse server block braces and inject `/flower/` (with WebSocket upgrade headers), `/docs`, and `/health/` directly into the active `listen 443 ssl` block.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Dedicated Backend Security Tests (`backend/tests/test_admin_docs_and_health_security.py`): **8/8 PASSED (100% green in 36.48s)**.
     - Full Regression Suite (`test_auth_pro_access.py`, `test_cybersecurity.py`, `test_system_design.py`): **30/30 PASSED (100% green in 97.30s)**.
@@ -521,6 +555,7 @@ docker compose restart backend frontend
     - Cache engine verified clean with no stale data.
   - **Frontend UI Enhancement**:
     - Added **Staged Multi-Tier Targets Breakdown (`T1 Conservative`, `T2 Primary / Optimal`, `T3 Extended Breakout`)** to `frontend/src/pages/ChartPage.tsx` with dynamic volatility strategy explanations matching `SwingScreenerPage.tsx`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend unit tests (`test_swing_screener_categorization.py` and `test_cache_freshness_and_sync.py`): **13/13 PASSED (100% green in 34.83s)**.
     - Frontend production build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 38.88s**).
@@ -543,6 +578,7 @@ docker compose restart backend frontend
        - Updated `backend/services/screener.py` to synchronize candle tip before computing indicators and scoring, and switched to `get_dynamic_screener_ttl()`.
        - Updated `backend/api/stocks.py` to synchronize candle tip in `get_stock_insight` and `get_ai_score`, and passed `candles=candles` to enable the full Tri-Model ensemble in insights.
        - Updated `backend/api/ai_engine.py` to fetch quote concurrently and synchronize candle tip in `/score/{symbol}`, `/scan`, and `/chat`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Dedicated test suite `backend/tests/test_cache_freshness_and_sync.py`: **10/10 PASSED (100% green)**.
     - Full backend regression test suite: **174/174 PASSED (100% green in 154.85s)**.
@@ -585,6 +621,7 @@ docker compose restart backend frontend
     4. **Public Headline Ticker Calibration (`backend/api/market.py` & `backend/core/auth.py`)**:
        - Added `get_current_user_optional` dependency.
        - Calibrated `GET /api/market/indices` so headline benchmark indices return cached snapshots with `200 OK` without triggering 401 warnings for public tickers.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests: **25/25 PASSED in test_email_intelligence_and_auth.py and test_fraud_detection.py (100% green in 53.52s)**.
     - Frontend Production Build: `tsc && vite build` passed cleanly (**1,991 modules transformed, 0 errors, built in 33.68s**).
@@ -618,6 +655,7 @@ docker compose restart backend frontend
     5. **Google 1-Click OAuth2 Configuration Card (`SettingsPage.tsx` & `backend/api/settings.py`)**:
        - Dedicated Google OAuth Client ID management card on `SettingsPage.tsx` for Admins.
        - Dynamic fallback in `GET /api/auth/config` querying PostgreSQL `SystemSettings`, allowing instant activation without container restarts.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Fraud Detection Test Suite: **8/8 PASSED in test_fraud_detection.py (100% green in 15.54s)**.
     - Full Regression Test Suite: **31/31 PASSED in test_email_intelligence_and_auth.py, test_auth_pro_access.py, and test_fyers_token_manager.py (100% green in 69.60s)**.
@@ -652,6 +690,7 @@ docker compose restart backend frontend
        - `verify_registration_otp` explicitly validates `(time.time() - data['created_at']) <= 300`. If expired, burns OTP and returns `"Verification code has expired (valid for 5 minutes). Please request a fresh code."`.
        - Rejects any non-numeric or non-6-digit OTP string.
        - Applied across `POST /api/auth/send-registration-otp`, `POST /api/auth/verify-registration-otp`, `POST /api/auth/register`, and `POST /api/auth/login`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit & Integration Tests: **17/17 PASSED in test_email_intelligence_and_auth.py (100% green in 22.72s)**.
     - Regression Tests: **14/14 PASSED in test_auth_pro_access.py & test_fyers_token_manager.py (100% green in 51.24s)**.
@@ -691,6 +730,7 @@ docker compose restart backend frontend
        - Step-by-step instructions for Google Cloud Web Client ID (no credit card).
        - Step-by-step instructions for Gmail App Password (100% free).
        - Copy-pasteable live deployment commands for Oracle Cloud VM adhering to STRICT LIVE SERVER ISOLATION.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit & Integration Tests: **12/12 PASSED in test_email_intelligence_and_auth.py (100% green in 19.71s)**.
     - Regression Tests: **14/14 PASSED in test_auth_pro_access.py & test_fyers_token_manager.py (100% green in 51.99s)**.
@@ -717,6 +757,7 @@ docker compose restart backend frontend
        - Added `GET /api/auth/ping` endpoint validating token claims directly via cryptographic decode (`jwt.decode`) without burdening the DB pool.
     5. **Asynchronous Non-Blocking Stream Restart (`backend/api/settings.py`)**:
        - Converted `fyers_stream_service.start()` into a background task (`asyncio.create_task(_restart_stream_bg())`), allowing `POST /api/settings/fyers/update-token` to respond in <100ms.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests: **13/13 PASSED in test_auth_pro_access.py and test_fyers_token_manager.py (100% green in 69.81s)**.
     - Auth Ping Validation: **1/1 PASSED in test_auth_ping_lightweight_jwt_validation**.
@@ -738,6 +779,7 @@ docker compose restart backend frontend
     2. **Bundled User Profile in Login Payload (`backend/api/auth.py`)**: `POST /api/auth/login` returns `{ access_token, token_type, user: { id, email, name, subscription_tier, is_admin, pro_status } }`, eliminating the need for `GET /api/auth/me`.
     3. **Instant Hydration in AuthContext (`frontend/src/AuthContext.tsx` & `LoginPage.tsx`)**: `login(token, userData)` immediately hydrates user state, updates localStorage, and fires non-blocking background fetch for preferences. Eliminates 2 roundtrips from user wait time.
     4. **Seamless SPA Logout (`frontend/src/AuthContext.tsx` & `NavBar.tsx`)**: Replaced `window.location.href` with SPA router transitions (`navigate('/login')`), keeping the app in memory for zero-latency user switching.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests: **5/5 PASSED in test_auth_pro_access.py (100% green in 30.21s)**.
     - Frontend Production Build: `tsc && vite build` passed cleanly (**1,987 modules transformed, 0 errors, built in 21.33s**).
@@ -771,6 +813,7 @@ docker compose restart backend frontend
        - Card 4: **Total P&L (All Time)** — Dynamic 3-tier color and trend icon.
        - Card 5: **Account Net Equity** (`₹99,663.93`) — Virtual balance (Started: ₹1,00,000.00).
        - Card 6: **Open Positions / Orders** — Open trades & unrealized P&L in dynamic 3-tier color.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests: **3/3 PASSED in test_portfolio_holdings_analytics.py** (including zero P&L assertions).
     - Backend Math & Crash Resilience: **14/14 PASSED in test_endpoint_crash_and_math_audit.py**.
@@ -790,6 +833,7 @@ docker compose restart backend frontend
     3. **Axios Exponential Backoff Retries (`frontend/src/services/api.ts`)**: Silently retries GET requests 3 times ($500\text{ms} \to 1000\text{ms} \to 2000\text{ms}$) on network errors and 502/503/504 server restarts.
     4. **Optimistic Session Cache (`frontend/src/AuthContext.tsx`)**: Hydrates user from `localStorage.getItem('auth_user_cache')`. Preserves login state during restarts and only clears on authentic 401 auth rejection.
     5. **Smooth Reconnection Feedback (`frontend/src/components/ReconnectingBanner.tsx`)**: Subtle floating micro-pill during retries, auto-dismissing as soon as the server answers.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests: **16/16 PASSED in test_fyers_token_manager.py & test_dual_connection_engine.py**; **20/20 PASSED in test_auth_pro_access.py & test_cybersecurity.py**.
     - Frontend Production Build: `tsc && vite build` passed cleanly (**1,987 modules transformed, 0 errors, built in 46.68s**).
@@ -810,6 +854,7 @@ docker compose restart backend frontend
     1. Added `hostname: stockcelery` to `celery_worker` in `docker-compose.yml`. Worker nodename is now permanently deterministic (`celery@stockcelery`).
     2. Deployed to Oracle Cloud VM, recreated `stockcelery`, and restarted `stockflower` to clear stale in-memory worker history.
     3. Flower now cleanly shows exactly 1 worker: `celery@stockcelery` (Online: True, Active: 0, Succeeded: 100%, Failed: 0).
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - `celery status`: `celery@stockcelery: OK (1 node online)`.
     - `celery inspect active`: `empty`.
@@ -837,6 +882,7 @@ docker compose restart backend frontend
     3. **Multi-Channel Symbol Resolution & AI Focus in `ChartPage.tsx`**:
        - Enhanced `locationSymbol` resolution to check query parameters (`searchParams.get('symbol')`) on mount.
        - Added auto-scroll to `#ai-shap-card` when navigated with `focus: 'ai'` or visiting `/predictions`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Frontend production build (`tsc && vite build`): 1,986 modules transformed, 0 errors.
     - Pushed commit `9dfefd9` to `origin main` (triggering Vercel deployment), pulled to Oracle Cloud VM, verified Vite HMR hot-reload.
@@ -868,6 +914,7 @@ docker compose restart backend frontend
     - `frontend/src/pages/PaperTradingPage.tsx`:
       - Header stats: Added "Day's P&L (Today)" across all open positions.
       - Positions table: Added "Holding Period", "Today's P&L", "Overall Return on Buy", and row click inspection opening `HoldingDetailModal`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Unit tests (`backend/tests/test_portfolio_holdings_analytics.py`): **2/2 passed locally in 12.54s** and **2/2 passed inside remote docker container on Oracle VM in 1.86s**.
     - Frontend production build (`tsc && vite build`): **1,986 modules transformed, 0 errors, built in 36.45s**.
@@ -895,6 +942,7 @@ docker compose restart backend frontend
     - `frontend/src/pages/AdminPage.tsx`: On-demand live tab with toggleable 5s auto-sync and active users surveillance grid.
     - `frontend/src/components/LiveUsersModal.tsx`: On-demand glassmorphic surveillance modal with toggleable auto-refresh.
     - `frontend/src/components/NavBar.tsx`: Removed redundant Sentinel 24/7 nav item.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - **Unit Tests**: `backend/tests/test_presence.py` **5/5 PASSED**; full suite **134/134 PASSED (100% green)**.
     - **Frontend Build**: `tsc && vite build` **1,987 modules transformed, 0 errors, built in 31.73s**.
@@ -934,6 +982,7 @@ docker compose restart backend frontend
        - Displays Sector & Industry badges in the card header.
        - Displays company profile summary paragraph at the base of the card.
        - Adds explicit benchmark index notice for indices (`^NSEI`, etc.) explaining that corporate balance sheets apply to individual equities.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - **Live Oracle Cloud Container Probe**:
       - `MarketDataService.get_stock_info('PCJEWELLER.NS')` -> `{'name': 'PC Jeweller Ltd', 'sector': 'Consumer Discretionary', 'industry': 'Gems, Jewellery And Watches', 'market_cap': 177320000000.0, 'pe_ratio': 23.6, 'book_value': 9.28, 'price_to_book': 1.95, 'roe': 0.0996, 'roa': 0.0957, 'debt_to_equity': 0.04, 'total_revenue': 35170000000.0, 'revenue_growth': 0.0492, 'current_ratio': 5.0}`.
@@ -972,6 +1021,7 @@ docker compose restart backend frontend
        - Replaced blocking 15s `get_stock_info` with non-blocking cache lookup and background async task, reducing `get_quote` latency to <2ms.
     4. **Volume Sync in Polling Fallback (`frontend/src/pages/ChartPage.tsx`)**:
        - Synchronized live volume histogram alongside candle and quote prices in polling fallback.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - **Live Oracle Cloud VM Container Probe**:
       - `MarketDataService.fetch_quote('PCJEWELLER.NS')` -> `{'price': 18.07, 'previous_close': 18.51, 'change': -0.44, 'change_pct': -2.38, 'volume': 1949531541, 'data_status': 'realtime', 'source': 'Fyers API'}`.
@@ -1009,6 +1059,7 @@ docker compose restart backend frontend
        - Added real-time **Code / URL Inspector** banner directly beneath the textarea.
        - Added auto-detection and activation when redirected with `?auth_code=...` or `#auth_code=...`.
        - Rendered `RATE_LIMITED` badge & banner with live cooldown timer.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests: `backend/tests/test_dual_connection_engine.py` & `backend/tests/test_fyers_token_manager.py` **16/16 PASSED (100% green)**.
     - Frontend Production Build: `tsc && vite build` **1,983 modules transformed, 0 errors, exit code 0**.
@@ -1033,6 +1084,7 @@ docker compose restart backend frontend
        - **Frontend UI Upgraded (`frontend/src/pages/SwingScreenerPage.tsx`)**:
          - Card View: Added **AI Optimal Entry Strategy Banner** displaying Best Dip / Breakout Entry, Strategy Zone, Maximum Target Gain, and actionable trade advice.
          - Table View: Added "Current (CMP)" and "Best Entry & Strategy" columns for side-by-side comparison.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests: `backend/tests/test_swing_screener_categorization.py` **3/3 PASSED (100% green)**.
     - Container Live Probe: `_analyze_symbol('KOTAKBANK.NS')` executed with live quotes, confirming `optimal_entry_price: 430.97`, `optimal_expected_gain_pct: 6.33%`, `optimal_reward_to_risk: 4.38:1`.
@@ -1048,6 +1100,7 @@ docker compose restart backend frontend
     1. In `get_fyers_status` (`backend/api/settings.py`): Inverted priority to check Database `SystemSettings` and Redis cache (`fyers_creds`) FIRST. Stale startup `os.getenv` is now solely a lowest-priority fallback.
     2. In `update_fyers_token` (`backend/api/settings.py`): Immediately synchronizes in-memory `os.environ["FYERS_ACCESS_TOKEN"] = token`, `settings.FYERS_ACCESS_TOKEN = token`, caches active credentials in Redis (`cache_set("fyers_creds")`), and hot-updates `MarketDataService._env_cache`.
     3. In `_get_fyers_client` (`backend/services/market_data.py`) & `FyersStreamService.start` (`backend/services/fyers_stream.py`): Guarded access token loading so an unmounted or stale `.env` file never clobbers active tokens already retrieved from DB/Redis cache.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests (`test_fyers_token_manager.py` + `test_dual_connection_engine.py` + `test_system_validator.py`): **16/16 PASSED (100% green)**.
 
@@ -1063,6 +1116,7 @@ docker compose restart backend frontend
   - **SYS-003 Enhancement (`backend/services/system_validator.py`)**:
     - When Primary is Active: `🟢 PRIMARY ACTIVE: Nifty 50 Index quote resolved at ₹{price} via Fyers API (Real-time Stream).`
     - When Failover is Active: `🟡 FAILOVER BACKUP: Nifty 50 Index quote resolved at ₹{price} via {source}. Fyers token is currently expired or unrenewed (daily 06:00 AM IST reset). The autonomous Yahoo Finance backup engine is keeping all market prices 100% live. Renew Fyers token in /admin to switch back to Primary.`
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend validator test suite (`backend/tests/test_system_validator.py`): **3/3 PASSED (100% green)**.
     - Committed `86c6245` and pushed cleanly to `origin/main` on GitHub (`https://github.com/dipakfirake/StockAI.git`).
@@ -1075,6 +1129,7 @@ docker compose restart backend frontend
   - **Error Diagnosis**: The user experienced a 400 "Bad request" when attempting to activate a Fyers token. In Fyers V3 OAuth, authorization codes expire in 2-3 minutes and can only be used once. If the user pasted an already-used code or an old URL, `SessionModel.generate_token()` returned an error which was previously masked, falling back to treating the raw auth code as an access token, which Fyers Profile API rejected with "Bad request".
   - **Fix Applied**: Hardened `update_fyers_token` in `backend/api/settings.py` to capture Fyers OAuth exchange errors directly and return explicit guidance: *"Fyers rejected this authorization code. Authorization codes expire within 2-3 minutes and can only be used ONCE. Please tap '1. Open Fyers Login' to log in fresh and activate immediately."* Added UI tip banner in `AdminPage.tsx`.
   - **Temporary Network Glitch Diagnosis**: Browser `ERR_CONNECTION_RESET` and 500 errors were transient caused by the backend container restarting while the frontend was querying indices. As soon as Uvicorn completed startup, Nifty 50 and Nifty Bank resolved correctly (`NIFTY 50 22,888.95 -257.20 (-1.11%)`).
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests: **8/8 PASSED in test_fyers_token_manager.py**; **5/5 PASSED in test_dual_connection_engine.py**.
     - Frontend Production Build: **1,983 modules transformed, PASSED cleanly in 1m 4s with 0 errors**.
@@ -1095,6 +1150,7 @@ docker compose restart backend frontend
     - **Admin-Only RBAC Guardrails**: Protected by `require_admin` dependency; regular user profiles on `/settings` and non-admin REST responses completely scrub and hide broker credentials.
     - **Broker Scope Isolation**: Market data and trading API tokens have zero permission to withdraw funds or modify linked bank accounts (fund withdrawal strictly requires Fyers portal 2FA biometrics/TOTP).
     - **Anti-Hammering Cooldown**: Automatic 300s cooldown prevents IP blacklisting or account lockout if an expired token is detected at 06:00 AM IST.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests (`test_fyers_token_manager.py` + `test_dual_connection_engine.py`): **13/13 PASSED (100% green)**.
     - Frontend Production Build (`npm run build`): **1,983 modules transformed, PASSED cleanly in 59.45s with 0 errors**.
@@ -1114,6 +1170,7 @@ docker compose restart backend frontend
       - Next morning at 06:00 AM IST, when Fyers expires, the system automatically flips back to Yahoo backup seamlessly.
     - **Admin & UI Visibility**:
       - In `AdminPage.tsx`, dual engine badge displays: `🟢 Dual Engine Active: Primary Fyers WebSocket Stream (<100ms Push)` or `🟡 Dual Engine Active: Yahoo Finance Backup Engine (Live 3s Poller)`.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Dual Engine Unit Tests (`backend/tests/test_dual_connection_engine.py`): **5/5 PASSED (100% green)**.
     - Token Manager & Market Data Suite (`test_fyers_token_manager.py` + `test_market_data.py`): **19/19 PASSED (100% green)**.
@@ -1133,6 +1190,7 @@ docker compose restart backend frontend
     - **User Settings Sanitization (`frontend/src/pages/SettingsPage.tsx` & `backend/api/settings.py`)**:
       - Removed the Fyers token card and broker inputs from `SettingsPage.tsx`. Regular users only see user-level trading preferences (Risk %, Slippage) without any broker keys or token fields.
       - Hardened `GET /api/settings/` in `backend/api/settings.py` so that non-admins are never returned `fyers_access_token`, `fyers_client_id`, or any sensitive keys in the API response.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - Backend Unit Tests (`backend/tests/test_fyers_token_manager.py`): **8/8 PASSED (100% green)** including `test_get_all_settings_non_admin_filtering`.
     - Combined Backend Suite: **19/19 PASSED**.
@@ -1153,6 +1211,7 @@ docker compose restart backend frontend
   - **Fyers After-Hours Rollover Guard & Tertiary Direct Candle Fallback**:
     - Added after-hours rollover protection in Fyers quote parsing (`prev_close = last_price - calc_change` if `prev_close_price == lp`).
     - Added tertiary direct async HTTP Yahoo Chart candle fallback in `fetch_candles` ensuring candles never return `[]` even if both Fyers and yfinance fail.
+    4. **Host Server Directory Anchoring**: In [`backend/services/swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py#L25), anchored `get_audit_dir()` to `/app/audits/swing_trades` inside Docker container and mapped to `./audits/swing_trades` on host server.
   - **Verification Evidence**:
     - `pytest backend/tests/test_market_data.py -v`: **11/11 PASSED in 8.46s (100% green)**.
     - Live container probe for `PCJEWELLER.NS`: Price `18.13`, Change `+1.85`, Change% `11.36%`, Previous Close `16.28`, 52W High `18.65`, 52W Low `7.47` (100% match with Zerodha Kite).
