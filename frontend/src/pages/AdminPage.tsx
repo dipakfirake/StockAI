@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
-import { adminApi, settingsApi, healthApi } from '../services/api';
+import { adminApi, settingsApi, healthApi, swingAuditApi } from '../services/api';
 import { Link } from 'react-router-dom';
 import { usePresenceContext } from '../PresenceContext';
 import {
@@ -31,6 +31,10 @@ import {
   Check,
   Eye,
   EyeOff,
+  FileSpreadsheet,
+  Download,
+  History,
+  Calendar,
 } from 'lucide-react';
 
 interface AdminUser {
@@ -73,8 +77,43 @@ export default function AdminPage() {
   const { user } = useAuth();
   const isAdmin = Boolean(user?.is_admin);
 
-  // Navigation tab: 'live' | 'fyers' | 'users' | 'ops' (defaults to 'fyers' so live surveillance only starts when clicked)
-  const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users' | 'ops'>('fyers');
+  // Navigation tab: 'live' | 'fyers' | 'users' | 'ops' | 'audit' (defaults to 'fyers' so live surveillance only starts when clicked)
+  const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users' | 'ops' | 'audit'>('fyers');
+
+  // 11-Day Swing Audit State
+  const [auditCycle, setAuditCycle] = useState<any | null>(null);
+  const [auditFiles, setAuditFiles] = useState<any[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditSyncing, setAuditSyncing] = useState(false);
+
+  const fetchAuditData = async () => {
+    setAuditLoading(true);
+    try {
+      const [cycleRes, filesRes] = await Promise.all([
+        swingAuditApi.getCurrentCycle(),
+        swingAuditApi.listFiles(),
+      ]);
+      setAuditCycle(cycleRes.data?.cycle || null);
+      setAuditFiles(filesRes.data?.files || []);
+    } catch (err) {
+      console.error('Failed to load audit data in admin:', err);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const handleAdminSyncAudit = async () => {
+    setAuditSyncing(true);
+    try {
+      const res = await swingAuditApi.sync();
+      alert(`11-Day Audit Synchronized Successfully!\nEvaluated ${res.data.updated_count || 0} stocks\nWin Rate: ${res.data.win_rate ?? 0}%\nTotal P&L: ₹${res.data.total_pnl_rupees ?? 0}`);
+      await fetchAuditData();
+    } catch (err: any) {
+      alert(`Audit sync failed: ${err?.response?.data?.detail || err.message}`);
+    } finally {
+      setAuditSyncing(false);
+    }
+  };
 
   // Ops & Infrastructure State (Celery Flower, Swagger, Health)
   const [healthState, setHealthState] = useState<{
@@ -259,6 +298,13 @@ export default function AdminPage() {
   useEffect(() => {
     if (isAdmin && activeTab === 'ops') {
       fetchHealth();
+    }
+  }, [isAdmin, activeTab]);
+
+  // Automatically trigger audit data load whenever admin opens the Audit tab
+  useEffect(() => {
+    if (isAdmin && activeTab === 'audit') {
+      fetchAuditData();
     }
   }, [isAdmin, activeTab]);
 
@@ -671,6 +717,42 @@ export default function AdminPage() {
             }}
           >
             <Lock size={10} /> SECURED
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('audit');
+            fetchAuditData();
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 18px',
+            borderRadius: '8px',
+            border: activeTab === 'audit' ? '1px solid #38bdf8' : '1px solid transparent',
+            background: activeTab === 'audit' ? 'rgba(56, 189, 248, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+            color: activeTab === 'audit' ? '#38bdf8' : 'var(--text-secondary)',
+            fontWeight: 700,
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <FileSpreadsheet size={18} />
+          📊 11-Day Swing Audits & Excel Archive
+          <span
+            style={{
+              fontSize: 11,
+              padding: '2px 8px',
+              borderRadius: 12,
+              fontWeight: 700,
+              backgroundColor: 'rgba(56, 189, 248, 0.2)',
+              color: '#38bdf8',
+            }}
+          >
+            {auditFiles.length} Reports
           </span>
         </button>
       </div>
@@ -2256,6 +2338,242 @@ export default function AdminPage() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 4: 📊 11-DAY SWING AUDITS & EXCEL ARCHIVES (ADMIN ONLY)
+         ========================================================================= */}
+      {activeTab === 'audit' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginBottom: 32 }}>
+          {/* Top Audit Status Header */}
+          <div
+            className="card"
+            style={{
+              padding: 24,
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.85) 100%)',
+              borderRadius: 12,
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(56, 189, 248, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#38bdf8' }}>
+                  <FileSpreadsheet size={24} />
+                </div>
+                <div>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    11-Day Swing Trade Audit & Performance Ledger
+                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', fontWeight: 700 }}>
+                      CYCLE #{auditCycle?.cycle_number || 1}
+                    </span>
+                  </h2>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                    Automated daily price recording, milestone target profit booking, stop-loss enforcement, and institutional Excel generation.
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <a
+                  href="/api/swing-audit/download-latest"
+                  download
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38, padding: '0 16px', textDecoration: 'none' }}
+                >
+                  <Download size={15} />
+                  <span>Download Current Excel (.xlsx)</span>
+                </a>
+
+                <button
+                  onClick={handleAdminSyncAudit}
+                  disabled={auditSyncing}
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38, padding: '0 16px', color: '#34d399', borderColor: 'rgba(52, 211, 153, 0.3)', background: 'rgba(52, 211, 153, 0.08)' }}
+                >
+                  <RefreshCw size={15} className={auditSyncing ? 'spin' : ''} />
+                  <span>{auditSyncing ? 'Syncing...' : 'Sync 11-Day Prices Now'}</span>
+                </button>
+
+                <button
+                  onClick={fetchAuditData}
+                  disabled={auditLoading}
+                  className="btn btn-ghost"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}
+                >
+                  <RefreshCw size={14} className={auditLoading ? 'spin' : ''} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Cycle KPI Cards */}
+            {auditCycle && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
+                <div style={{ padding: 14, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Period</div>
+                  <div style={{ fontSize: '1rem', fontWeight: 800, color: '#f8fafc', marginTop: 4 }}>
+                    {auditCycle.from_date} to {auditCycle.to_date}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#34d399', marginTop: 4 }}>Status: {auditCycle.status}</div>
+                </div>
+
+                <div style={{ padding: 14, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Win Rate</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: (auditCycle.win_rate || 0) >= 50 ? '#34d399' : '#f87171', marginTop: 4 }}>
+                    {auditCycle.win_rate ?? 0}%
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                    Wins: {auditCycle.win_trades || 0} / Losses: {auditCycle.loss_trades || 0}
+                  </div>
+                </div>
+
+                <div style={{ padding: 14, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Total Cycle Return</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: (auditCycle.total_gain_loss_pct || 0) >= 0 ? '#34d399' : '#f87171', marginTop: 4 }}>
+                    {(auditCycle.total_gain_loss_pct || 0) > 0 ? `+${auditCycle.total_gain_loss_pct}` : auditCycle.total_gain_loss_pct ?? 0}%
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>Across all cataloged setups</div>
+                </div>
+
+                <div style={{ padding: 14, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Realized Net P&L</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: (auditCycle.total_pnl_rupees || 0) >= 0 ? '#34d399' : '#f87171', marginTop: 4 }}>
+                    ₹{(auditCycle.total_pnl_rupees || 0).toLocaleString('en-IN')}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                    Total Setups: {auditCycle.total_trades || 0}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Historical & Available Excel Files Table */}
+          <div
+            className="card"
+            style={{
+              padding: 24,
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 12,
+              background: 'rgba(15, 23, 42, 0.6)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
+                  Archived Audit Workbooks (.xlsx)
+                </h3>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Every 11-day cycle generates a permanent multi-sheet workbook saved on the server. Download any past or active cycle below.
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {auditFiles.length} file{auditFiles.length === 1 ? '' : 's'} available
+              </span>
+            </div>
+
+            {auditLoading ? (
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px' }} />
+                <div>Loading audit spreadsheets...</div>
+              </div>
+            ) : auditFiles.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                <FileSpreadsheet size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                <div>No audit files generated yet. Click "Sync 11-Day Prices Now" to generate the current cycle workbook.</div>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', color: 'var(--text-secondary)', textAlign: 'left' }}>
+                      <th style={{ padding: '12px 14px' }}>Cycle #</th>
+                      <th style={{ padding: '12px 14px' }}>Period</th>
+                      <th style={{ padding: '12px 14px' }}>Status</th>
+                      <th style={{ padding: '12px 14px' }}>Trades</th>
+                      <th style={{ padding: '12px 14px' }}>Win Rate</th>
+                      <th style={{ padding: '12px 14px' }}>Return %</th>
+                      <th style={{ padding: '12px 14px' }}>Realized P&L</th>
+                      <th style={{ padding: '12px 14px' }}>File Size</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'right' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditFiles.map((file, idx) => (
+                      <tr
+                        key={idx}
+                        style={{
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                          background: idx % 2 === 0 ? 'rgba(255, 255, 255, 0.01)' : 'transparent',
+                        }}
+                      >
+                        <td style={{ padding: '12px 14px', fontWeight: 700, color: '#f8fafc' }}>
+                          Cycle #{file.cycle_number > 0 ? file.cycle_number : 'Archive'}
+                        </td>
+                        <td style={{ padding: '12px 14px', color: 'var(--text-secondary)' }}>
+                          {file.from_date} → {file.to_date}
+                        </td>
+                        <td style={{ padding: '12px 14px' }}>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              fontWeight: 600,
+                              textTransform: 'uppercase',
+                              background: file.status === 'ACTIVE' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                              color: file.status === 'ACTIVE' ? '#34d399' : '#94a3b8',
+                            }}
+                          >
+                            {file.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 14px', color: '#e2e8f0' }}>
+                          {file.total_trades} (W: {file.win_trades} / L: {file.loss_trades})
+                        </td>
+                        <td style={{ padding: '12px 14px', fontWeight: 700, color: file.win_rate >= 50 ? '#34d399' : '#f87171' }}>
+                          {file.win_rate}%
+                        </td>
+                        <td style={{ padding: '12px 14px', fontWeight: 700, color: file.total_gain_loss_pct >= 0 ? '#34d399' : '#f87171' }}>
+                          {file.total_gain_loss_pct > 0 ? `+${file.total_gain_loss_pct}` : file.total_gain_loss_pct}%
+                        </td>
+                        <td style={{ padding: '12px 14px', fontWeight: 700, color: file.total_pnl_rupees >= 0 ? '#34d399' : '#f87171' }}>
+                          ₹{file.total_pnl_rupees.toLocaleString('en-IN')}
+                        </td>
+                        <td style={{ padding: '12px 14px', color: 'var(--text-secondary)' }}>
+                          {file.size_bytes ? `${(file.size_bytes / 1024).toFixed(1)} KB` : 'Generated'}
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                          <a
+                            href={swingAuditApi.downloadFileUrl(file.filename)}
+                            download
+                            className="btn btn-secondary"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '5px 12px',
+                              fontSize: 12,
+                              color: '#38bdf8',
+                              borderColor: 'rgba(56, 189, 248, 0.3)',
+                              background: 'rgba(56, 189, 248, 0.08)',
+                              textDecoration: 'none',
+                            }}
+                          >
+                            <Download size={13} />
+                            <span>Download .xlsx</span>
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

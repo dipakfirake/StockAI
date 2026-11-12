@@ -3507,3 +3507,43 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend TypeScript/Vite Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 53.19s (exit code 0)**.
   - Python Syntax & Structure: Verified.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide user with step-by-step clarification of the 11-day audit and Excel system, and provide exact copy-pasteable commands for their live server terminal.
+
+---
+
+### Session Entry 70: Swing Audit Sync 500 Resolution, Complete System Clarification, and Multi-Location Excel Archive & Download Architecture
+- **Timestamp:** 2026-11-12 08:35:00 IST (03:05:00 UTC)
+- **User Prompt:**
+  `"Continue . And otherwise add one small button in admin dasboard settings or in screeners for downloading current excel file and see and download previous files also.or make both."`
+- **Root Cause Analysis & Forensic Discoveries**:
+  1. **Sync 500 Error Root Cause**:
+     - When clicking `[Sync 11-Day Prices]`, `POST /api/swing-audit/sync` triggered `SwingAuditService.update_daily_prices`.
+     - In line 464 & 465, `float(a.profit_loss_pct)` and `float(a.realized_pnl_rupees)` threw `TypeError: float() argument must be a string or a real number, not 'NoneType'` because new/open trades have null PnL in PostgreSQL.
+     - In line 349, comparing `c_date >= audit.recommendation_date` could raise a `TypeError` if `recommendation_date` was deserialized as a `datetime` object.
+     - `generate_excel_workbook` and `get_cycle_summary` lacked enclosing exception guards, allowing errors to bubble up to FastAPI as unhandled 500s.
+  2. **Multi-Location Excel Archive Requirement**:
+     - The user requested buttons in Admin Dashboard, Settings, or Screener (or both/all) to download the current cycle's Excel workbook AND to see and download previous/historical cycle workbooks.
+- **Engineering Changes & Enhancements Delivered**:
+  1. **Null-Safety & Defensive Guarding in Backend**:
+     - In `backend/services/swing_audit_service.py`:
+       - Safely coerced all numeric conversions (`float(val or 0.0)`).
+       - Coerced `recommendation_date` safely to `datetime.date` before candle comparisons.
+       - Enclosed `generate_excel_workbook` and `get_cycle_summary` in top-level `try...except` blocks with structured logging and safe fallback returns.
+       - Guaranteed `update_daily_prices` returns `{"status": "partial_success", ...}` on unexpected exceptions.
+     - In `backend/api/swing_audit.py`:
+       - Guarded `POST /api/swing-audit/sync` and `GET /api/swing-audit/current-cycle` to return clean fallback payloads rather than raising HTTP 500.
+       - Added `GET /api/swing-audit/files`: Scans PostgreSQL `SwingTradeAuditCycle` and filesystem `.xlsx` files, returning metadata (Cycle #, dates, trades, win rate, return %, PnL, file size, download link).
+       - Added `GET /api/swing-audit/download/{filename}`: Path-traversal protected endpoint to safely stream any active or historical `.xlsx` report.
+  2. **Frontend Multi-Location UI Integration**:
+     - `frontend/src/services/api.ts`: Added `listFiles()` and `downloadFileUrl(filename)` to `swingAuditApi`.
+     - `frontend/src/pages/SwingScreenerPage.tsx`:
+       - Added `[Past Audits & Archives]` button next to `[Audit Excel (.xlsx)]`.
+       - Built interactive glassmorphic modal listing all historical 11-day cycles with win rates, trades, P&L, and download buttons.
+     - `frontend/src/pages/AdminPage.tsx`:
+       - Added 5th top-level navigation tab: `📊 11-Day Swing Audits & Excel Archive`.
+       - Displays Active Cycle Scorecard cards, `[Download Current Excel (.xlsx)]`, `[Sync 11-Day Prices Now]` button, and full table of historical workbooks with download links.
+     - `frontend/src/pages/SettingsPage.tsx`:
+       - Added "11-Day Swing Trade Audit & Reports" card with active cycle stats, current download button, sync button, and collapsible list of all historical archives.
+- **Verification Evidence**:
+  - Python Compilation (`py_compile`): **0 syntax/type errors, exit code 0** on `swing_audit_service.py` and `swing_audit.py`.
+  - Frontend TypeScript/Vite Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 51.40s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide transparent architectural clarification to the user explaining how the system works, where the files are stored, and provide copy-pasteable commands for their live server terminal.

@@ -331,7 +331,9 @@ export const swingAuditApi = {
     notes?: string;
   }) => api.post('/swing-audit/track', data),
   sync: () => api.post('/swing-audit/sync'),
+  listFiles: () => api.get<{ files: any[]; count: number }>('/swing-audit/files'),
   downloadLatestUrl: () => '/api/swing-audit/download-latest',
+  downloadFileUrl: (filename: string) => `/api/swing-audit/download/${encodeURIComponent(filename)}`,
 }
 
 export default api

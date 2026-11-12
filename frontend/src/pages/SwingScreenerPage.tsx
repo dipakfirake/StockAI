@@ -4,7 +4,8 @@ import { marketApi, paperTradingApi, alertsApi, swingAuditApi } from '../service
 import { 
   TrendingUp, TrendingDown, Minus, RefreshCw, Search, Filter, 
   ExternalLink, Briefcase, Bell, CheckCircle2, ShieldAlert, 
-  ArrowUpRight, ArrowDownRight, Layers, LayoutGrid, List, Sparkles, AlertCircle, Target, Download
+  ArrowUpRight, ArrowDownRight, Layers, LayoutGrid, List, Sparkles, AlertCircle, Target, Download,
+  FileSpreadsheet, History, Calendar, X
 } from 'lucide-react'
 import { toast } from '../components/Toast'
 
@@ -101,6 +102,27 @@ export default function SwingScreenerPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [syncingAudit, setSyncingAudit] = useState(false)
   const [tradingSymbol, setTradingSymbol] = useState<string | null>(null)
+  const [showArchiveModal, setShowArchiveModal] = useState(false)
+  const [archiveFiles, setArchiveFiles] = useState<any[]>([])
+  const [loadingArchives, setLoadingArchives] = useState(false)
+
+  const fetchArchiveFiles = async () => {
+    setLoadingArchives(true)
+    try {
+      const res = await swingAuditApi.listFiles()
+      setArchiveFiles(res.data?.files || [])
+    } catch (err: any) {
+      console.error('Failed to load audit archives:', err)
+      toast.error('Failed to load audit archives', err?.response?.data?.detail || err.message)
+    } finally {
+      setLoadingArchives(false)
+    }
+  }
+
+  const handleOpenArchives = () => {
+    setShowArchiveModal(true)
+    fetchArchiveFiles()
+  }
 
   const handleSyncAudit = async () => {
     setSyncingAudit(true)
@@ -284,6 +306,27 @@ export default function SwingScreenerPage() {
             <Download size={15} />
             <span>Audit Excel (.xlsx)</span>
           </a>
+
+          <button
+            onClick={handleOpenArchives}
+            className="btn btn-secondary no-shrink"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              height: 38,
+              whiteSpace: 'nowrap',
+              flex: '0 0 auto',
+              color: '#a78bfa',
+              borderColor: 'rgba(167, 139, 250, 0.3)',
+              background: 'rgba(167, 139, 250, 0.08)'
+            }}
+            title="View all current & historical 11-day audit cycle Excel files and download past files"
+          >
+            <History size={15} />
+            <span>Past Audits ({archiveFiles.length > 0 ? archiveFiles.length : 'Archive'})</span>
+          </button>
         </div>
       </div>
 
@@ -812,6 +855,200 @@ export default function SwingScreenerPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* 11-Day Swing Audit Archives Modal */}
+      {showArchiveModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: 16
+          }}
+          onClick={() => setShowArchiveModal(false)}
+        >
+          <div 
+            style={{
+              background: '#0f172a',
+              border: '1px solid rgba(148, 163, 184, 0.2)',
+              borderRadius: 12,
+              width: '100%',
+              maxWidth: 780,
+              maxHeight: '85vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              overflow: 'hidden'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(30, 41, 59, 0.5)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <FileSpreadsheet size={20} style={{ color: '#38bdf8' }} />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
+                    11-Day Swing Trade Audit Workbooks & Archives
+                  </h3>
+                  <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
+                    Download current & historical Excel reports with full price ledgers and P&L journals
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowArchiveModal(false)}
+                className="btn btn-ghost"
+                style={{ padding: 6, borderRadius: 6, color: '#94a3b8' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{
+              padding: '12px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(15, 23, 42, 0.8)',
+              borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+              flexWrap: 'wrap',
+              gap: 10
+            }}>
+              <a 
+                href="/api/swing-audit/download-latest" 
+                download
+                className="btn btn-primary"
+                style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, height: 34 }}
+              >
+                <Download size={14} />
+                <span>Download Current Active Cycle (.xlsx)</span>
+              </a>
+              <button 
+                onClick={fetchArchiveFiles} 
+                disabled={loadingArchives}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, height: 34 }}
+              >
+                <RefreshCw size={13} className={loadingArchives ? 'spin' : ''} />
+                <span>Refresh List</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
+              {loadingArchives ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
+                  <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px' }} />
+                  <div>Loading audit archive workbooks...</div>
+                </div>
+              ) : archiveFiles.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
+                  <FileSpreadsheet size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                  <div>No archived audit files found. Click "Sync 11-Day Prices" to generate the first workbook!</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {archiveFiles.map((file, idx) => (
+                    <div 
+                      key={idx}
+                      style={{
+                        padding: '14px 16px',
+                        background: 'rgba(30, 41, 59, 0.6)',
+                        border: '1px solid rgba(148, 163, 184, 0.15)',
+                        borderRadius: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 16,
+                        flexWrap: 'wrap'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '1 1 300px' }}>
+                        <div style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 8,
+                          background: file.status === 'ACTIVE' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(56, 189, 248, 0.15)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: file.status === 'ACTIVE' ? '#34d399' : '#38bdf8'
+                        }}>
+                          <FileSpreadsheet size={18} />
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, fontSize: 14, color: '#f8fafc' }}>
+                              Cycle #{file.cycle_number > 0 ? file.cycle_number : 'Archive'}
+                            </span>
+                            <span style={{
+                              fontSize: 10,
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              fontWeight: 600,
+                              textTransform: 'uppercase',
+                              background: file.status === 'ACTIVE' ? 'rgba(52, 211, 153, 0.2)' : 'rgba(148, 163, 184, 0.2)',
+                              color: file.status === 'ACTIVE' ? '#34d399' : '#94a3b8'
+                            }}>
+                              {file.status}
+                            </span>
+                            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                              {file.from_date} to {file.to_date}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                            <span>Trades: <strong style={{ color: '#e2e8f0' }}>{file.total_trades}</strong></span>
+                            <span>Win Rate: <strong style={{ color: file.win_rate >= 50 ? '#34d399' : '#f87171' }}>{file.win_rate}%</strong></span>
+                            <span>Return: <strong style={{ color: file.total_gain_loss_pct >= 0 ? '#34d399' : '#f87171' }}>{file.total_gain_loss_pct > 0 ? `+${file.total_gain_loss_pct}` : file.total_gain_loss_pct}%</strong></span>
+                            <span>Realized P&L: <strong style={{ color: file.total_pnl_rupees >= 0 ? '#34d399' : '#f87171' }}>₹{file.total_pnl_rupees.toLocaleString('en-IN')}</strong></span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 11, color: '#64748b' }}>
+                          {file.size_bytes ? `${(file.size_bytes / 1024).toFixed(1)} KB` : ''}
+                        </span>
+                        <a 
+                          href={swingAuditApi.downloadFileUrl(file.filename)} 
+                          download
+                          className="btn btn-secondary"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            height: 32,
+                            fontSize: 12,
+                            color: '#38bdf8',
+                            borderColor: 'rgba(56, 189, 248, 0.3)',
+                            background: 'rgba(56, 189, 248, 0.08)'
+                          }}
+                        >
+                          <Download size={13} />
+                          <span>Download .xlsx</span>
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
