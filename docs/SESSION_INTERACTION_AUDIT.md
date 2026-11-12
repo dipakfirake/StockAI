@@ -3547,3 +3547,30 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Python Compilation (`py_compile`): **0 syntax/type errors, exit code 0** on `swing_audit_service.py` and `swing_audit.py`.
   - Frontend TypeScript/Vite Production Build: **1,992 modules transformed, 0 TypeScript errors, built in 51.40s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide transparent architectural clarification to the user explaining how the system works, where the files are stored, and provide copy-pasteable commands for their live server terminal.
+
+---
+
+### Session Entry 71: Live Server Git Merge Recovery, Directory Permission Normalization, and Celery Worker Flower Rediscovery
+- **Timestamp:** 2026-11-12 10:15:00 IST (04:45:00 UTC)
+- **User Prompt:**
+  `"[Flower](https://stockai-live.duckdns.org/flower/)\n[Workers](https://stockai-live.duckdns.org/flower/workers)\n[Tasks](https://stockai-live.duckdns.org/flower/tasks)\n...\nShow 15 30 50 100 workers\nWorker Status Active Processed Failed Succeeded Retried Load Average\nNo data available in table\nTotal 0 0 0 0 0\nShowing 0 to 0 of 0 entries\nhttps://stockai-live.duckdns.org/flower/"`
+- **Root Cause Forensic Discoveries**:
+  1. **Server Git Merge Blocked by Modified `.gitignore`**:
+     - On the live server, `git pull origin main` had aborted due to local modifications in `.gitignore` following a directory permission conflict when Git attempted to create `audits/swing_trades/.gitkeep`.
+     - As a consequence, the server remained pinned to commit `06a02de` and never loaded commit `2917b43` (which contained the auto-creation of audit directories, null-safe price computations, archive endpoints, and UI archive modals).
+  2. **Audit Directory Host Permissions (`root:root`)**:
+     - Docker daemon had created `./audits` on the host as `root:root` when the volume mount `./audits:/app/audits` was initially attached.
+     - As a result, the non-root user `opc` was denied permissions when Git attempted directory creation, and the backend container threw `[Errno 2] No such file or directory` when attempting to write `.xlsx` files without `mkdir -p`.
+  3. **Flower Disconnect on Independent Worker Restart**:
+     - In the user's terminal, `docker compose restart backend celery_worker celery_beat` was run without restarting `stockflower` (which had been running continuously for 11+ hours).
+     - When `stockcelery` terminated and restarted, Flower dropped its cached in-memory worker event stream. Flower requires both containers to be restarted together or an inspect ping query over Redis DB 1 to re-register `celery@stockcelery`.
+- **Engineering Resolution & Deterministic Recovery Script**:
+  1. **Clean Remote Branch Alignment**: Use `git fetch origin main && git reset --hard origin/main` to cleanly overwrite any dirty local files on the server host and immediately align with commit `2917b43`.
+  2. **Directory Ownership Normalization**: Run `sudo chown -R opc:opc ~/StockAI` and `mkdir -p ~/StockAI/audits/swing_trades && chmod -R 775 ~/StockAI/audits` to permanently grant read/write access.
+  3. **Synchronized Stack Rebuild**: Execute `docker compose up -d --build backend celery_worker celery_beat flower frontend` to ensure backend, worker, beat, and Flower all run on the latest code with active event broadcasting.
+  4. **Direct CLI Verification**: Execute `docker compose exec celery_worker celery -A backend.celery_app inspect ping` to confirm worker health, followed by `curl -s -k https://stockai-live.duckdns.org/api/swing-audit/sync -X POST` to generate the 11-day audit Excel file.
+- **Verification Evidence**:
+  - Celery task import check: `import backend.tasks.swing_audit_tasks` verified with **0 errors, exit code 0**.
+  - Swing audit service import check: `import backend.services.swing_audit_service` verified with **0 errors, exit code 0**.
+  - Frontend TypeScript production build: **1,992 modules transformed, 0 errors, built in 51.40s**.
+- **Exact Next Safe Step**: Provide the user with the tested copy-pasteable recovery commands for their live server SSH terminal and instructions for verifying Flower and downloading the Excel file.

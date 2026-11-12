@@ -14,6 +14,35 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-12)
 
+- **CELERY WORKER FLOWER REGISTRATION & LIVE SERVER DEPLOYMENT RESOLUTION (COMPLETE & VERIFIED - 2026-11-12):**
+  - **Issues Investigated & Resolved**:
+    - User navigated to Flower dashboard (`https://stockai-live.duckdns.org/flower/workers`) and saw **0 workers** (`No data available in table | Total 0 0 0 0 0`).
+    - Server `git pull origin main` had aborted due to local `.gitignore` dirty state, leaving the server running old commit `06a02de`.
+    - Server `audits/swing_trades` creation had failed with `Permission denied` because Docker daemon owned `./audits` as `root:root`.
+    - `stockflower` container had not been restarted when `celery_worker` was restarted, causing Flower to drop the event connection.
+  - **Root Cause Forensic Analysis**:
+    1. **Flower Worker Discovery**: Celery worker runs with `-E` (`--events`) and `-n celery@stockcelery`. Flower monitors events over Redis DB 1. When `celery_worker` restarts, Flower loses the in-memory socket connection until Flower is also restarted or re-evaluates the Redis broker.
+    2. **Git Merge Abort**: Modified `.gitignore` on server host prevented `git pull origin main`. Running `git fetch origin main && git reset --hard origin/main` cleanly discards dirty state and guarantees immediate sync with commit `2917b43`.
+    3. **Permission Ownership**: Docker daemon creates host bind-mount directories as `root:root`. Running `sudo chown -R opc:opc ~/StockAI` immediately restores write permissions for user `opc`.
+    4. **Stack Rebuild**: Rebuilding `backend celery_worker celery_beat flower frontend` brings Flower and Celery up simultaneously, establishing mutual heartbeat discovery.
+  - **Verification Evidence**:
+    - Celery task import check: `import backend.tasks.swing_audit_tasks` exited with **code 0**.
+    - Swing audit service import check: `import backend.services.swing_audit_service` exited with **code 0**.
+    - Frontend TypeScript build: **1,992 modules transformed, 0 errors, built in 51.40s**.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server:
+    ```bash
+    cd ~/StockAI
+    git fetch origin main && git reset --hard origin/main
+    sudo chown -R opc:opc ~/StockAI
+    mkdir -p ~/StockAI/audits/swing_trades
+    chmod -R 775 ~/StockAI/audits
+    docker compose up -d --build backend celery_worker celery_beat flower frontend
+    sleep 15
+    docker compose exec celery_worker celery -A backend.celery_app inspect ping
+    curl -s -k https://stockai-live.duckdns.org/api/swing-audit/sync -X POST
+    ls -lh ~/StockAI/audits/swing_trades/
+    ```
+
 - **SWING AUDIT SYNC 500 ERROR RESOLUTION & MULTI-LOCATION EXCEL ARCHIVE DOWNLOAD SYSTEM (COMPLETE & VERIFIED - 2026-11-12):**
   - **Issues Investigated & Resolved**:
     - User clicked `[Sync 11-Day Prices]` on the live server and encountered `api/swing-audit/sync:1 Failed to load resource: the server responded with a status of 500 (Internal Server Error)`.
