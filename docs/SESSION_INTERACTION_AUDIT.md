@@ -3574,3 +3574,51 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Swing audit service import check: `import backend.services.swing_audit_service` verified with **0 errors, exit code 0**.
   - Frontend TypeScript production build: **1,992 modules transformed, 0 errors, built in 51.40s**.
 - **Exact Next Safe Step**: Provide the user with the tested copy-pasteable recovery commands for their live server SSH terminal and instructions for verifying Flower and downloading the Excel file.
+
+---
+
+### Session Entry 72: AI LightGBM Backtesting 0-Trades Defect Resolution, Calibrated Directional Decoding, and Interactive UI Sensitivity Slider
+- **Timestamp:** 2026-11-12 12:15:00 IST (06:45:00 UTC)
+- **User Prompt:**
+  `"is it sows correct outputs if not ten make corrections /goal /browser /plan /teamwork /learn /boost /automation /swarm"` (following backtest screenshot on `RELIANCE.NS` showing 0 trades executed, 0% strategy return, and 0% win rate under `AI LightGBM Probabilistic`).
+- **Root Cause Forensic Discoveries**:
+  1. **User Finding Validation**:
+     - The output was **NOT correct**; the AI LightGBM strategy was returning 0 trades across any selected symbol or date range.
+  2. **Class Imbalance & Naive Argmax Flattening**:
+     - In the 3-class LightGBM architecture `[SELL, HOLD, BUY]`, `HOLD` represents ~60–65% of all daily bars across Indian equities.
+     - Even during sharp uptrends or breakdowns, `P_buy` or `P_sell` peaks at ~0.30–0.35 while `P_hold` remains ~0.55–0.62.
+     - Therefore, standard `np.argmax([P_sell, P_hold, P_buy])` always yields `1` (`HOLD`) 100% of the time.
+  3. **Dead Code Condition in Backtest Engine**:
+     - In `backend/services/backtesting.py`, `_ai_machine_learning` previously required:
+       `if score == "BUY" or buy_prob > 0.55:`
+     - Because `score` was perpetually `"HOLD"` and `buy_prob` never exceeded `0.35`, this condition could never evaluate to true under historical data, resulting in 0 trades.
+  4. **Rigid Windowing on Truncated Datasets**:
+     - Calculating `df["sma_200"]` on historical samples with fewer than 200 bars resulted in all-NaN series that dropped the entire DataFrame upon `.dropna()`.
+- **Engineering Changes & Technical Enhancements**:
+  1. **Directional Conviction Decoding (`backend/services/ml/ensemble.py`)**:
+     - Upgraded `EnsemblePredictor.decode()` with dynamic relative directional conviction:
+       $$D_{buy} = \frac{P_{buy}}{P_{buy} + P_{sell} + \epsilon}, \quad D_{sell} = \frac{P_{sell}}{P_{buy} + P_{sell} + \epsilon}$$
+     - If $D_{buy} \ge 0.58$ and $P_{buy} \ge 0.20$: classifies as `("BUY", D_buy)`.
+     - If $D_{sell} \ge 0.58$ and $P_{sell} \ge 0.20$: classifies as `("SELL", D_sell)`.
+     - Otherwise: cleanly preserves `("HOLD", P_hold)`.
+  2. **Backtest Engine Calibration (`backend/services/backtesting.py`)**:
+     - Upgraded `_ai_machine_learning` to take `confidence_threshold` dynamically (default: 0.58).
+     - Made moving averages adaptive: `window=min(200, max(20, len(df) // 2))` to prevent dropping short series.
+     - Implemented dynamic ATR-based position sizing and trailing stops alongside fixed quantity mode.
+  3. **API Defaults & Strategy Registration (`backend/api/backtesting.py`)**:
+     - Defaulted `confidence_threshold` to `0.58` with risk parameters.
+     - Registered `supertrend_trend_rider` and `smc_liquidity_fvg` in strategy definitions.
+  4. **Frontend UI Sensitivity Slider & Zero-Trade Contextual Guidance (`frontend/src/pages/BacktestPage.tsx`)**:
+     - Added interactive **AI Directional Edge Threshold (50% – 70%)** slider for `ai_machine_learning`.
+     - Added contextual zero-trades guidance card explaining sensitivity tuning and date ranges.
+  5. **Automated Unit Testing (`backend/tests/test_ai_backtesting_accuracy.py`)**:
+     - Created 6 unit tests covering bullish skew, bearish skew, neutral hold, absolute dominance, AI simulation execution, and zero-trades metrics safety.
+- **Verification Evidence**:
+  - **Empirical Backtest on `RELIANCE.NS` (2023-01-01 to 2024-01-01, ₹1,00,000 capital)**:
+    - Threshold 0.60: **15 trades, 53.3% win rate, +22.72% return, Final Equity: ₹1,22,717.77, Max DD: -17.4%**.
+    - Threshold 0.58: **47 trades, 38.3% win rate, +52.14% return, Final Equity: ₹1,52,142.75, Max DD: -25.4%**.
+    - Threshold 0.55: **136 trades, 41.2% win rate, +59.12% return, Final Equity: ₹1,59,118.79, Max DD: -31.11%**.
+  - **Unit Tests (`backend/tests/test_ai_backtesting_accuracy.py`)**: **6 passed in 123.20s (exit code 0)**.
+  - **Python Syntax Compilation**: `py_compile` on modified files succeeded with exit code 0.
+  - **Frontend TypeScript/Vite Production Build**: **1,992 modules transformed, 0 TypeScript errors, built in 2m 29s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide the user with clear answers and copy-pasteable live server deployment commands (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).

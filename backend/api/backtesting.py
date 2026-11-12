@@ -93,7 +93,7 @@ async def list_strategies(current_user=Depends(require_pro_tier)):
                 "id": "ai_machine_learning",
                 "name": "LightGBM Multi-Cap AI Model",
                 "description": "Walk-forward trade execution powered by the trained LightGBM ML model with ATR trailing stops and SHAP confidence scoring",
-                "params": {"confidence_threshold": 0.65, "quantity": 10, "qty_mode": "fixed"},
+                "params": {"confidence_threshold": 0.58, "quantity": 10, "qty_mode": "atr", "risk_pct": 0.02},
             },
             {
                 "id": "rsi_mean_reversion",
@@ -112,6 +112,18 @@ async def list_strategies(current_user=Depends(require_pro_tier)):
                 "name": "MACD Signal Line Cross",
                 "description": "Buy when MACD histogram turns positive, sell when it turns negative",
                 "params": {"quantity": 10},
+            },
+            {
+                "id": "supertrend_trend_rider",
+                "name": "SuperTrend Trend Rider (ATR + 200 EMA)",
+                "description": "Institutional trend rider: Buys when price > EMA 200 & SuperTrend turns bullish. Uses ATR dynamic trailing stop.",
+                "params": {"period": 10, "multiplier": 3.0, "quantity": 10},
+            },
+            {
+                "id": "smc_liquidity_fvg",
+                "name": "SMC Institutional FVG Hunter",
+                "description": "Smart Money Concepts: Enters on unmitigated Fair Value Gap pullbacks with tight stops and asymmetric 2.5R profit targets.",
+                "params": {"gap_pct": 0.3, "risk_reward": 2.5, "quantity": 10},
             },
         ]
     }

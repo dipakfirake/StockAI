@@ -82,17 +82,40 @@ class EnsemblePredictor:
         combined = combined / (combined.sum() + 1e-8)
         return combined.astype(np.float32)
 
-    def decode(self, probs: np.ndarray) -> tuple[str, float]:
+    def decode(self, probs: np.ndarray, threshold: float = 0.58, min_directional_prob: float = 0.20) -> tuple[str, float]:
         """
-        Convert probability vector to direction label and confidence.
-
+        Convert 3-class probability vector [sell, hold, buy] to direction label and confidence.
+        
+        Handles class imbalance: since HOLD typically represents ~60% of baseline market days,
+        raw argmax would overwhelmingly suppress BUY/SELL signals. We evaluate directional
+        relative conviction when HOLD is the largest prior class:
+          directional_buy = P(buy) / (P(buy) + P(sell))
+        
         Returns:
             direction: "BUY", "HOLD", or "SELL"
             confidence: float in [0, 1]
         """
-        labels = ["SELL", "HOLD", "BUY"]
-        idx = int(np.argmax(probs))
-        return labels[idx], float(probs[idx])
+        p_sell = float(probs[0])
+        p_hold = float(probs[1])
+        p_buy = float(probs[2])
+
+        # 1. Obvious absolute dominance
+        if p_buy > p_hold and p_buy > p_sell:
+            return "BUY", p_buy
+        if p_sell > p_hold and p_sell > p_buy:
+            return "SELL", p_sell
+
+        # 2. Relative directional conviction when in typical market consolidation regime
+        denom = p_buy + p_sell + 1e-8
+        directional_buy = p_buy / denom
+        directional_sell = p_sell / denom
+
+        if directional_buy >= threshold and p_buy >= min_directional_prob:
+            return "BUY", round(directional_buy, 4)
+        elif directional_sell >= threshold and p_sell >= min_directional_prob:
+            return "SELL", round(directional_sell, 4)
+        else:
+            return "HOLD", round(p_hold, 4)
 
     def format_result(
         self,

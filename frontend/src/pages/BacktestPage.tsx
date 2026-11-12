@@ -10,7 +10,7 @@ const STRATEGIES = [
   { id: 'rsi_mean_reversion', name: 'RSI Mean Reversion', defaultParams: { rsi_buy: 30, rsi_sell: 70, quantity: 10 }, description: 'Buy when RSI < 30 (oversold), sell when RSI > 70 (overbought)' },
   { id: 'ema_crossover', name: 'EMA Crossover', defaultParams: { fast_ema: 9, slow_ema: 21, quantity: 10 }, description: 'Buy when EMA9 crosses above EMA21, sell on cross down' },
   { id: 'macd_signal', name: 'MACD Signal Cross', defaultParams: { quantity: 10 }, description: 'Buy when MACD histogram turns positive, sell when negative' },
-  { id: 'ai_machine_learning', name: 'AI LightGBM Probabilistic', defaultParams: { qty_mode: 'atr', risk_pct: 0.02 }, description: 'Simulates AI predictions using LightGBM. Uses ATR-based dynamic position sizing and trailing stop losses.' },
+  { id: 'ai_machine_learning', name: 'AI LightGBM Probabilistic', defaultParams: { qty_mode: 'atr', risk_pct: 0.02, confidence_threshold: 58 }, description: 'Simulates AI predictions using LightGBM. Uses ATR-based dynamic position sizing and trailing stop losses.' },
   { id: 'supertrend_trend_rider', name: 'SuperTrend Trend Rider (ATR + 200 EMA)', defaultParams: { period: 10, multiplier: 3.0, quantity: 10 }, description: 'Institutional trend rider: Buys when price > EMA 200 & SuperTrend turns bullish. Uses ATR dynamic trailing stop to lock in multi-week runners.' },
   { id: 'smc_liquidity_fvg', name: 'SMC Institutional FVG Hunter', defaultParams: { gap_pct: 0.3, risk_reward: 2.5, quantity: 10 }, description: 'Smart Money Concepts: Enters on unmitigated Fair Value Gap pullbacks with tight stops and asymmetric 2.5R profit targets.' },
 ]
@@ -27,6 +27,7 @@ export default function BacktestPage() {
     end_date: '2024-12-31',
     initial_capital: '100000',
     quantity: '10',
+    confidence_threshold: '58',
   })
   const [results, setResults] = useState<any>(null)
   const [running, setRunning] = useState(false)
@@ -43,7 +44,11 @@ export default function BacktestPage() {
       const params: any = { quantity: parseInt(form.quantity) }
       if (form.strategy === 'rsi_mean_reversion') { params.rsi_buy = 30; params.rsi_sell = 70 }
       if (form.strategy === 'ema_crossover') { params.fast_ema = 9; params.slow_ema = 21 }
-      if (form.strategy === 'ai_machine_learning') { params.qty_mode = 'atr'; params.risk_pct = 0.02 }
+      if (form.strategy === 'ai_machine_learning') { 
+        params.qty_mode = 'atr'
+        params.risk_pct = 0.02
+        params.confidence_threshold = (parseFloat(form.confidence_threshold || '58') / 100.0) || 0.58
+      }
       if (form.strategy === 'supertrend_trend_rider') { params.period = 10; params.multiplier = 3.0 }
       if (form.strategy === 'smc_liquidity_fvg') { params.gap_pct = 0.3; params.risk_reward = 2.5 }
 
@@ -135,6 +140,30 @@ export default function BacktestPage() {
               </select>
               {selectedStrategy && <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 6 }}>{selectedStrategy.description}</div>}
             </div>
+            {form.strategy === 'ai_machine_learning' && (
+              <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '12px 14px', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>AI Directional Edge Threshold</label>
+                  <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-bullish)' }}>
+                    {form.confidence_threshold || 58}%
+                  </span>
+                </div>
+                <input 
+                  type="range" 
+                  min="50" 
+                  max="70" 
+                  step="1"
+                  value={form.confidence_threshold || 58} 
+                  onChange={e => setForm({ ...form, confidence_threshold: e.target.value })} 
+                  style={{ width: '100%', accentColor: 'var(--primary-color)', cursor: 'pointer' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                  <span>50% (High Frequency)</span>
+                  <span style={{ color: 'var(--color-bullish)', fontWeight: 600 }}>58% (Balanced / Optimal)</span>
+                  <span>70% (Ultra Selective)</span>
+                </div>
+              </div>
+            )}
             <div className="grid-2">
               <div>
                 <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Start Date</label>
@@ -175,8 +204,17 @@ export default function BacktestPage() {
           {metrics && (
             <div>
               {metrics.total_trades === 0 && (
-                <div className="card" style={{ marginBottom: 16, borderColor: 'var(--color-neutral)', color: 'var(--color-text-secondary)' }}>
-                  <strong>Note:</strong> No trades were executed during this period with the current parameters. Try adjusting your parameters or the date range.
+                <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(234, 179, 8, 0.4)', background: 'rgba(234, 179, 8, 0.05)', color: 'var(--color-text-secondary)' }}>
+                  <strong style={{ color: '#eab308' }}>Note:</strong> No trades triggered during this period with the current parameters.
+                  {form.strategy === 'ai_machine_learning' ? (
+                    <div style={{ fontSize: 12, marginTop: 4 }}>
+                      💡 Try lowering the <strong>AI Directional Edge Threshold</strong> slider (e.g. to 52%–55%) or expanding the historical date range.
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, marginTop: 4 }}>
+                      💡 Try selecting a wider date range or adjusting indicator thresholds.
+                    </div>
+                  )}
                 </div>
               )}
               {/* Benchmark Comparison */}

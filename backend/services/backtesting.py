@@ -378,9 +378,10 @@ class BacktestEngine:
         from ta.volatility import BollingerBands, AverageTrueRange
         from backend.services.ai_engine import ai_engine_service
 
-        qty_mode = params.get("qty_mode", "fixed") # "fixed" or "atr"
-        fixed_qty = params.get("quantity", 10)
-        risk_pct = params.get("risk_pct", 0.02) # 2% risk per trade if atr mode
+        qty_mode = params.get("qty_mode", "atr") # "fixed" or "atr"
+        fixed_qty = int(params.get("quantity", 10))
+        risk_pct = float(params.get("risk_pct", 0.02)) # 2% risk per trade if atr mode
+        confidence_threshold = float(params.get("confidence_threshold", 0.58)) # Directional edge threshold (0.50 - 0.70)
 
         df["rsi_14"] = RSIIndicator(df["Close"], window=14).rsi()
         
@@ -390,8 +391,8 @@ class BacktestEngine:
         
         df["ema_9"] = EMAIndicator(df["Close"], window=9).ema_indicator()
         df["ema_21"] = EMAIndicator(df["Close"], window=21).ema_indicator()
-        df["ema_50"] = EMAIndicator(df["Close"], window=50).ema_indicator()
-        df["sma_200"] = SMAIndicator(df["Close"], window=200).sma_indicator()
+        df["ema_50"] = EMAIndicator(df["Close"], window=min(50, max(10, len(df) // 4))).ema_indicator()
+        df["sma_200"] = SMAIndicator(df["Close"], window=min(200, max(20, len(df) // 2))).sma_indicator()
         
         bb = BollingerBands(df["Close"], window=20, window_dev=2)
         df["bb_upper"] = bb.bollinger_hband()
@@ -439,7 +440,15 @@ class BacktestEngine:
             ai_result = ai_engine_service.score(indicators, symbol, compute_shap=False)
             score = ai_result.get("score", "HOLD")
             probs = ai_result.get("probabilities", {})
-            buy_prob = probs.get("buy", 0.0)
+            p_buy = float(probs.get("buy", 0.0) or 0.0)
+            p_sell = float(probs.get("sell", 0.0) or 0.0)
+            p_hold = float(probs.get("hold", 0.0) or 0.0)
+            denom = p_buy + p_sell + 1e-8
+            directional_buy = p_buy / denom
+            directional_sell = p_sell / denom
+
+            is_buy = (score == "BUY") or (directional_buy >= confidence_threshold and p_buy >= 0.20)
+            is_sell = (score == "SELL") or (directional_sell >= confidence_threshold and p_sell >= 0.20)
             
             price = float(row["Close"])
             current_atr = float(row["atr"]) if float(row["atr"]) > 0 else 1.0
@@ -453,7 +462,7 @@ class BacktestEngine:
                 qty = fixed_qty
 
             if position is None:
-                if score == "BUY" or buy_prob > 0.55:
+                if is_buy:
                     entry = price * (1 + slippage_pct)
                     sl = entry - (current_atr * 1.5)
                     position = {"entry": entry, "qty": qty, "entry_date": ts.isoformat(), "highest_price": entry, "sl": sl}
@@ -464,7 +473,7 @@ class BacktestEngine:
                     if new_sl > position["sl"]:
                         position["sl"] = new_sl
 
-                if score == "SELL" or price <= position["sl"]:
+                if is_sell or price <= position["sl"]:
                     exit_p = price * (1 - slippage_pct)
                     pnl = (exit_p - position["entry"]) * position["qty"] - commission * 2
                     equity += pnl
