@@ -3734,3 +3734,30 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Total Test Suite**: **26 of 26 tests passed**.
   - **Frontend TypeScript Production Build (`npm run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 23.44s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).
+
+
+---
+
+### Session Entry 75: Inline 6-Column Market Depth Table in Charts Section Matching Mobile App UX
+- **Timestamp:** 2026-11-15 21:20:00 IST (15:50:00 UTC)
+- **User Prompt:**
+  `"i want this types of bids orders and Qty in charts section. what yu done then? 🤷♂️ check and make corrections. /goal /browser /plan /teamwork /learn /boost /agy-customizations /automation /generative_ui /migrate-workflows /migrate-agent-settings /plugin /run-workflow /swarm"` with uploaded image showing `PCJEWELLER BSE 15.51 -0.44 (-2.76%)`, chart sparkline, and exact 6-column table: `Bid Orders Qty Offer Orders Qty`.
+- **Forensic Diagnosis & User Intent**:
+  1. The user clarified via visual screenshot that they do not want Market Depth hidden inside an optional popup modal.
+  2. They want the **Market Depth table directly embedded inline in the Charts section** (`/chart`), positioned immediately below the main candlestick chart.
+  3. The layout must match the exact 6-column broker structure:
+     `Bid (₹) | Orders | Qty | Offer (₹) | Orders | Qty`
+     with Bids in Blue (`#387ed1`), Offers in Red (`#df514c`), zero-padded 5 rows, total buy/sell volume footers, and live updating.
+- **Engineering Changes Delivered**:
+  1. **Unified 6-Column Table (`frontend/src/components/MarketDepthWidget.tsx`)**:
+     - Upgraded table to exact 6-column unified grid: `Bid | Orders | Qty | Offer | Orders | Qty`.
+     - Zero-pads up to 5 levels so even inactive/off-market or low-liquidity stocks render all 5 levels cleanly (`0.00 0 0`) rather than collapsing.
+     - Footers display `Total` buy quantity and `Total` sell quantity.
+     - Added `inline` mode for full-width embedding directly within page cards without modal containers.
+  2. **Direct Embedding in Charts Page (`frontend/src/pages/ChartPage.tsx`)**:
+     - Embedded `<MarketDepthWidget symbol={symbol} inline={true} />` directly below the candlestick chart (line 1688).
+     - Tied to chart's active symbol, automatically syncing depth whenever the user switches symbols (e.g. `PCJEWELLER`, `RELIANCE`, `TCS`).
+- **Verification Evidence**:
+  - **Unit Tests (`backend/tests/test_market_depth.py`)**: **8 of 8 passed in 8.96s (100% green, exit code 0)**.
+  - **Frontend Production Build (`npm run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 16.44s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide copy-pasteable live server deployment commands (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build frontend`).

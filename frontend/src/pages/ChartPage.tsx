@@ -11,6 +11,7 @@ import StockSearchBox from '../components/StockSearchBox'
 import ChartReplayControls from '../components/ChartReplayControls'
 import LiveQuoteHeader from '../components/LiveQuoteHeader'
 import MarketDepthModal from '../components/MarketDepthModal'
+import MarketDepthWidget from '../components/MarketDepthWidget'
 import { TrendlinePrimitive, Point } from '../components/DrawingEngine'
 import { formatINR, formatNumber2Dec } from '../utils/formatters'
 import { useLocalStorage } from '../hooks/useLocalStorage'
@@ -1684,6 +1685,29 @@ export default function ChartPage() {
           <div ref={rsiContainerRef} style={{ width: '100%', borderTop: '1px solid var(--color-border)', display: showIndicators ? 'block' : 'none' }} />
           <div ref={macdContainerRef} style={{ width: '100%', display: showIndicators ? 'block' : 'none' }} />
         </div>
+      </div>
+
+      {/* Zerodha Kite 5-Level Market Depth (Level 2 Order Book) */}
+      <div className="card" style={{ padding: 16, marginTop: 16, marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, borderBottom: '1px solid var(--color-border-light, #1e222d)', paddingBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlignJustify size={16} style={{ color: '#387ed1' }} />
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Market Depth (Order Book) — {symbol.replace('.NS', '').replace('.BO', '')}
+            </h3>
+            <span className="badge badge-secondary" style={{ fontSize: 10 }}>5 Bids & 5 Offers</span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+            Real-time Liquidity & Queue Matching
+          </div>
+        </div>
+        <MarketDepthWidget 
+          symbol={symbol} 
+          inline={true}
+          onTrade={(direction, price) => {
+            navigate('/paper-trading', { state: { symbol, direction, price } })
+          }}
+        />
       </div>
 
       {/* UX Redesign: Pattern Scanner & Live Setup */}
