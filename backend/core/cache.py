@@ -25,7 +25,12 @@ async def get_redis() -> redis.Redis:
                 await _redis_client.aclose()
             except Exception:
                 pass
-        _redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        _redis_client = redis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
+        )
         _redis_loop_id = current_loop_id
     return _redis_client
 

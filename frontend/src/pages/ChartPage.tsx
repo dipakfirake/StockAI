@@ -3,13 +3,14 @@ import { useNavigate, useLocation, useParams, Link } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, HistogramData, LineData } from 'lightweight-charts'
 import { stocksApi, aiApi, swingAuditApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
-import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info, FileSpreadsheet, CheckCircle2 } from 'lucide-react'
+import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info, FileSpreadsheet, CheckCircle2, AlignJustify } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
 import { toast } from '../components/Toast'
 import StockSearchBox from '../components/StockSearchBox'
 import ChartReplayControls from '../components/ChartReplayControls'
 import LiveQuoteHeader from '../components/LiveQuoteHeader'
+import MarketDepthModal from '../components/MarketDepthModal'
 import { TrendlinePrimitive, Point } from '../components/DrawingEngine'
 import { formatINR, formatNumber2Dec } from '../utils/formatters'
 import { useLocalStorage } from '../hooks/useLocalStorage'
@@ -83,6 +84,7 @@ export default function ChartPage() {
   const [showPatterns, setShowPatterns] = useLocalStorage('chart_show_patterns', false)
   const [showEvents, setShowEvents] = useLocalStorage('chart_show_events', false)
   const [showVolumeProfile, setShowVolumeProfile] = useLocalStorage('chart_show_vp', false)
+  const [showDepthModal, setShowDepthModal] = useState<boolean>(false)
   const [volumeProfile, setVolumeProfile] = useState<any>(null)
 
   const [searchInput, setSearchInput] = useState(symbol)
@@ -1527,6 +1529,15 @@ export default function ChartPage() {
             </button>
             <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px', flexShrink: 0 }} />
             <button 
+              onClick={() => setShowDepthModal(true)}
+              className="btn btn-ghost no-shrink" 
+              style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: showDepthModal ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showDepthModal ? 600 : 400 }}
+              title="View Zerodha Kite 5-Level Market Depth"
+            >
+              <AlignJustify size={14} style={{ marginRight: 4 }} /> Depth
+            </button>
+            <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 4px', flexShrink: 0 }} />
+            <button 
               onClick={() => setIsDrawing(!isDrawing)}
               className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: isDrawing ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: isDrawing ? 600 : 400 }}
@@ -2299,6 +2310,19 @@ export default function ChartPage() {
         )}
 
       </div>
+
+      {/* Zerodha Kite Market Depth Modal */}
+      {showDepthModal && (
+        <MarketDepthModal
+          isOpen={showDepthModal}
+          symbol={symbol}
+          onClose={() => setShowDepthModal(false)}
+          onTrade={(direction, price) => {
+            setShowDepthModal(false)
+            navigate('/paper-trading', { state: { symbol, direction, price } })
+          }}
+        />
+      )}
 
     </div>
   )

@@ -3685,3 +3685,52 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Python Syntax Compilation**: `py_compile` succeeded with **exit code 0** on `swing_audit.py`, `swing_audit_service.py`, `settings.py`, and test files.
   - **Frontend TypeScript/Vite Production Build**: **1,992 modules transformed, 0 TypeScript errors, built in 15.50s (exit code 0)**.
 - **Exact Next Safe Step**: Push commits to `origin/main`, provide the user with clear answers and copy-pasteable live server deployment commands (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).
+
+
+---
+
+### Session Entry 74: Zerodha Kite-Style 5-Level Market Depth (Level 2 Order Book), Zero-Rate-Limit Fyers Liquidity Engine, and Paper Trading Order Matching
+- **Timestamp:** 2026-11-15 20:30:00 IST (15:00:00 UTC)
+- **User Prompt:**
+  `"is this system contains shared price meanslike in zerodha kite when we sees stocks we sees the bidded prices, orders and Qty. of 5 to 10 bidded prices of buying and selling and only when some one buys then only we can sell like this happens na so we have to add this also in our system. without exhausting limits of fyers Api find some technics and strategies like this. /goal /browser /plan /teamwork /learn /boost /agy-customizations /automation /generative_ui /migrate-workflows /plugin /run-workflow /swarm"`
+- **Forensic Diagnosis & Architectural Design**:
+  1. **System Capability Gap Identified**:
+     - Previously, the system streamed only single-tick LTP, volume, Day High/Low, and Open/Close via Fyers WebSocket V3 and Yahoo fallback.
+     - The system lacked Level 2 (5-level) Market Depth (Bid/Ask order book with Orders Count, Quantities, Prices, and Total Buy/Sell Qty ratio).
+     - Paper trading previously executed orders immediately at LTP with flat slippage estimates, rather than matching against an active order book queue with buyer/seller liquidity validation.
+  2. **Zero-Rate-Limit Defense Strategy for Fyers API**:
+     - Fyers REST API strictly caps requests at 50 requests/min (safety budgeted at 40 req/min) and 5 requests/sec. Polling REST for 5-depth order books across multiple stocks would exhaust API quotas in seconds.
+     - Implemented a 4-tier zero-exhaustion architecture:
+       1. **On-Demand View-Driven WebSocket Streaming (`data_type="DepthUpdate"`)**: Only streams depth for the single stock actively viewed in the Market Depth widget (carrying 0 REST rate limit penalty).
+       2. **Single-Flight Coalescing & 1-Second Redis Depth Cache (`fyers:depth:{symbol}`)**: Consolidates concurrent component queries into a single upstream fetch.
+       3. **Fyers Rate Budget Guard**: Queries `MarketDataService.check_and_record_fyers_rate_budget()` before calling Fyers REST, automatically routing to synthetic depth without throwing errors if the budget is tight.
+       4. **High-Fidelity Synthetic Liquidity Engine**: Generates authentic 5-level Bids/Asks obeying NSE ₹0.05 tick size, realistic order count and quantity Poisson distributions, volume profile, circuit limits (LC/UC), and dynamic buyer vs seller pressure ratios for off-market, weekend, and fallback scenarios.
+  3. **Order Book Matching Engine ("Only Sell When Someone Buys")**:
+     - **Market Sells**: Sweeps down available Bid levels (Bid 1, Bid 2, Bid 3), calculating volume-weighted execution price and realistic slippage.
+     - **Circuit Breaker Lower Circuit Lock (`total_buy_qty == 0` or Bid 1 <= 0)**: Blocks immediate execution and queues order as `PENDING_NO_BUYERS` (mirroring real exchange mechanics).
+     - **Market Buys**: Sweeps up available Ask levels; detects Upper Circuit locks (`total_sell_qty == 0`).
+     - **Limit Orders**: Queue in virtual order book and execute only when market price satisfies the limit boundary with active volume.
+- **Engineering Changes & Technical Enhancements**:
+  1. **Market Depth Service (`backend/services/market_depth_service.py`)**:
+     - Implemented `quantize_tick(price, 0.05)`, `generate_synthetic_depth(symbol, quote)`, `get_market_depth(symbol)`, and `calculate_order_book_execution(depth, direction, quantity, order_type, limit_price)`.
+  2. **API Endpoint (`backend/api/stocks.py`)**:
+     - Added authenticated endpoint `GET /api/stocks/{symbol}/depth`.
+  3. **Paper Trading Matching Upgrade (`backend/services/paper_trading.py`)**:
+     - Upgraded `place_order`, `_execute_exit`, and `evaluate_pending_orders` to execute against 5-level market depth liquidity.
+  4. **Redis Cache Socket Guard (`backend/core/cache.py`)**:
+     - Added `socket_connect_timeout=0.5, socket_timeout=0.5` to `redis.from_url` to prevent TCP SYN timeouts when Redis is offline.
+  5. **Frontend Zerodha Kite-Style Components**:
+     - Created `frontend/src/components/MarketDepthWidget.tsx`: 5 Bids (Blue) vs 5 Asks (Red), Orders, Qty, Price, Total Buy/Sell Qty ratio bar, Spread, ATP/VWAP, Open/High/Low/Prev Close, Lower/Upper Circuits, and quick Buy/Sell action buttons.
+     - Created `frontend/src/components/MarketDepthModal.tsx`: Floating blur-backdrop modal.
+     - Integrated into `frontend/src/components/WatchlistSidebar.tsx` (Kite Depth button on each stock row).
+     - Integrated into `frontend/src/pages/PaperTradingPage.tsx` (Depth button in order placement modal and positions table).
+     - Integrated into `frontend/src/pages/ChartPage.tsx` (Market Depth toolbar button).
+     - Added `getDepth` to `stocksApi` in `frontend/src/services/api.ts`.
+  6. **Automated Unit Testing (`backend/tests/test_market_depth.py`)**:
+     - Authored 8 unit tests covering tick quantization, synthetic depth generation, bid sweeping slippage, ask sweeping slippage, circuit breaker locks, limit order execution, async caching, and paper trading exit book matching.
+- **Verification Evidence**:
+  - **Market Depth Unit Tests (`backend/tests/test_market_depth.py`)**: **8 of 8 passed in 7.06s (100% green, exit code 0)**.
+  - **Regression Test Suite (`test_swing_audit_coupled_ratchet.py` & `test_fyers_stream.py`)**: **18 of 18 passed in 8.52s (100% green, exit code 0)**.
+  - **Total Test Suite**: **26 of 26 tests passed**.
+  - **Frontend TypeScript Production Build (`npm run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 23.44s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide live server deployment commands (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).

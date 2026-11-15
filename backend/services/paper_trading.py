@@ -107,10 +107,37 @@ class PaperTradingService:
         entry_price = None
         slippage_amount = 0.0
 
+        # Order Book Liquidity Matching Engine ("Only sell when someone buys / Only buy when someone sells")
+        from backend.services.market_depth_service import market_depth_service, MarketDepthService
+        try:
+            depth = await market_depth_service.get_market_depth(symbol)
+        except Exception:
+            depth = None
+
         if order_type == "MARKET":
-            status = "OPEN"
-            slippage_amount = raw_price * settings.DEFAULT_SLIPPAGE_PCT
-            entry_price = raw_price + slippage_amount if direction == "BUY" else raw_price - slippage_amount
+            if depth:
+                exec_price, slip, exec_status, reason = MarketDepthService.calculate_order_book_execution(
+                    depth=depth,
+                    direction=direction,
+                    quantity=quantity,
+                    order_type="MARKET",
+                )
+                if exec_status == "FILLED":
+                    status = "OPEN"
+                    entry_price = exec_price
+                    slippage_amount = slip
+                elif exec_status in ("PENDING_NO_BUYERS", "PENDING_NO_SELLERS"):
+                    # Circuit breaker lock: No buyers to sell to, or no sellers to buy from
+                    status = "PENDING"
+                    entry_price = None
+                    slippage_amount = 0.0
+                    logger.warning(f"Market order queued due to order book lock: {reason}")
+                else:
+                    raise ValueError(reason)
+            else:
+                status = "OPEN"
+                slippage_amount = raw_price * settings.DEFAULT_SLIPPAGE_PCT
+                entry_price = raw_price + slippage_amount if direction == "BUY" else raw_price - slippage_amount
 
         # 4. Fat-Finger Price Deviation Bounds
         if order_type == "LIMIT":
@@ -258,9 +285,29 @@ class PaperTradingService:
 
     @staticmethod
     async def _execute_exit(trade: PaperTrade, exit_price_raw: float):
-        """Internal helper to calculate slippage, taxes, and final PnL on exit."""
-        slippage = exit_price_raw * settings.DEFAULT_SLIPPAGE_PCT
-        exit_price = exit_price_raw - slippage if trade.direction == "BUY" else exit_price_raw + slippage
+        """Internal helper to calculate slippage, taxes, and final PnL on exit matching against order book."""
+        from backend.services.market_depth_service import market_depth_service, MarketDepthService
+        
+        exit_direction = "SELL" if trade.direction == "BUY" else "BUY"
+        exit_price = None
+        
+        try:
+            depth = await market_depth_service.get_market_depth(trade.symbol)
+            if depth:
+                exec_p, _, exec_status, _ = MarketDepthService.calculate_order_book_execution(
+                    depth=depth,
+                    direction=exit_direction,
+                    quantity=trade.quantity,
+                    order_type="MARKET"
+                )
+                if exec_status == "FILLED":
+                    exit_price = exec_p
+        except Exception:
+            pass
+
+        if exit_price is None:
+            slippage = exit_price_raw * settings.DEFAULT_SLIPPAGE_PCT
+            exit_price = exit_price_raw - slippage if trade.direction == "BUY" else exit_price_raw + slippage
         
         multiplier = 1 if trade.direction == "BUY" else -1
         
@@ -281,7 +328,9 @@ class PaperTradingService:
 
     @staticmethod
     async def evaluate_pending_orders(db: AsyncSession):
-        """Check all PENDING orders and execute if price levels are hit."""
+        """Check all PENDING orders and execute if price levels are hit with order book liquidity."""
+        from backend.services.market_depth_service import market_depth_service, MarketDepthService
+
         result = await db.execute(select(PaperTrade).where(PaperTrade.status == "PENDING"))
         pending_orders = result.scalars().all()
         
@@ -306,8 +355,22 @@ class PaperTradingService:
                     triggered = True
             
             if triggered:
-                slippage_amount = current_price * settings.DEFAULT_SLIPPAGE_PCT
-                entry_price = current_price + slippage_amount if order.direction == "BUY" else current_price - slippage_amount
+                try:
+                    depth = await market_depth_service.get_market_depth(order.symbol)
+                    exec_p, slip_amt, exec_stat, _ = MarketDepthService.calculate_order_book_execution(
+                        depth=depth,
+                        direction=order.direction,
+                        quantity=order.quantity,
+                        order_type="MARKET",
+                    )
+                    if exec_stat == "FILLED":
+                        entry_price = exec_p
+                        slippage_amount = slip_amt
+                    else:
+                        continue  # Wait for liquidity / circuit unlock
+                except Exception:
+                    slippage_amount = current_price * settings.DEFAULT_SLIPPAGE_PCT
+                    entry_price = current_price + slippage_amount if order.direction == "BUY" else current_price - slippage_amount
                 
                 order.entry_price = Decimal(str(round(entry_price, 4)))
                 order.slippage = Decimal(str(round(slippage_amount, 4)))

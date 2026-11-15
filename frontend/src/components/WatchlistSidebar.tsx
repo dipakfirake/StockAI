@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, TrendingUp, TrendingDown, Star, Trash2 } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, Star, Trash2, AlignJustify } from 'lucide-react';
 import { watchlistApi } from '../services/api';
 import StockSearchBox from './StockSearchBox';
 import { formatINR } from '../utils/formatters';
 import { isWebSocketSupportedOnHost } from '../services/websocket';
+import MarketDepthModal from './MarketDepthModal';
 import './WatchlistSidebar.css';
 
 interface WatchlistSidebarProps {
@@ -22,6 +23,7 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
   const [stocks, setStocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [, setIsAdding] = useState(false);
+  const [selectedDepthSymbol, setSelectedDepthSymbol] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -301,6 +303,17 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
                       <span>{q.change > 0 ? '+' : ''}{q.change_pct?.toFixed(2) || '0.00'}%</span>
                       <button 
                         className="wl-remove-btn" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedDepthSymbol(q.symbol);
+                        }}
+                        title="View Market Depth (Kite 5 Bids/Asks)"
+                        style={{ marginLeft: 4, opacity: 0.8 }}
+                      >
+                        <AlignJustify size={15} />
+                      </button>
+                      <button 
+                        className="wl-remove-btn" 
                         onClick={(e) => handleRemove(e, q.symbol)}
                         title="Remove from Watchlist"
                       >
@@ -314,6 +327,20 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
           )}
         </div>
       </div>
+
+      {selectedDepthSymbol && (
+        <MarketDepthModal
+          isOpen={!!selectedDepthSymbol}
+          symbol={selectedDepthSymbol}
+          onClose={() => setSelectedDepthSymbol(null)}
+          onTrade={(direction, price) => {
+            const sym = selectedDepthSymbol;
+            setSelectedDepthSymbol(null);
+            onClose();
+            navigate('/paper-trading', { state: { symbol: sym, direction, price } });
+          }}
+        />
+      )}
     </>
   );
 }

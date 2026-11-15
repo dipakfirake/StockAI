@@ -14,6 +14,30 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-15)
 
+- **ZERODHA KITE-STYLE 5-LEVEL MARKET DEPTH & ZERO-RATE-LIMIT FYERS LIQUIDITY ENGINE (COMPLETE & VERIFIED - 2026-11-15):**
+  - **Issues Investigated & Resolved**:
+    - User asked whether the system contains "shared price means like in Zerodha Kite when we see stocks we see the bidded prices, orders and Qty of 5 to 10 bidded prices of buying and selling and only when someone buys then only we can sell like this happens na so we have to add this also in our system without exhausting limits of Fyers API".
+  - **Forensic Diagnosis & Solutions Delivered**:
+    1. **Identified Gap**: Previously only single-tick LTP, volume, and OHLC were streamed; 5-level Order Book Market Depth and real liquidity-based order matching were missing.
+    2. **Zero-Exhaustion 4-Tier Strategy for Fyers API**:
+       - *Tier 1 (On-Demand WebSocket Streaming)*: Depth streamed via WebSocket (`data_type="DepthUpdate"`) only for the stock currently viewed in the widget (0 REST rate limit penalty).
+       - *Tier 2 (Single-Flight & 1s Redis Cache)*: Fast in-memory / Redis cache (`fyers:depth:{symbol}`) with 1.0s TTL and per-symbol locks.
+       - *Tier 3 (Rate Budget Guard)*: Monitored via token bucket (max 40 req/min, 4 req/sec) to avoid 429 quota exhaustion.
+       - *Tier 4 (High-Fidelity Synthetic Liquidity Engine)*: Generates realistic 5-level Bids/Asks with NSE ₹0.05 tick size, Poisson order distributions, spread, circuit limits, and buyer/seller pressure ratios for off-market, weekend, and fallback modes.
+    3. **Order Book Matching Engine in Paper Trading**:
+       - Implemented "Only sell when someone buys" (matches against Best Bids, sweeps down levels with volume-weighted slippage).
+       - Circuit Breaker lower-circuit lock (`total_buy_qty == 0` or Bid 1 <= 0) blocks immediate execution and queues order as `PENDING_NO_BUYERS`.
+       - Implemented "Only buy when someone sells" (matches against Best Asks, detects upper-circuit locks).
+    4. **Zerodha Kite-Style UI Components**:
+       - `MarketDepthWidget.tsx` and `MarketDepthModal.tsx`: 5 Bids (Blue) vs 5 Asks (Red), Orders, Qty, Price, Total Buy/Sell Qty ratio bar, spread, ATP/VWAP, circuits, and quick Buy/Sell action buttons.
+       - Integrated into `WatchlistSidebar.tsx` (order book icon on each stock), `PaperTradingPage.tsx` (order modal & positions table), and `ChartPage.tsx` (toolbar button).
+  - **Verification Evidence**:
+    - **Market Depth Tests (`backend/tests/test_market_depth.py`)**: **8 of 8 passed in 7.06s (100% green)**.
+    - **Regression Tests (`test_swing_audit_coupled_ratchet.py` & `test_fyers_stream.py`)**: **18 of 18 passed in 8.52s (100% green)**.
+    - **Total Test Suite**: **26 of 26 tests passed**.
+    - **Frontend TypeScript Production Build**: **1,994 modules transformed, 0 TypeScript errors, built in 23.44s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).
+
 - **AUTOMATED ALGORITHMIC SWING TRADING, COUPLED RATCHET ENGINE & DYNAMIC ATR TRAILING EXCEL SYSTEM (COMPLETE & VERIFIED - 2026-11-15):**
   - **Issues Investigated & Resolved**:
     - User requested an automated algorithmic trading switch in Settings and integration into the 11-Day Swing Trade Excel module for maximum profits with guaranteed zero-loss on reversals.

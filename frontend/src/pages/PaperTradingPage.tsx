@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { paperTradingApi, stocksApi } from '../services/api'
-import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle, Calendar, Eye } from 'lucide-react'
+import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle, Calendar, Eye, AlignJustify } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
 import HoldingDetailModal from '../components/HoldingDetailModal'
+import MarketDepthModal from '../components/MarketDepthModal'
 import { formatINR, formatNumber2Dec, getPnlColor, getPnlClass, getPnlSign } from '../utils/formatters'
 
 export default function PaperTradingPage() {
@@ -13,6 +14,7 @@ export default function PaperTradingPage() {
   const [activeTab, setActiveTab] = useState<'POSITIONS' | 'ORDERS' | 'HISTORY'>('POSITIONS')
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [selectedPosition, setSelectedPosition] = useState<any | null>(null)
+  const [depthModalSymbol, setDepthModalSymbol] = useState<string | null>(null)
   
   const [form, setForm] = useState({ 
     symbol: '', 
@@ -238,6 +240,14 @@ export default function PaperTradingPage() {
                         <button 
                           className="btn btn-secondary" 
                           style={{ padding: '4px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                          onClick={() => setDepthModalSymbol(t.symbol)}
+                          title="View 5-Level Market Depth (Kite)"
+                        >
+                          <AlignJustify size={12} /> Depth
+                        </button>
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '4px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3 }}
                           onClick={() => setSelectedPosition(t)}
                           title="Inspect details"
                         >
@@ -363,6 +373,19 @@ export default function PaperTradingPage() {
                   />
                 </div>
 
+                {form.symbol && (
+                  <div style={{ marginBottom: 16 }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setDepthModalSymbol(form.symbol)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, padding: '5px 12px', width: '100%', justifyContent: 'center' }}
+                    >
+                      <AlignJustify size={13} /> View 5-Level Market Depth (Kite Bids & Asks)
+                    </button>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
                   <div style={{ flex: 1 }}>
                     <label className="form-label">Product</label>
@@ -425,6 +448,26 @@ export default function PaperTradingPage() {
         holding={selectedPosition}
         onExit={handleClose}
       />
+
+      {/* Zerodha Kite Market Depth Modal */}
+      {depthModalSymbol && (
+        <MarketDepthModal
+          isOpen={!!depthModalSymbol}
+          symbol={depthModalSymbol}
+          onClose={() => setDepthModalSymbol(null)}
+          onTrade={(direction, price) => {
+            setForm({
+              ...form,
+              symbol: depthModalSymbol,
+              direction,
+              limit_price: price ? String(price) : form.limit_price,
+              order_type: price ? 'LIMIT' : 'MARKET'
+            })
+            setDepthModalSymbol(null)
+            setIsOrderModalOpen(true)
+          }}
+        />
+      )}
 
       <style>{`
         .form-label { font-size: 11px; color: var(--color-text-muted); margin-bottom: 6px; display: block; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }

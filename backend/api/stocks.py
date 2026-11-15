@@ -452,3 +452,24 @@ async def get_volume_profile(
     df = candles_to_df(candles)
     profile = calculate_volume_profile(df, num_bins=num_bins)
     return {"symbol": safe_symbol, "timeframe": safe_tf, **profile}
+
+
+@router.get("/{symbol}/depth")
+async def get_stock_market_depth(
+    symbol: str,
+    current_user=Depends(get_current_user),
+):
+    """
+    Get 5-level market depth (Level 2 order book) for a symbol with zero Fyers rate limit exhaustion.
+    Returns bids, asks, total buy/sell quantities, spread, circuit limits, and order book imbalance.
+    """
+    from backend.services.market_depth_service import market_depth_service
+
+    safe_symbol = sanitize_symbol(symbol)
+    try:
+        depth = await market_depth_service.get_market_depth(safe_symbol)
+        return depth
+    except Exception as e:
+        logger.error(f"Error fetching market depth for {safe_symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch market depth for {safe_symbol}")
+
