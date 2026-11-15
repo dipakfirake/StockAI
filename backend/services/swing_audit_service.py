@@ -357,9 +357,19 @@ class SwingAuditService:
                     # Effective buy price: User's execution price if bought, else system recommendation price
                     raw_buy = audit.user_buy_price if (audit.user_bought and audit.user_buy_price is not None) else audit.buy_price
                     buy_val = float(raw_buy or 0.0)
-                    target_val = float(audit.target_price or (buy_val * 1.06))
-                    sl_val = float(audit.stop_loss or (buy_val * 0.96))
+                    t1_val = float(audit.target_1 or audit.target_price or (buy_val * 1.06))
+                    t2_val = float(audit.target_2 or 0.0)
+                    has_t2 = bool(t2_val > t1_val)
+                    initial_sl = float(audit.stop_loss or (buy_val * 0.96))
                     capital_val = float(audit.allocated_capital or 100000.0)
+
+                    # Dynamic Coupled Ratchet & Trailing Stop state
+                    current_sl = float(audit.dynamic_stop_loss or initial_sl)
+                    highest_p = float(audit.highest_price_recorded or buy_val)
+                    tranche_2_active = bool(audit.tranche_2_active)
+                    tranche_2_buy = float(audit.tranche_2_buy_price or 0.0)
+                    tranche_2_sl = float(audit.tranche_2_stop_loss or 0.0)
+                    ratchet_stage = audit.ratchet_stage or "INITIAL"
 
                     # Process Day 1 through Day 11
                     for idx, (candle_date, c_data) in enumerate(valid_candles[:11]):
@@ -369,10 +379,49 @@ class SwingAuditService:
                         low_p = float(c_data.get("low", 0.0) or 0.0)
                         close_p = float(c_data.get("close", 0.0) or 0.0)
 
-                        change_pct = round(((close_p - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
+                        highest_p = max(highest_p, high_p)
+                        atr_val = round(max(high_p - low_p, 0.02 * close_p), 2)
 
-                        tgt_hit = high_p >= target_val
-                        sl_hit = low_p <= sl_val
+                        change_pct = round(((close_p - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
+                        day_ratchet_event = None
+                        just_ratcheted = False
+
+                        # ─── COUPLED RATCHET ENGINE: TARGET 1 CROSS & TRANCHE 2 ACTIVATION ─
+                        if high_p >= t1_val and audit.status == "IN_PROGRESS":
+                            if has_t2:
+                                # Multi-target active: Do NOT close! Activate Tranche 2 & ratchet Tranche 1
+                                if not tranche_2_active:
+                                    tranche_2_active = True
+                                    tranche_2_buy = round(max(t1_val, open_p), 2)
+                                    tranche_2_sl = round(max(buy_val * 1.01, tranche_2_buy - (1.5 * atr_val)), 2)
+                                    just_ratcheted = True
+                                
+                                # Ratchet Tranche 1 SL to Break-Even + 1% or ATR trailing floor
+                                atr_trail_floor = round(highest_p - (1.5 * atr_val), 2)
+                                t1_new_sl = round(max(current_sl, buy_val * 1.01, atr_trail_floor), 2)
+                                if t1_new_sl > current_sl:
+                                    current_sl = t1_new_sl
+                                    just_ratcheted = True
+
+                                ratchet_stage = "BREAKEVEN_LOCKED"
+                                day_ratchet_event = "BREAKEVEN_LOCKED"
+
+                                # Step 2: If price reaches halfway to T2 (or >= 108 in our example)
+                                half_way_t2 = t1_val + 0.5 * (t2_val - t1_val)
+                                if high_p >= half_way_t2:
+                                    # Lock Tranche 1 at Target 1!
+                                    current_sl = max(current_sl, t1_val)
+                                    # Ratchet Tranche 2 SL to Target 1 (near breakeven!)
+                                    tranche_2_sl = max(tranche_2_sl, t1_val)
+                                    ratchet_stage = "T2_RATCHET_ACTIVE"
+                                    day_ratchet_event = "T2_RATCHET_ACTIVE"
+
+                        tgt_hit = (high_p >= t2_val) if (has_t2 and tranche_2_active) else (high_p >= t1_val)
+                        # On the day a target is crossed and stop elevated, pre-existing stop governs that day's morning lows
+                        if just_ratcheted:
+                            sl_hit = (low_p <= initial_sl)
+                        else:
+                            sl_hit = (low_p <= current_sl)
 
                         # Update or insert daily price record
                         if day_num in existing_price_map:
@@ -385,6 +434,9 @@ class SwingAuditService:
                             dp.change_pct_from_buy = Decimal(str(change_pct))
                             dp.target_hit = tgt_hit
                             dp.stoploss_hit = sl_hit
+                            dp.dynamic_sl_day = Decimal(str(current_sl))
+                            dp.atr_value = Decimal(str(atr_val))
+                            dp.ratchet_event = day_ratchet_event
                         else:
                             dp = SwingTradeAuditPrice(
                                 audit_id=audit.id,
@@ -396,33 +448,89 @@ class SwingAuditService:
                                 close_price=Decimal(str(close_p)),
                                 change_pct_from_buy=Decimal(str(change_pct)),
                                 target_hit=tgt_hit,
-                                stoploss_hit=sl_hit
+                                stoploss_hit=sl_hit,
+                                dynamic_sl_day=Decimal(str(current_sl)),
+                                atr_value=Decimal(str(atr_val)),
+                                ratchet_event=day_ratchet_event,
                             )
                             db.add(dp)
 
-                        # ─── EXECUTION RULE 1: STOP LOSS BREACH ─────────────────────
-                        if sl_hit and audit.status == "IN_PROGRESS":
-                            exit_price_val = min(open_p, sl_val) if open_p > 0 else sl_val
-                            loss_pct = round(((exit_price_val - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
-                            pnl_val = round((loss_pct / 100.0) * capital_val, 2)
+                        # Persist active audit ratchet state on each day
+                        audit.dynamic_stop_loss = Decimal(str(current_sl))
+                        audit.highest_price_recorded = Decimal(str(highest_p))
+                        audit.tranche_2_active = tranche_2_active
+                        audit.tranche_2_buy_price = Decimal(str(tranche_2_buy)) if tranche_2_active else None
+                        audit.tranche_2_stop_loss = Decimal(str(tranche_2_sl)) if tranche_2_active else None
+                        audit.ratchet_stage = ratchet_stage
 
-                            audit.status = "STOPLOSS_HIT"
+                        # ─── EXECUTION RULE 1: TARGET 2 ACHIEVED ────────────────────────
+                        if has_t2 and tranche_2_active and high_p >= t2_val and audit.status == "IN_PROGRESS":
+                            # Exit both tranches at Target 2
+                            exit_price_val = max(open_p, t2_val) if open_p > 0 else t2_val
+                            t1_gain = ((exit_price_val - buy_val) / buy_val) * 100 if buy_val > 0 else 0.0
+                            t2_gain = ((exit_price_val - tranche_2_buy) / tranche_2_buy) * 100 if tranche_2_buy > 0 else 0.0
+                            
+                            # 50/50 capital allocation between tranches
+                            combined_pnl_rs = round(((t1_gain / 100.0) * (capital_val * 0.5)) + ((t2_gain / 100.0) * (capital_val * 0.5)), 2)
+                            combined_gain_pct = round((combined_pnl_rs / capital_val) * 100.0, 2)
+
+                            audit.status = "TARGET_2_ACHIEVED"
+                            audit.ratchet_stage = "TARGET_2_ACHIEVED"
                             audit.exit_date = candle_date
                             audit.exit_price = Decimal(str(round(exit_price_val, 2)))
                             audit.exit_day_number = day_num
-                            audit.profit_loss_pct = Decimal(str(loss_pct))
-                            audit.realized_pnl_rupees = Decimal(str(pnl_val))
-                            audit.notes = f"Stop Loss breached on Day {day_num} ({candle_date}). Sold at ₹{exit_price_val:.2f}."
-                            logger.info(f"[Audit SL Executed] {audit.symbol} stopped out on Day {day_num} @ ₹{exit_price_val:.2f} ({loss_pct}%)")
+                            audit.profit_loss_pct = Decimal(str(combined_gain_pct))
+                            audit.realized_pnl_rupees = Decimal(str(combined_pnl_rs))
+                            audit.notes = f"Target 2 reached on Day {day_num} ({candle_date}). Tranche 1 (+{t1_gain:.1f}%) and Tranche 2 (+{t2_gain:.1f}%) profit booked @ ₹{exit_price_val:.2f}."
+                            logger.info(f"[Audit T2 Hit] {audit.symbol} reached Target 2 on Day {day_num} @ ₹{exit_price_val:.2f} (+{combined_gain_pct}%, ₹{combined_pnl_rs})")
                             break
 
-                        # ─── EXECUTION RULE 2: TARGET ACHIEVED ───────────────────────
-                        elif tgt_hit and audit.status == "IN_PROGRESS":
-                            exit_price_val = max(open_p, target_val) if open_p > 0 else target_val
+                        # ─── EXECUTION RULE 2: STOP LOSS / PROFIT RATCHET BREACH ───────
+                        elif sl_hit and audit.status == "IN_PROGRESS":
+                            exit_price_val = min(open_p, current_sl) if open_p > 0 else current_sl
+
+                            if tranche_2_active:
+                                # Both tranches exit at ratcheted protective floors
+                                t1_gain = ((exit_price_val - buy_val) / buy_val) * 100 if buy_val > 0 else 0.0
+                                t2_exit_p = min(open_p, tranche_2_sl) if open_p > 0 else tranche_2_sl
+                                t2_gain = ((t2_exit_p - tranche_2_buy) / tranche_2_buy) * 100 if tranche_2_buy > 0 else 0.0
+
+                                combined_pnl_rs = round(((t1_gain / 100.0) * (capital_val * 0.5)) + ((t2_gain / 100.0) * (capital_val * 0.5)), 2)
+                                combined_gain_pct = round((combined_pnl_rs / capital_val) * 100.0, 2)
+
+                                audit.status = "STOPPED_IN_PROFIT" if combined_pnl_rs >= 0 else "STOPLOSS_HIT"
+                                audit.ratchet_stage = "STOPPED_IN_PROFIT" if combined_pnl_rs >= 0 else "STOPLOSS_HIT"
+                                audit.exit_date = candle_date
+                                audit.exit_price = Decimal(str(round(exit_price_val, 2)))
+                                audit.exit_day_number = day_num
+                                audit.profit_loss_pct = Decimal(str(combined_gain_pct))
+                                audit.realized_pnl_rupees = Decimal(str(combined_pnl_rs))
+                                audit.notes = f"Coupled Ratchet stop triggered on Day {day_num} ({candle_date}). Tranche 1 @ ₹{exit_price_val:.2f} (+{t1_gain:.1f}%), Tranche 2 @ ₹{t2_exit_p:.2f} ({t2_gain:+.1f}%). Net: ₹{combined_pnl_rs:+,.2f}."
+                                logger.info(f"[Audit Ratchet Exit] {audit.symbol} exited in profit on Day {day_num} @ ₹{exit_price_val:.2f} (Net: +{combined_gain_pct}%, ₹{combined_pnl_rs})")
+                            else:
+                                # Normal initial stoploss breach before Target 1
+                                loss_pct = round(((exit_price_val - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
+                                pnl_val = round((loss_pct / 100.0) * capital_val, 2)
+
+                                audit.status = "STOPLOSS_HIT"
+                                audit.ratchet_stage = "STOPLOSS_HIT"
+                                audit.exit_date = candle_date
+                                audit.exit_price = Decimal(str(round(exit_price_val, 2)))
+                                audit.exit_day_number = day_num
+                                audit.profit_loss_pct = Decimal(str(loss_pct))
+                                audit.realized_pnl_rupees = Decimal(str(pnl_val))
+                                audit.notes = f"Stop Loss breached on Day {day_num} ({candle_date}). Sold at ₹{exit_price_val:.2f}."
+                                logger.info(f"[Audit SL Executed] {audit.symbol} stopped out on Day {day_num} @ ₹{exit_price_val:.2f} ({loss_pct}%)")
+                            break
+
+                        # ─── EXECUTION RULE 3: SINGLE-TARGET WIN (NO T2 CONFIGURED) ─────
+                        elif (not has_t2) and high_p >= t1_val and audit.status == "IN_PROGRESS":
+                            exit_price_val = max(open_p, t1_val) if open_p > 0 else t1_val
                             gain_pct = round(((exit_price_val - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
                             pnl_val = round((gain_pct / 100.0) * capital_val, 2)
 
                             audit.status = "TARGET_ACHIEVED"
+                            audit.ratchet_stage = "TARGET_1_LOCKED"
                             audit.exit_date = candle_date
                             audit.exit_price = Decimal(str(round(exit_price_val, 2)))
                             audit.exit_day_number = day_num
@@ -432,20 +540,35 @@ class SwingAuditService:
                             logger.info(f"[Audit Target Hit] {audit.symbol} reached target on Day {day_num} @ ₹{exit_price_val:.2f} (+{gain_pct}%)")
                             break
 
-                        # ─── EXECUTION RULE 3: 11-DAY TIME HORIZON EXIT ─────────────
+                        # ─── EXECUTION RULE 4: 11-DAY TIME HORIZON EXIT ─────────────────
                         elif day_num == 11 and audit.status == "IN_PROGRESS":
                             exit_price_val = close_p
-                            pnl_pct = round(((exit_price_val - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
-                            pnl_val = round((pnl_pct / 100.0) * capital_val, 2)
+                            if tranche_2_active:
+                                t1_gain = ((exit_price_val - buy_val) / buy_val) * 100 if buy_val > 0 else 0.0
+                                t2_gain = ((exit_price_val - tranche_2_buy) / tranche_2_buy) * 100 if tranche_2_buy > 0 else 0.0
+                                combined_pnl_rs = round(((t1_gain / 100.0) * (capital_val * 0.5)) + ((t2_gain / 100.0) * (capital_val * 0.5)), 2)
+                                combined_gain_pct = round((combined_pnl_rs / capital_val) * 100.0, 2)
 
-                            audit.status = "DAY_11_EXIT"
-                            audit.exit_date = candle_date
-                            audit.exit_price = Decimal(str(round(exit_price_val, 2)))
-                            audit.exit_day_number = 11
-                            audit.profit_loss_pct = Decimal(str(pnl_pct))
-                            audit.realized_pnl_rupees = Decimal(str(pnl_val))
-                            audit.notes = f"11-Day horizon completed on {candle_date}. Position closed at CMP ₹{exit_price_val:.2f}."
-                            logger.info(f"[Audit Day 11 Exit] {audit.symbol} closed on Day 11 @ ₹{exit_price_val:.2f} ({pnl_pct}%)")
+                                audit.status = "DAY_11_EXIT"
+                                audit.ratchet_stage = "DAY_11_EXIT"
+                                audit.exit_date = candle_date
+                                audit.exit_price = Decimal(str(round(exit_price_val, 2)))
+                                audit.exit_day_number = 11
+                                audit.profit_loss_pct = Decimal(str(combined_gain_pct))
+                                audit.realized_pnl_rupees = Decimal(str(combined_pnl_rs))
+                                audit.notes = f"11-Day horizon completed on {candle_date}. Position closed at CMP ₹{exit_price_val:.2f}. Net: ₹{combined_pnl_rs:+,.2f}."
+                            else:
+                                pnl_pct = round(((exit_price_val - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
+                                pnl_val = round((pnl_pct / 100.0) * capital_val, 2)
+
+                                audit.status = "DAY_11_EXIT"
+                                audit.ratchet_stage = "DAY_11_EXIT"
+                                audit.exit_date = candle_date
+                                audit.exit_price = Decimal(str(round(exit_price_val, 2)))
+                                audit.exit_day_number = 11
+                                audit.profit_loss_pct = Decimal(str(pnl_pct))
+                                audit.realized_pnl_rupees = Decimal(str(pnl_val))
+                                audit.notes = f"11-Day horizon completed on {candle_date}. Position closed at CMP ₹{exit_price_val:.2f}."
                             break
 
                     updated_count += 1
@@ -463,7 +586,7 @@ class SwingAuditService:
             for a in audits:
                 pnl_pct = float(a.profit_loss_pct or 0.0)
                 pnl_rs = float(a.realized_pnl_rupees or 0.0)
-                if a.status == "TARGET_ACHIEVED" or (a.status == "DAY_11_EXIT" and pnl_pct > 0):
+                if a.status in ("TARGET_ACHIEVED", "TARGET_2_ACHIEVED", "STOPPED_IN_PROFIT") or (a.status == "DAY_11_EXIT" and pnl_pct > 0):
                     win_trades += 1
                 elif a.status == "STOPLOSS_HIT" or (a.status == "DAY_11_EXIT" and pnl_pct < 0):
                     loss_trades += 1
@@ -593,6 +716,9 @@ class SwingAuditService:
             c_ret = float(cycle.total_gain_loss_pct or 0.0)
             c_pnl = float(cycle.total_pnl_rupees or 0.0)
 
+            t2_expansions = sum(1 for a in audits if a.tranche_2_active)
+            stopped_in_profit_count = sum(1 for a in audits if a.status in ("STOPPED_IN_PROFIT", "TARGET_2_ACHIEVED"))
+
             kpi_metrics = [
                 ("Total Recommendations", str(cycle.total_trades or 0), card_fill),
                 ("Target Hits (Wins)", str(cycle.win_trades or 0), emerald_fill),
@@ -600,6 +726,9 @@ class SwingAuditService:
                 ("Win Rate", f"{c_win_rate:.1f}%", emerald_fill if c_win_rate >= 50 else amber_fill),
                 ("Total Cycle Return", f"{c_ret:+.2f}%", emerald_fill if c_ret >= 0 else rose_fill),
                 ("Realized Net P&L", f"₹{c_pnl:+,.2f}", emerald_fill if c_pnl >= 0 else rose_fill),
+                ("T2 Pyramiding Expansions", str(t2_expansions), emerald_fill if t2_expansions > 0 else card_fill),
+                ("Coupled Ratchet Wins", str(stopped_in_profit_count), emerald_fill if stopped_in_profit_count > 0 else card_fill),
+                ("Zero-Loss Protection Rate", f"{(stopped_in_profit_count / max(1, t2_expansions) * 100):.1f}%" if t2_expansions > 0 else "100.0%", emerald_fill),
             ]
 
             row = 5
@@ -648,6 +777,10 @@ class SwingAuditService:
                 "Day 9 Price",
                 "Day 10 Price",
                 "Day 11 Price (Check)",
+                "Dynamic Trailing SL (₹)",
+                "Tranche 2 Buy (₹)",
+                "Tranche 2 SL (₹)",
+                "Ratchet Milestone",
                 "Audit Status",
                 "Exit Date",
                 "Exit Price (₹)",
@@ -674,6 +807,8 @@ class SwingAuditService:
 
             status_colors = {
                 "TARGET_ACHIEVED": Font(name="Calibri", size=10, bold=True, color="166534"),
+                "TARGET_2_ACHIEVED": Font(name="Calibri", size=10, bold=True, color="047857"),
+                "STOPPED_IN_PROFIT": Font(name="Calibri", size=10, bold=True, color="0D9488"),
                 "STOPLOSS_HIT": Font(name="Calibri", size=10, bold=True, color="991B1B"),
                 "DAY_11_EXIT": Font(name="Calibri", size=10, bold=True, color="1E40AF"),
                 "IN_PROGRESS": Font(name="Calibri", size=10, bold=True, color="854D0E"),
@@ -686,7 +821,7 @@ class SwingAuditService:
                 dp_map = {dp.day_number: dp for dp in audit.daily_prices}
 
                 # Choose row fill based on status
-                if audit.status == "TARGET_ACHIEVED":
+                if audit.status in ("TARGET_ACHIEVED", "TARGET_2_ACHIEVED", "STOPPED_IN_PROFIT"):
                     r_fill = green_row_fill
                 elif audit.status == "STOPLOSS_HIT":
                     r_fill = red_row_fill
@@ -699,6 +834,11 @@ class SwingAuditService:
 
                 a_pnl_pct = float(audit.profit_loss_pct or 0.0)
                 a_pnl_rs = float(audit.realized_pnl_rupees or 0.0)
+
+                dyn_sl = float(audit.dynamic_stop_loss or audit.stop_loss or 0.0)
+                t2_buy_str = f"₹{float(audit.tranche_2_buy_price):.2f}" if (audit.tranche_2_active and audit.tranche_2_buy_price) else "—"
+                t2_sl_str = f"₹{float(audit.tranche_2_stop_loss):.2f}" if (audit.tranche_2_active and audit.tranche_2_stop_loss) else "—"
+                ratchet_milestone = (audit.ratchet_stage or "INITIAL").replace("_", " ")
 
                 row_data = [
                     f"SW-{cycle.cycle_number:02d}-{r_idx - 1:03d}",
@@ -729,7 +869,12 @@ class SwingAuditService:
                 exit_dt_str = audit.exit_date.strftime("%d-%m-%Y") if (audit.exit_date and hasattr(audit.exit_date, 'strftime')) else (str(audit.exit_date) if audit.exit_date else "—")
                 exit_p_val = float(audit.exit_price) if audit.exit_price is not None else "—"
 
+                # Dynamic Ratchet and Outcome columns (22 to 31)
                 row_data.extend([
+                    dyn_sl,
+                    t2_buy_str,
+                    t2_sl_str,
+                    ratchet_milestone,
                     (audit.status or "").replace("_", " "),
                     exit_dt_str,
                     exit_p_val,
@@ -742,52 +887,54 @@ class SwingAuditService:
                     cell = ws_ledger.cell(row=r_idx, column=c_idx, value=val)
                     cell.fill = r_fill
                     cell.border = thin_border
-                    cell.alignment = Alignment(vertical="center", horizontal="center" if c_idx in (1, 4, 6, 10, 22, 23, 27) else "right" if c_idx in (5, 7, 8, 9, 24, 25, 26) else "left")
+                    cell.alignment = Alignment(vertical="center", horizontal="center" if c_idx in (1, 4, 6, 10, 25, 26, 27, 31) else "right" if c_idx in (5, 7, 8, 9, 22, 28, 29, 30) else "left")
 
                     # Highlight user bought status
                     if c_idx == 6:
                         cell.font = Font(name="Calibri", size=10, bold=True, color="166534" if audit.user_bought else "64748B")
                     elif c_idx == 7 and audit.user_buy_price is not None:
                         cell.number_format = '₹#,##0.00'
-                    elif c_idx == 22: # Audit Status
+                    elif c_idx == 22:
+                        cell.number_format = '₹#,##0.00'
+                    elif c_idx == 26: # Audit Status
                         cell.font = status_colors.get(audit.status, Font(name="Calibri", size=10, bold=True))
-                    elif c_idx == 25: # Gain/Loss %
+                    elif c_idx == 29: # Gain/Loss %
                         cell.font = Font(name="Calibri", size=10, bold=True, color="166534" if a_pnl_pct >= 0 else "991B1B")
-                    elif c_idx == 26: # Realized PnL ₹
+                    elif c_idx == 30: # Realized PnL ₹
                         cell.number_format = '₹#,##0.00;[Red]-₹#,##0.00'
 
             # Total summary row in Ledger
             if audits:
                 sum_row = len(audits) + 2
                 ws_ledger.row_dimensions[sum_row].height = 24
-                ws_ledger.merge_cells(start_row=sum_row, start_column=1, end_row=sum_row, end_column=24)
+                ws_ledger.merge_cells(start_row=sum_row, start_column=1, end_row=sum_row, end_column=28)
                 lbl = ws_ledger.cell(row=sum_row, column=1, value="TOTAL 11-DAY CYCLE GAIN / REALIZED PROFIT:")
                 lbl.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
                 lbl.fill = navy_fill
                 lbl.alignment = Alignment(horizontal="right", vertical="center")
 
                 # Apply fill across merged range
-                for col_c in range(1, 25):
+                for col_c in range(1, 29):
                     ws_ledger.cell(row=sum_row, column=col_c).fill = navy_fill
                     ws_ledger.cell(row=sum_row, column=col_c).border = thin_border
 
                 # Total Gain/Loss % formula or direct value
-                sum_pct_cell = ws_ledger.cell(row=sum_row, column=25, value=f"{c_ret:+.2f}%")
+                sum_pct_cell = ws_ledger.cell(row=sum_row, column=29, value=f"{c_ret:+.2f}%")
                 sum_pct_cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
                 sum_pct_cell.fill = emerald_fill if c_ret >= 0 else rose_fill
                 sum_pct_cell.alignment = Alignment(horizontal="right", vertical="center")
                 sum_pct_cell.border = thin_border
 
                 # Total Realized PnL ₹ formula or value
-                sum_pnl_cell = ws_ledger.cell(row=sum_row, column=26, value=c_pnl)
+                sum_pnl_cell = ws_ledger.cell(row=sum_row, column=30, value=c_pnl)
                 sum_pnl_cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
                 sum_pnl_cell.fill = emerald_fill if c_pnl >= 0 else rose_fill
                 sum_pnl_cell.alignment = Alignment(horizontal="right", vertical="center")
                 sum_pnl_cell.number_format = '₹#,##0.00;[Red]-₹#,##0.00'
                 sum_pnl_cell.border = thin_border
 
-                ws_ledger.cell(row=sum_row, column=27).fill = navy_fill
-                ws_ledger.cell(row=sum_row, column=27).border = thin_border
+                ws_ledger.cell(row=sum_row, column=31).fill = navy_fill
+                ws_ledger.cell(row=sum_row, column=31).border = thin_border
 
             # Auto-adjust column widths
             for col in ws_ledger.columns:
@@ -924,6 +1071,13 @@ class SwingAuditService:
                     "user_buy_time": a.user_buy_time.isoformat() if a.user_buy_time and hasattr(a.user_buy_time, "isoformat") else (str(a.user_buy_time) if a.user_buy_time else None),
                     "target_price": float(a.target_price or 0.0),
                     "stop_loss": float(a.stop_loss or 0.0),
+                    "target_1": float(a.target_1) if a.target_1 is not None else float(a.target_price or 0.0),
+                    "target_2": float(a.target_2) if a.target_2 is not None else None,
+                    "dynamic_stop_loss": float(a.dynamic_stop_loss) if a.dynamic_stop_loss is not None else float(a.stop_loss or 0.0),
+                    "tranche_2_active": bool(a.tranche_2_active),
+                    "tranche_2_buy_price": float(a.tranche_2_buy_price) if a.tranche_2_buy_price is not None else None,
+                    "tranche_2_stop_loss": float(a.tranche_2_stop_loss) if a.tranche_2_stop_loss is not None else None,
+                    "ratchet_stage": a.ratchet_stage or "INITIAL",
                     "reward_to_risk": float(a.reward_to_risk or 0.0),
                     "total_score": float(a.total_score) if a.total_score is not None else None,
                     "status": a.status or "IN_PROGRESS",

@@ -11,6 +11,9 @@ import {
   History,
   ChevronDown,
   ChevronUp,
+  Bot,
+  Zap,
+  TrendingUp,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { settingsApi, swingAuditApi } from '../services/api'
@@ -105,7 +108,20 @@ export default function SettingsPage() {
     )
   }
 
-  const visibleSettings = Object.entries(settings).filter(([key]) => !isBrokerOrSensitiveKey(key))
+  const isAlgoKey = (key: string) => {
+    return (
+      key === 'enable_swing_algo_trading' ||
+      key === 'enable_coupled_ratchet' ||
+      key === 'enable_t2_pyramiding' ||
+      key === 'swing_atr_multiplier' ||
+      key === 'swing_capital_per_trade' ||
+      key === 'swing_max_open_positions'
+    )
+  }
+
+  const visibleSettings = Object.entries(settings).filter(
+    ([key]) => !isBrokerOrSensitiveKey(key) && !isAlgoKey(key)
+  )
 
   return (
     <div style={{ maxWidth: 850, margin: '0 auto', paddingBottom: 60 }}>
@@ -165,6 +181,206 @@ export default function SettingsPage() {
           </Link>
         </div>
       )}
+
+      {/* =========================================================================
+          ⚡ Automated Algorithmic Swing Trading & Coupled Ratchet Engine Card
+         ========================================================================= */}
+      <div
+        className="card"
+        style={{
+          padding: 24,
+          marginBottom: 24,
+          border: '1px solid rgba(16, 185, 129, 0.35)',
+          background: 'linear-gradient(135deg, rgba(6, 78, 59, 0.25) 0%, rgba(15, 23, 42, 0.9) 100%)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(16, 185, 129, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981' }}>
+              <Bot size={24} />
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 8 }}>
+                Automated Algorithmic Swing Trading & Coupled Ratchet
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: '3px 8px',
+                    borderRadius: 4,
+                    background: (settings['enable_swing_algo_trading'] === true || settings['enable_swing_algo_trading'] === 'true') ? 'rgba(16, 185, 129, 0.25)' : 'rgba(148, 163, 184, 0.2)',
+                    color: (settings['enable_swing_algo_trading'] === true || settings['enable_swing_algo_trading'] === 'true') ? '#34d399' : '#94a3b8',
+                    fontWeight: 700,
+                  }}
+                >
+                  {(settings['enable_swing_algo_trading'] === true || settings['enable_swing_algo_trading'] === 'true') ? '● ALGO ENGINE ACTIVE' : '○ MANUAL / MONITOR ONLY'}
+                </span>
+              </h2>
+              <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>
+                Autonomous trade execution, multi-target pyramiding, and dynamic ATR profit-locking trailing stops
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Controls Grid */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Master Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15, color: '#f8fafc' }}>
+                Automated Swing Algo Trading Master Switch
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                When enabled, Celery Beat executes trades autonomously based on institutional Swing Screener signals.
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={settings['enable_swing_algo_trading'] === true || settings['enable_swing_algo_trading'] === 'true'}
+                onChange={(e) => setSettings({ ...settings, enable_swing_algo_trading: e.target.checked.toString() })}
+                style={{ width: 22, height: 22, cursor: 'pointer', accentColor: '#10b981' }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 700, color: (settings['enable_swing_algo_trading'] === true || settings['enable_swing_algo_trading'] === 'true') ? '#34d399' : '#94a3b8' }}>
+                {(settings['enable_swing_algo_trading'] === true || settings['enable_swing_algo_trading'] === 'true') ? 'ON' : 'OFF'}
+              </span>
+            </label>
+          </div>
+
+          {/* Coupled Ratchet Engine Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Zap size={15} style={{ color: '#38bdf8' }} />
+                Coupled Ratchet Stop-Loss & Profit-Locking Engine
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                Locks Tranche 1 at break-even (+1%) when Target 1 hits, and ratchets both tranches to T1 (+5%) as price nears Target 2.
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={settings['enable_coupled_ratchet'] === true || settings['enable_coupled_ratchet'] === 'true' || settings['enable_coupled_ratchet'] === undefined}
+                onChange={(e) => setSettings({ ...settings, enable_coupled_ratchet: e.target.checked.toString() })}
+                style={{ width: 20, height: 20, cursor: 'pointer', accentColor: '#38bdf8' }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#38bdf8' }}>
+                {(settings['enable_coupled_ratchet'] === true || settings['enable_coupled_ratchet'] === 'true' || settings['enable_coupled_ratchet'] === undefined) ? 'ENABLED' : 'DISABLED'}
+              </span>
+            </label>
+          </div>
+
+          {/* Target 2 Pyramiding Mode Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <TrendingUp size={15} style={{ color: '#a78bfa' }} />
+                Target 2 Pyramiding (Buy Tranche 2 on Confirmed T2)
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                Buys Tranche 2 only when the swing engine issues an extended Target 2 (e.g. ₹110). If no T2 exists, exits at T1 normally.
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={settings['enable_t2_pyramiding'] === true || settings['enable_t2_pyramiding'] === 'true' || settings['enable_t2_pyramiding'] === undefined}
+                onChange={(e) => setSettings({ ...settings, enable_t2_pyramiding: e.target.checked.toString() })}
+                style={{ width: 20, height: 20, cursor: 'pointer', accentColor: '#a78bfa' }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#a78bfa' }}>
+                {(settings['enable_t2_pyramiding'] === true || settings['enable_t2_pyramiding'] === 'true' || settings['enable_t2_pyramiding'] === undefined) ? 'ENABLED' : 'DISABLED'}
+              </span>
+            </label>
+          </div>
+
+          {/* ATR Volatility Multiplier Slider */}
+          <div style={{ padding: '14px 16px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: '#f8fafc' }}>
+                  Dynamic ATR Volatility Multiplier
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                  Trails protective stops using: Peak Price − (Multiplier × ATR). Prevents wicks from prematurely exiting high-profit runners.
+                </div>
+              </div>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#38bdf8', padding: '3px 10px', background: 'rgba(56, 189, 248, 0.15)', borderRadius: 6 }}>
+                {parseFloat(settings['swing_atr_multiplier'] || '1.5').toFixed(1)}x ATR
+              </span>
+            </div>
+            <input
+              type="range"
+              min="1.0"
+              max="3.0"
+              step="0.1"
+              value={parseFloat(settings['swing_atr_multiplier'] || '1.5')}
+              onChange={(e) => setSettings({ ...settings, swing_atr_multiplier: e.target.value })}
+              style={{ width: '100%', cursor: 'pointer', accentColor: '#38bdf8' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b', marginTop: 4 }}>
+              <span>1.0x (Tighter Trailing)</span>
+              <span>1.5x (Recommended Balanced)</span>
+              <span>3.0x (Wide Volatility Buffer)</span>
+            </div>
+          </div>
+
+          {/* Capital & Position Guardrails */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+            <div style={{ padding: '12px 14px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <label style={{ display: 'block', fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#cbd5e1' }}>
+                Capital per Automated Trade (₹)
+              </label>
+              <input
+                type="number"
+                className="input"
+                value={settings['swing_capital_per_trade'] || '100000'}
+                onChange={(e) => setSettings({ ...settings, swing_capital_per_trade: e.target.value })}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div style={{ padding: '12px 14px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <label style={{ display: 'block', fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#cbd5e1' }}>
+                Max Concurrent Open Positions
+              </label>
+              <input
+                type="number"
+                className="input"
+                value={settings['swing_max_open_positions'] || '5'}
+                onChange={(e) => setSettings({ ...settings, swing_max_open_positions: e.target.value })}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+
+          {/* Save Button for Algo Card */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <button
+              onClick={saveSettings}
+              disabled={loading}
+              className="btn btn-primary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                border: 'none',
+                fontWeight: 600,
+                padding: '9px 18px',
+              }}
+            >
+              <Save size={16} /> Save Algorithmic Configuration
+            </button>
+            {saveSuccess && (
+              <span style={{ color: '#34d399', fontSize: 13, fontWeight: 600 }}>
+                ✓ Algorithmic trading parameters saved!
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* =========================================================================
           ⚙️ User & Trading Preferences Card

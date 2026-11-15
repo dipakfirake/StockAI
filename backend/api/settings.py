@@ -49,6 +49,12 @@ DEFAULT_SETTINGS = [
     {"key": "default_slippage", "value": "0.1", "value_type": "float", "description": "Default slippage percentage"},
     {"key": "enable_trading", "value": "true", "value_type": "boolean", "description": "Global kill switch for trading"},
     {"key": "enable_auto_trader", "value": "false", "value_type": "boolean", "description": "Master toggle switch for AI Auto-Trader daemon"},
+    {"key": "enable_swing_algo_trading", "value": "false", "value_type": "boolean", "description": "Master switch for Automated Algorithmic Swing Trading"},
+    {"key": "enable_coupled_ratchet", "value": "true", "value_type": "boolean", "description": "Coupled Ratchet Stop-Loss & Profit Locking Engine"},
+    {"key": "enable_t2_pyramiding", "value": "true", "value_type": "boolean", "description": "Target 2 Pyramiding (Buy Tranche 2 on confirmed T2)"},
+    {"key": "swing_atr_multiplier", "value": "1.5", "value_type": "float", "description": "ATR Volatility Multiplier for Dynamic Trailing Stop"},
+    {"key": "swing_capital_per_trade", "value": "100000.0", "value_type": "float", "description": "Capital allocation per automated swing trade (₹)"},
+    {"key": "swing_max_open_positions", "value": "5", "value_type": "integer", "description": "Maximum concurrent automated swing positions"},
     {"key": "fyers_client_id", "value": "", "value_type": "string", "description": "Fyers App Client ID"},
     {"key": "fyers_access_token", "value": "", "value_type": "string", "description": "Fyers Access Token (Update Daily)"},
     {"key": "google_client_id", "value": "", "value_type": "string", "description": "Google OAuth2 Web Client ID"}

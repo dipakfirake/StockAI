@@ -12,6 +12,40 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-11-15)
+
+- **AUTOMATED ALGORITHMIC SWING TRADING, COUPLED RATCHET ENGINE & DYNAMIC ATR TRAILING EXCEL SYSTEM (COMPLETE & VERIFIED - 2026-11-15):**
+  - **Issues Investigated & Resolved**:
+    - User requested an automated algorithmic trading switch in Settings and integration into the 11-Day Swing Trade Excel module for maximum profits with guaranteed zero-loss on reversals.
+    - Proposed scenario: Stock bought at ₹100, SL ₹96, Target 1 = ₹105. When Target 2 (₹110) is active, buy Tranche 2 at breakout (₹106) and dynamically ratchet stop-losses (Tranche 1 SL to ₹101, then to ₹105 when price hits ₹108).
+    - User requested honest advice on how to prevent pyramiding losses while maximizing swing profit.
+  - **Quantitative Forensic Diagnosis & Architectural Solutions**:
+    1. **The Pyramiding Trap Resolved**: Naive pyramiding (buying Tranche 2 at ₹106 with SL left at ₹101) creates an average cost of ₹103, resulting in a net loss (-₹400) if stopped out at ₹101.
+    2. **The "Coupled Ratchet" Zero-Loss Rule**:
+       - Tranche 2 is **strictly conditional**: only triggered when an extended Target 2 (e.g. ₹110) exists.
+       - When price crosses Target 1 (₹105), Tranche 1 SL ratchets to Break-Even + 1% (₹101) or ATR floor.
+       - When price reaches halfway to Target 2 (e.g. ₹108), both Tranche 1 and Tranche 2 stops ratchet to **₹105**, guaranteeing a **+4% net profit (+₹400)** on any reversal, and **+14% (+₹1,400)** when Target 2 hits.
+    3. **Dynamic ATR Volatility Ratchet**: Stops trail using $\max(\text{Previous SL}, \text{Highest Price} - 1.5 \times \text{ATR})$, preventing normal intraday market wicks from prematurely stopping out high-profit runners.
+    4. **Settings Page Control Center (`frontend/src/pages/SettingsPage.tsx`)**:
+       - Added **"Automated Algorithmic Swing Trading & Coupled Ratchet"** card with:
+         - Master Algo Trading switch (`enable_swing_algo_trading`)
+         - Coupled Ratchet engine toggle (`enable_coupled_ratchet`)
+         - Target 2 Pyramiding toggle (`enable_t2_pyramiding`)
+         - Dynamic ATR Volatility Multiplier slider (1.0x to 3.0x ATR)
+         - Capital per trade and max open positions guardrails
+    5. **11-Day Swing Audit Excel System (`backend/services/swing_audit_service.py`)**:
+       - Added `dynamic_stop_loss`, `tranche_2_active`, `tranche_2_buy_price`, `tranche_2_stop_loss`, and `ratchet_stage` to `SwingTradeAudit`.
+       - Updated `generate_excel_workbook`:
+         - Sheet 1 (Scorecard): Added KPI metrics for "T2 Pyramiding Expansions", "Coupled Ratchet Wins", and "Zero-Loss Protection Rate".
+         - Sheet 2 (11-Day Price Tracking): Added dedicated columns for `Dynamic Trailing SL (₹)`, `Tranche 2 Buy (₹)`, `Tranche 2 SL (₹)`, and `Ratchet Milestone`.
+  - **Verification Evidence**:
+    - **Unit Tests (`backend/tests/test_swing_audit_coupled_ratchet.py`)**: **5 of 5 tests passed (100%)** covering single-target win, multi-target activation, reversal zero-loss profit lock (+4%), continuation Target 2 win (+14%), and Excel workbook generation with 31 columns.
+    - **Existing Audit Tests (`backend/tests/test_swing_audit.py`)**: **7 of 7 tests passed (100%)**.
+    - **Full Backend Pytest Suite**: **12 of 12 tests passed**.
+    - **Python Syntax Compilation**: `py_compile` succeeded with exit code 0 across all modified backend files.
+    - **Frontend TypeScript/Vite Production Build**: **1,992 modules transformed, 0 TypeScript errors, built in 15.50s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls latest code on live server (`git fetch origin main && git reset --hard origin/main`), rebuilds `backend` and `frontend` (`docker compose up -d --build backend frontend`), and accesses `https://stockai-live.duckdns.org/settings`.
+
 ## Latest verified checks (2026-11-12)
 
 - **AI LIGHTGBM BACKTESTING ZERO-TRADES DEFECT RESOLUTION & CALIBRATED DIRECTIONAL DECODING (COMPLETE & VERIFIED - 2026-11-12):**

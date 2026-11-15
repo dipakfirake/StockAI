@@ -67,6 +67,14 @@ class SwingTradeAudit(Base):
     realized_pnl_rupees: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"))
     allocated_capital: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("100000.00"))
     
+    # Dynamic Coupled Ratchet & Trailing Stop tracking
+    dynamic_stop_loss: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    tranche_2_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    tranche_2_buy_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    tranche_2_stop_loss: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    ratchet_stage: Mapped[str] = mapped_column(String(40), default="INITIAL")  # INITIAL, BREAKEVEN_LOCKED, T2_RATCHET_ACTIVE, STOPPED_IN_PROFIT, TARGET_2_ACHIEVED
+    highest_price_recorded: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    
     # User execution tracking (when user explicitly buys this recommendation)
     user_bought: Mapped[bool] = mapped_column(Boolean, default=False)
     user_buy_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
@@ -98,6 +106,9 @@ class SwingTradeAuditPrice(Base):
     change_pct_from_buy: Mapped[Decimal] = mapped_column(Numeric(8, 2), default=Decimal("0.00"))
     target_hit: Mapped[bool] = mapped_column(Boolean, default=False)
     stoploss_hit: Mapped[bool] = mapped_column(Boolean, default=False)
+    dynamic_sl_day: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    atr_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    ratchet_event: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
