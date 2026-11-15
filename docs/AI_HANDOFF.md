@@ -14,6 +14,28 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-15)
 
+- **MARKET DEPTH OFF-MARKET FREEZING & ZERODHA KITE 0.00 BOOK ALIGNMENT (COMPLETE & VERIFIED - 2026-11-15):**
+  - **Issues Investigated & Resolved**:
+    - User asked: *"i am checking icici stock why it is changing at night the bids"* and shared a dark-mode Zerodha Kite screenshot of `PCJEWELLER BSE 15.51` showing all 5 bid/offer levels cleared to `0.00 0 0` with `Total 0 | Total 0`.
+  - **Forensic Diagnosis & Solutions Delivered**:
+    1. **Root Cause**: `generate_synthetic_depth()` previously ran a pseudo-random seed based on `int(time.time() // 3)`, which advanced every 3 seconds even outside market hours. Simultaneously, the frontend was polling every 2.0s, causing bids to fluctuate at night.
+    2. **Exchange Standard Behavior**: Indian equities (NSE & BSE) trade 09:15-15:30 IST. Post-market session closes at 16:00 IST. Outside market hours, exchanges cancel remaining day orders and clear the order book, displaying `0.00 0 0` on Zerodha Kite.
+    3. **Backend Upgrades (`backend/services/market_depth_service.py` & `backend/api/stocks.py`)**:
+       - Default off-market behavior (`is_indian_market_open() == False`) now returns official Zerodha Kite post-market state: 5 rows of `0.00 0 0` for Bids and Offers, `Total 0 | Total 0`, and `is_market_open: False`.
+       - Off-market cache TTL extended to 300s (5 minutes) to eliminate compute on static books.
+       - Practice mode simulated depth is now seeded with a **100% frozen date-bound hash** (`hashlib.md5(f"{symbol}:{prev_close}:{today_str}".encode())`), guaranteeing zero fluctuation at night.
+       - Added `simulate: bool = Query(False)` parameter to `GET /api/stocks/{symbol}/depth`.
+    4. **Frontend Upgrades (`frontend/src/components/MarketDepthWidget.tsx`)**:
+       - Smart Polling: halts 2s fast polling when `is_market_open === false`, slowing to 60s to prevent unnecessary browser re-renders.
+       - Visual Zerodha Kite 0.00 Book: displays `0.00 0 0` on both sides and `Total 0 | Total 0`, matching the user's screenshot.
+       - Added top banner with `⚡ Preview Practice Depth` toggle for traders who want to practice paper trading against a frozen simulated book.
+  - **Verification Evidence**:
+    - **Unit Tests (`backend/tests/test_market_depth.py`)**: **10 of 10 passed in 9.67s (100% green)**.
+    - **Regression Tests (`test_swing_audit_coupled_ratchet.py` & `test_fyers_stream.py`)**: **18 of 18 passed in 10.07s (100% green)**.
+    - **Total Test Suite**: **28 of 28 tests passed**.
+    - **Frontend Production Build**: **1,994 modules transformed, 0 TypeScript errors, built in 23.45s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).
+
 - **ZERODHA KITE-STYLE 5-LEVEL MARKET DEPTH & ZERO-RATE-LIMIT FYERS LIQUIDITY ENGINE (COMPLETE & VERIFIED - 2026-11-15):**
   - **Issues Investigated & Resolved**:
     - User asked whether the system contains "shared price means like in Zerodha Kite when we see stocks we see the bidded prices, orders and Qty of 5 to 10 bidded prices of buying and selling and only when someone buys then only we can sell like this happens na so we have to add this also in our system without exhausting limits of Fyers API".

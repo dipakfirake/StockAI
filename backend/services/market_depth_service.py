@@ -62,7 +62,7 @@ class MarketDepthService:
         return _DEPTH_LOCKS[clean]
 
     @staticmethod
-    def generate_synthetic_depth(symbol: str, quote: dict) -> dict:
+    def generate_synthetic_depth(symbol: str, quote: dict, is_open: Optional[bool] = None) -> dict:
         """
         Generates high-fidelity synthetic 5-level market depth based on real market parameters:
         - Current LTP and Prev Close
@@ -112,9 +112,20 @@ class MarketDepthService:
         buy_bias = 0.50 + min(0.20, max(-0.20, pct_change * 0.04))
         sell_bias = 1.0 - buy_bias
 
-        # Seed pseudo-random generator with deterministic hourly bucket + symbol hash
-        # so depths don't wildly fluctuate on instant consecutive renders, but stay organic
-        seed_val = int(time.time() // 3) + hash(symbol) % 10000
+        if is_open is None:
+            is_open = is_indian_market_open()
+
+        # Seed pseudo-random generator:
+        # 1. When market is CLOSED (nights, weekends): Pin seed to symbol + prev_close + date.
+        #    This guarantees the order book is 100% STATIC and NEVER fluctuates at night!
+        # 2. When market is OPEN (09:15-15:30 IST): Pin seed to 3s bucket for organic live micro-ticks.
+        if not is_open:
+            import hashlib
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            seed_hash = hashlib.md5(f"{symbol}:{prev_close}:{today_str}".encode()).hexdigest()
+            seed_val = int(seed_hash[:8], 16)
+        else:
+            seed_val = int(time.time() // 3) + hash(symbol) % 10000
         rng = random.Random(seed_val)
 
         bids: List[Dict[str, Any]] = []
@@ -182,26 +193,36 @@ class MarketDepthService:
             "sell_ratio": sell_ratio,
             "data_source": "High-Fidelity Synthetic Liquidity Engine",
             "is_realtime": False,
+            "is_market_open": is_open,
+            "market_status": "OPEN" if is_open else "CLOSED",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     @classmethod
-    async def get_market_depth(cls, symbol: str) -> dict:
+    async def get_market_depth(cls, symbol: str, simulate: bool = False) -> dict:
         """
         Retrieves 5-level market depth with 4-tier rate limit defense:
-        1. Checks 1-second Redis cache 'fyers:depth:{symbol}'.
-        2. Inspects Fyers WebSocket live depth cache if connected.
-        3. If Fyers REST is available and rate budget has headroom, queries Fyers Depth.
-        4. Seamlessly falls back to High-Fidelity Synthetic Liquidity Engine with zero errors.
+        1. When Indian Equities markets are CLOSED (outside 09:15-15:30 IST, nights, weekends):
+           - By default returns Zerodha Kite-style official post-market state (0.00 0 0 for all levels).
+           - Also bundles 'simulated_bids' and 'simulated_asks' (generated with 100% frozen date seed)
+             so paper traders can toggle practice mode without book fluctuations.
+           - Caches for 300 seconds to eliminate unnecessary compute.
+        2. When markets are OPEN (09:15-15:30 IST):
+           - Checks 1-second Redis cache 'fyers:depth:{symbol}:1:0'.
+           - Inspects Fyers WebSocket live depth cache if connected.
+           - If Fyers REST is available and rate budget has headroom, queries Fyers Depth.
+           - Seamlessly falls back to High-Fidelity Synthetic Liquidity Engine with zero errors.
         """
         from backend.services.market_data import market_data_service, MarketDataService
         from backend.services.fyers_stream import fyers_stream_service
 
         clean_symbol = symbol.strip().upper()
         norm_symbol = MarketDataService._normalise_symbol(clean_symbol)
-        cache_key = f"fyers:depth:{norm_symbol}"
+        is_open = is_indian_market_open()
 
-        # 1. Fast Redis cache check (1.0s TTL)
+        cache_key = f"fyers:depth:{norm_symbol}:{1 if is_open else 0}:{1 if simulate else 0}"
+
+        # 1. Fast Redis cache check
         cached_depth = await cache_get(cache_key)
         if cached_depth and isinstance(cached_depth, dict):
             return cached_depth
@@ -216,6 +237,74 @@ class MarketDepthService:
 
             depth_data: Optional[dict] = None
 
+            # Case A: Market is CLOSED (Nights, Weekends, Holidays)
+            if not is_open:
+                quote = await market_data_service.fetch_quote(clean_symbol)
+                if not quote or not quote.get("price"):
+                    quote = {
+                        "symbol": clean_symbol,
+                        "price": 100.0,
+                        "previous_close": 100.0,
+                        "open": 100.0,
+                        "high": 100.0,
+                        "low": 100.0,
+                        "volume": 0,
+                    }
+
+                price = float(quote.get("price") or quote.get("ltp") or 100.0)
+                prev_close = float(quote.get("previous_close") or quote.get("close") or price)
+                lower_circuit = quantize_tick(prev_close * 0.90)
+                upper_circuit = quantize_tick(prev_close * 1.10)
+                atp = float(quote.get("atp") or quote.get("vwap") or price)
+
+                # Generate frozen static synthetic depth (100% static across whole night)
+                synthetic = cls.generate_synthetic_depth(clean_symbol, quote, is_open=False)
+
+                if simulate:
+                    depth_data = synthetic
+                else:
+                    # Official Zerodha Kite post-market closed order book (all 0.00 0 0)
+                    kite_closed_bids = [{"price": 0.0, "quantity": 0, "orders": 0} for _ in range(5)]
+                    kite_closed_asks = [{"price": 0.0, "quantity": 0, "orders": 0} for _ in range(5)]
+
+                    depth_data = {
+                        "symbol": clean_symbol,
+                        "ltp": price,
+                        "previous_close": prev_close,
+                        "open": float(quote.get("open") or price),
+                        "high": float(quote.get("high") or price),
+                        "low": float(quote.get("low") or price),
+                        "volume": int(quote.get("volume") or 0),
+                        "atp": atp,
+                        "lower_circuit": lower_circuit,
+                        "upper_circuit": upper_circuit,
+                        "spread": 0.0,
+                        "spread_pct": 0.0,
+                        "bids": kite_closed_bids,
+                        "asks": kite_closed_asks,
+                        "total_buy_qty": 0,
+                        "total_sell_qty": 0,
+                        "buy_ratio": 0.0,
+                        "sell_ratio": 0.0,
+                        "data_source": "NSE/BSE Post-Market (Exchange Closed)",
+                        "is_realtime": False,
+                        "is_market_open": False,
+                        "market_status": "CLOSED",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "simulated_bids": synthetic["bids"],
+                        "simulated_asks": synthetic["asks"],
+                        "simulated_total_buy_qty": synthetic["total_buy_qty"],
+                        "simulated_total_sell_qty": synthetic["total_sell_qty"],
+                        "simulated_buy_ratio": synthetic["buy_ratio"],
+                        "simulated_sell_ratio": synthetic["sell_ratio"],
+                        "simulated_spread": synthetic["spread"],
+                    }
+
+                # Store in Redis with 300s TTL (market closed data is static)
+                await cache_set(cache_key, depth_data, ttl=300)
+                return depth_data
+
+            # Case B: Market is OPEN (09:15 - 15:30 IST)
             # 2. Check Fyers WebSocket live stream status
             if fyers_stream_service.is_connected and MarketDataService._fyers_token_valid:
                 # If the socket is live, query live socket depth or request depth subscription
@@ -226,7 +315,7 @@ class MarketDepthService:
 
             # 3. Check Fyers REST rate budget
             can_call_fyers = await MarketDataService.check_and_record_fyers_rate_budget()
-            if can_call_fyers and is_indian_market_open():
+            if can_call_fyers:
                 try:
                     fyers_instance = MarketDataService._get_fyers_model()
                     if fyers_instance:
@@ -291,12 +380,14 @@ class MarketDepthService:
                                     "sell_ratio": sell_ratio,
                                     "data_source": "Fyers Level 2 Market Depth",
                                     "is_realtime": True,
+                                    "is_market_open": True,
+                                    "market_status": "OPEN",
                                     "timestamp": datetime.now(timezone.utc).isoformat(),
                                 }
                 except Exception as e:
                     logger.debug(f"Fyers REST depth call notice for {norm_symbol}: {e}")
 
-            # 4. Fallback to High-Fidelity Synthetic Order Book
+            # 4. Fallback to High-Fidelity Synthetic Order Book (during market hours)
             if not depth_data:
                 quote = await market_data_service.fetch_quote(clean_symbol)
                 if not quote or not quote.get("price"):
@@ -309,9 +400,9 @@ class MarketDepthService:
                         "low": 100.0,
                         "volume": 100000,
                     }
-                depth_data = cls.generate_synthetic_depth(clean_symbol, quote)
+                depth_data = cls.generate_synthetic_depth(clean_symbol, quote, is_open=True)
 
-            # Store in Redis with 1.0s TTL
+            # Store in Redis with 1.0s TTL during market hours
             await cache_set(cache_key, depth_data, ttl=1)
             return depth_data
 

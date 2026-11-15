@@ -247,7 +247,8 @@ async def test_get_market_depth_service_async():
     async def fake_get(k): return mem_cache.get(k)
     async def fake_set(k, v, ttl=60): mem_cache[k] = v
 
-    with patch("backend.services.market_data.market_data_service.fetch_quote", new=AsyncMock(return_value=mock_quote)), \
+    with patch("backend.services.market_depth_service.is_indian_market_open", return_value=True), \
+         patch("backend.services.market_data.market_data_service.fetch_quote", new=AsyncMock(return_value=mock_quote)), \
          patch("backend.services.market_data.MarketDataService.check_and_record_fyers_rate_budget", new=AsyncMock(return_value=False)), \
          patch("backend.services.market_depth_service.cache_get", side_effect=fake_get), \
          patch("backend.services.market_depth_service.cache_set", side_effect=fake_set):
@@ -301,3 +302,81 @@ async def test_paper_trading_exit_order_book_matching():
         assert mock_trade.status == "CLOSED"
         assert float(mock_trade.exit_price) == 1549.95  # Sold against Best Bid
         assert mock_trade.realized_pnl > 0
+
+
+@pytest.mark.asyncio
+async def test_off_market_closed_depth_returns_zerodha_kite_zeroes():
+    """Verify that when Indian market is closed (at night/weekends), depth returns Zerodha Kite 0.00 book."""
+    mock_quote = {
+        "symbol": "ICICIBANK.NS",
+        "price": 1250.0,
+        "previous_close": 1240.0,
+        "open": 1245.0,
+        "high": 1260.0,
+        "low": 1238.0,
+        "volume": 2500000,
+    }
+    mem_cache = {}
+    async def fake_get(k): return mem_cache.get(k)
+    async def fake_set(k, v, ttl=60): mem_cache[k] = v
+
+    with patch("backend.services.market_depth_service.is_indian_market_open", return_value=False), \
+         patch("backend.services.market_data.market_data_service.fetch_quote", new=AsyncMock(return_value=mock_quote)), \
+         patch("backend.services.market_depth_service.cache_get", side_effect=fake_get), \
+         patch("backend.services.market_depth_service.cache_set", side_effect=fake_set):
+
+        depth = await market_depth_service.get_market_depth("ICICIBANK.NS", simulate=False)
+        assert depth["is_market_open"] is False
+        assert depth["market_status"] == "CLOSED"
+        assert "Exchange Closed" in depth["data_source"]
+
+        # All 5 Bids and Offers must be 0.00 0 0 matching Zerodha Kite post-market screenshot
+        for b in depth["bids"]:
+            assert b["price"] == 0.0
+            assert b["orders"] == 0
+            assert b["quantity"] == 0
+
+        for a in depth["asks"]:
+            assert a["price"] == 0.0
+            assert a["orders"] == 0
+            assert a["quantity"] == 0
+
+        assert depth["total_buy_qty"] == 0
+        assert depth["total_sell_qty"] == 0
+        assert depth["spread"] == 0.0
+
+        # Simulated depth must be bundled for practice preview
+        assert len(depth["simulated_bids"]) == 5
+        assert len(depth["simulated_asks"]) == 5
+        assert depth["simulated_total_buy_qty"] > 0
+
+
+def test_off_market_simulated_depth_is_strictly_static_and_stable():
+    """Verify that off-market simulated depth NEVER fluctuates at night between calls."""
+    quote = {
+        "symbol": "ICICIBANK.NS",
+        "price": 1250.0,
+        "previous_close": 1240.0,
+        "volume": 2500000,
+    }
+
+    # Generate depth call 1
+    depth1 = MarketDepthService.generate_synthetic_depth("ICICIBANK.NS", quote, is_open=False)
+    # Generate depth call 2 (simulating poll 5 seconds later)
+    depth2 = MarketDepthService.generate_synthetic_depth("ICICIBANK.NS", quote, is_open=False)
+
+    # Must be 100% bit-for-bit identical!
+    for i in range(5):
+        assert depth1["bids"][i]["price"] == depth2["bids"][i]["price"]
+        assert depth1["bids"][i]["orders"] == depth2["bids"][i]["orders"]
+        assert depth1["bids"][i]["quantity"] == depth2["bids"][i]["quantity"]
+
+        assert depth1["asks"][i]["price"] == depth2["asks"][i]["price"]
+        assert depth1["asks"][i]["orders"] == depth2["asks"][i]["orders"]
+        assert depth1["asks"][i]["quantity"] == depth2["asks"][i]["quantity"]
+
+    assert depth1["total_buy_qty"] == depth2["total_buy_qty"]
+    assert depth1["total_sell_qty"] == depth2["total_sell_qty"]
+    assert depth1["buy_ratio"] == depth2["buy_ratio"]
+    assert depth1["sell_ratio"] == depth2["sell_ratio"]
+

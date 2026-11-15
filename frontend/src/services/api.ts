@@ -92,7 +92,7 @@ export const stocksApi = {
     api.get(`/stocks/${symbol}/insight`, { params: { timeframe, ...(anchorDate && { anchor_date: anchorDate }) } }),
   getVolumeProfile: (symbol: string, timeframe = '1d') =>
     api.get(`/stocks/${symbol}/volume-profile`, { params: { timeframe } }),
-  getDepth: (symbol: string) => api.get(`/stocks/${symbol}/depth`),
+  getDepth: (symbol: string, simulate = false) => api.get(`/stocks/${symbol}/depth`, { params: { simulate } }),
   scanMarket: (rule: string) => api.get(`/scanner/nifty50`, { params: { rule } }),
   customScan: (data: { universe: string; timeframe?: string; conditions: Array<{ indicator: string; operator: string; value: number | string }> }) => api.post(`/scanner/custom`, data),
 }

@@ -3761,3 +3761,41 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Unit Tests (`backend/tests/test_market_depth.py`)**: **8 of 8 passed in 8.96s (100% green, exit code 0)**.
   - **Frontend Production Build (`npm run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 16.44s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide copy-pasteable live server deployment commands (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build frontend`).
+
+---
+
+### Session Entry 76: Market Depth Off-Market Freezing, Zerodha Kite 0.00 Post-Market Alignment, and Zero-Fluctuation Seed Engine
+- **Timestamp:** 2026-11-15 22:00:00 IST (16:30:00 UTC)
+- **User Prompt:**
+  `"i am checking icici stock why it is changing at night the bids"` with uploaded Zerodha Kite dark-mode screenshot of `PCJEWELLER BSE 15.51` showing all 5 bid and offer rows cleared to `0.00 0 0` and `Total 0 | Total 0`.
+- **Forensic Diagnosis & Root Cause**:
+  1. **Why ICICI bids were fluctuating at night:**
+     - In `backend/services/market_depth_service.py`, `generate_synthetic_depth()` was running even when Indian equity markets were closed.
+     - The pseudo-random generator was seeded with `seed_val = int(time.time() // 3) + hash(symbol) % 10000`. Because `time.time() // 3` advanced every 3 seconds, the pseudo-random generator regenerated random bids, asks, quantities, and order counts every 3 seconds!
+     - In addition, `MarketDepthWidget.tsx` was polling `/api/stocks/{symbol}/depth` every 2.0 seconds regardless of market hours, causing ICICI Bank's bids to constantly change on the user's screen at night.
+  2. **Exchange & Real Broker Reality:**
+     - Indian equities (NSE & BSE) trade between 09:15 and 15:30 IST. Post-market closes at 16:00 IST. At night and on weekends, the exchange cancels all remaining day orders and completely clears the order book.
+     - As demonstrated in the user's Zerodha Kite screenshot, real broker platforms display `0.00 0 0` across all 5 bids and 5 offers, with `Total 0` when the exchange is closed.
+- **Engineering Changes Delivered**:
+  1. **Market-Hours Aware Depth Service (`backend/services/market_depth_service.py`)**:
+     - Integrated `is_indian_market_open()` into `get_market_depth()` and `generate_synthetic_depth()`.
+     - When `is_indian_market_open() == False` (market closed at night, weekends, holidays):
+       - **Default Zerodha Kite Mode:** Returns 5 rows of `0.00 0 0` for Bids and Offers, `total_buy_qty: 0`, `total_sell_qty: 0`, `spread: 0.0`, `is_market_open: False`, `market_status: "CLOSED"`, `data_source: "NSE/BSE Post-Market (Exchange Closed)"`.
+       - **Zero-Fluctuation Static Seed:** For simulated practice depth, seeds with `hashlib.md5(f"{symbol}:{prev_close}:{today_str}".encode())`. Because `today_str` only advances at midnight UTC, numbers remain 100% frozen and static all night long.
+       - **Cache TTL Optimization:** Sets cache TTL to 300s (5 minutes) during off-market hours to eliminate repeated compute.
+     - When `is_indian_market_open() == True` (09:15-15:30 IST):
+       - Switches automatically to live order book mode with live Fyers L2 streaming or live market ticks.
+  2. **API Endpoint & Query Param (`backend/api/stocks.py` & `frontend/src/services/api.ts`)**:
+     - Added `simulate: bool = Query(False)` parameter to `GET /api/stocks/{symbol}/depth` so paper traders can request frozen practice depth if desired.
+  3. **Kite Off-Market UI & Smart Polling (`frontend/src/components/MarketDepthWidget.tsx`)**:
+     - **Smart Polling:** When `depth.is_market_open === false`, automatically halts 2-second fast polling and slows to a gentle 60-second background poll.
+     - **Visual Zerodha Kite 0.00 Book:** Displays `0.00 0 0` across all 5 bids and offers with `Total 0 | Total 0`, matching the user's screenshot.
+     - **Practice Mode Switcher:** Added top banner with a toggle button `⚡ Preview Practice Depth` / `✓ Showing Practice Depth`, allowing traders to preview a realistic book while guaranteeing zero random fluctuation.
+     - **Buyer vs Seller Bar:** In closed mode, cleanly shows `Order Book Cleared (Post-market session closed at 4:00 PM IST)`.
+- **Verification Evidence**:
+  - **Unit Tests (`backend/tests/test_market_depth.py`)**: **10 of 10 passed in 9.67s (100% green, exit code 0)**.
+    - Verified `test_off_market_closed_depth_returns_zerodha_kite_zeroes`: asserts all bids and asks are `0.00 0 0` when market is closed.
+    - Verified `test_off_market_simulated_depth_is_strictly_static_and_stable`: asserts consecutive synthetic depth calls produce 100% identical outputs with zero fluctuation.
+  - **Regression Test Suites (`test_swing_audit_coupled_ratchet.py` & `test_fyers_stream.py`)**: **18 of 18 passed in 10.07s (100% green, exit code 0)**. Total **28 of 28 tests passed**.
+  - **Frontend Production Build (`npm run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 23.45s (exit code 0)**.
+- **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide copy-pasteable live server deployment commands (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).

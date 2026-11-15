@@ -457,6 +457,7 @@ async def get_volume_profile(
 @router.get("/{symbol}/depth")
 async def get_stock_market_depth(
     symbol: str,
+    simulate: bool = Query(False, description="If True, return static simulated depth even when market is closed"),
     current_user=Depends(get_current_user),
 ):
     """
@@ -467,7 +468,7 @@ async def get_stock_market_depth(
 
     safe_symbol = sanitize_symbol(symbol)
     try:
-        depth = await market_depth_service.get_market_depth(safe_symbol)
+        depth = await market_depth_service.get_market_depth(safe_symbol, simulate=simulate)
         return depth
     except Exception as e:
         logger.error(f"Error fetching market depth for {safe_symbol}: {e}")

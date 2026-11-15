@@ -24,7 +24,16 @@ export interface MarketDepthData {
   sell_ratio: number;
   data_source: string;
   is_realtime: boolean;
+  is_market_open?: boolean;
+  market_status?: string;
   timestamp: string;
+  simulated_bids?: Array<{ price: number; quantity: number; orders: number }>;
+  simulated_asks?: Array<{ price: number; quantity: number; orders: number }>;
+  simulated_total_buy_qty?: number;
+  simulated_total_sell_qty?: number;
+  simulated_buy_ratio?: number;
+  simulated_sell_ratio?: number;
+  simulated_spread?: number;
 }
 
 interface MarketDepthWidgetProps {
@@ -46,6 +55,7 @@ export default function MarketDepthWidget({
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewPracticeDepth, setPreviewPracticeDepth] = useState<boolean>(false);
   const timerRef = useRef<number | null>(null);
 
   const cleanSymbol = (s: string) =>
@@ -70,7 +80,7 @@ export default function MarketDepthWidget({
     setLoading(true);
     fetchDepth();
 
-    // Poll depth every 2.0s while component is visible (Zero-rate-limit guaranteed by backend cache)
+    // Initial 2.0s interval; adjusted to 60s once depth responds with market status
     timerRef.current = window.setInterval(() => {
       fetchDepth();
     }, 2000);
@@ -82,6 +92,26 @@ export default function MarketDepthWidget({
       }
     };
   }, [symbol]);
+
+  // Adjust polling based on exchange open/closed status:
+  // If market is CLOSED at night or on weekends, pause fast polling to eliminate any UI churn.
+  useEffect(() => {
+    if (!depth) return;
+    if (depth.is_market_open === false) {
+      if (timerRef.current !== null) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      timerRef.current = window.setInterval(() => {
+        fetchDepth();
+      }, 60000); // 60s slow poll during off-market hours
+    }
+    return () => {
+      if (timerRef.current !== null) {
+        window.clearInterval(timerRef.current);
+      }
+    };
+  }, [depth?.is_market_open]);
 
   if (loading && !depth) {
     return (
@@ -109,19 +139,30 @@ export default function MarketDepthWidget({
   const change = round2(depth.ltp - depth.previous_close);
   const changePct = depth.previous_close > 0 ? round2((change / depth.previous_close) * 100) : 0;
 
-  // Ensure exactly 5 rows for bids and 5 rows for asks (pad with 0s if empty, matching Kite screenshot)
-  const bids = [...(depth.bids || [])];
+  // Distinguish between Market Closed (Zerodha Kite official 0.00 book) and Practice Mode (Static Book)
+  const isMarketClosed = depth.is_market_open === false;
+  const isPracticeMode = isMarketClosed && previewPracticeDepth;
+
+  const activeBids = isPracticeMode && depth.simulated_bids ? depth.simulated_bids : (depth.bids || []);
+  const activeAsks = isPracticeMode && depth.simulated_asks ? depth.simulated_asks : (depth.asks || []);
+
+  // Ensure exactly 5 rows for bids and 5 rows for asks (matching Kite screenshot)
+  const bids = [...activeBids];
   while (bids.length < 5) {
     bids.push({ price: 0.0, orders: 0, quantity: 0 });
   }
 
-  const asks = [...(depth.asks || [])];
+  const asks = [...activeAsks];
   while (asks.length < 5) {
     asks.push({ price: 0.0, orders: 0, quantity: 0 });
   }
 
-  const totalBidsSum = depth.total_buy_qty || bids.reduce((s, b) => s + b.quantity, 0);
-  const totalAsksSum = depth.total_sell_qty || asks.reduce((s, a) => s + a.quantity, 0);
+  const totalBidsSum = isPracticeMode ? (depth.simulated_total_buy_qty || 0) : (depth.total_buy_qty || 0);
+  const totalAsksSum = isPracticeMode ? (depth.simulated_total_sell_qty || 0) : (depth.total_sell_qty || 0);
+  const buyRatio = isPracticeMode ? (depth.simulated_buy_ratio || 50) : (depth.buy_ratio || 0);
+  const sellRatio = isPracticeMode ? (depth.simulated_sell_ratio || 50) : (depth.sell_ratio || 0);
+  const spreadVal = isPracticeMode ? (depth.simulated_spread || 0) : (depth.spread || 0);
+  const spreadPctVal = isPracticeMode ? round2((spreadVal / (depth.ltp || 1)) * 100) : (depth.spread_pct || 0);
 
   return (
     <div
@@ -172,17 +213,28 @@ export default function MarketDepthWidget({
                   fontSize: 10,
                   padding: '2px 6px',
                   borderRadius: 4,
-                  background: depth.is_realtime
+                  background: isMarketClosed
+                    ? 'rgba(168, 85, 247, 0.15)'
+                    : depth.is_realtime
                     ? 'rgba(38,166,154,0.15)'
                     : 'rgba(41,98,255,0.15)',
-                  color: depth.is_realtime ? '#26a69a' : '#2962ff',
+                  color: isMarketClosed
+                    ? '#c084fc'
+                    : depth.is_realtime
+                    ? '#26a69a'
+                    : '#2962ff',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 4,
                 }}
               >
-                {depth.is_realtime ? <Zap size={10} /> : <Shield size={10} />}
-                {depth.is_realtime ? 'Live Depth' : 'Simulated L2'}
+                {isMarketClosed ? (
+                  <>🌙 Market Closed (Static)</>
+                ) : depth.is_realtime ? (
+                  <><Zap size={10} /> Live Depth</>
+                ) : (
+                  <><Shield size={10} /> Live Simulated L2</>
+                )}
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
@@ -240,6 +292,61 @@ export default function MarketDepthWidget({
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Off-Market Hours Status & Practice Mode Toggle */}
+      {isMarketClosed && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 10,
+            padding: '7px 12px',
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid var(--color-border-light, #1e222d)',
+            borderRadius: 6,
+            fontSize: 11,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: '#a0aec0', fontWeight: 500 }}>
+              🌙 Market Closed (After Hours — NSE/BSE)
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: !previewPracticeDepth ? 'rgba(56, 126, 209, 0.2)' : 'rgba(255, 255, 255, 0.06)',
+                color: !previewPracticeDepth ? '#387ed1' : '#787b86',
+                fontWeight: 600,
+              }}
+            >
+              Kite 0.00 Mode
+            </span>
+          </div>
+
+          <button
+            onClick={() => setPreviewPracticeDepth(!previewPracticeDepth)}
+            style={{
+              background: previewPracticeDepth ? '#387ed1' : 'rgba(255, 255, 255, 0.07)',
+              border: 'none',
+              color: previewPracticeDepth ? '#ffffff' : '#d1d4dc',
+              padding: '4px 10px',
+              borderRadius: 4,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {previewPracticeDepth ? '✓ Showing Practice Depth' : '⚡ Preview Practice Depth'}
+          </button>
         </div>
       )}
 
@@ -421,23 +528,33 @@ export default function MarketDepthWidget({
             marginBottom: 4,
           }}
         >
-          <span style={{ color: '#387ed1' }}>Buyers: {depth.buy_ratio}%</span>
-          <span style={{ color: 'var(--color-text-muted, #787b86)' }}>
-            Spread: ₹{depth.spread} ({depth.spread_pct}%)
-          </span>
-          <span style={{ color: '#df514c' }}>Sellers: {depth.sell_ratio}%</span>
+          {isMarketClosed && !previewPracticeDepth ? (
+            <span style={{ color: 'var(--color-text-muted, #787b86)' }}>
+              Order Book Cleared (Post-market session closed at 4:00 PM IST)
+            </span>
+          ) : (
+            <>
+              <span style={{ color: '#387ed1' }}>Buyers: {buyRatio}%</span>
+              <span style={{ color: 'var(--color-text-muted, #787b86)' }}>
+                Spread: ₹{spreadVal} ({spreadPctVal}%)
+              </span>
+              <span style={{ color: '#df514c' }}>Sellers: {sellRatio}%</span>
+            </>
+          )}
         </div>
         <div
           style={{
             height: 6,
             width: '100%',
-            background: '#df514c',
+            background: isMarketClosed && !previewPracticeDepth ? '#2a2e39' : '#df514c',
             borderRadius: 3,
             overflow: 'hidden',
             display: 'flex',
           }}
         >
-          <div style={{ width: `${depth.buy_ratio}%`, background: '#387ed1', height: '100%' }} />
+          {(!isMarketClosed || previewPracticeDepth) && (
+            <div style={{ width: `${buyRatio}%`, background: '#387ed1', height: '100%' }} />
+          )}
         </div>
       </div>
 
