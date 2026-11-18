@@ -161,7 +161,7 @@ async def download_latest_audit_excel(
     """
     Download the latest 11-day audit Excel workbook (.xlsx) with formatting and formulas.
     Always generates an up-to-date workbook directly from active database state before streaming.
-    Streams file bytes directly with anti-cache headers.
+    Streams file bytes directly with dynamic timestamped filename and anti-cache headers.
     Supports HEAD method for uptime monitors, curl -I, and health probes.
     """
     from fastapi.responses import Response
@@ -199,18 +199,18 @@ async def download_latest_audit_excel(
             )
 
         # Read file bytes directly into memory and return as a streaming Response.
-        # This bypasses nginx static-file caching (which would serve the old file)
-        # and forces the browser to always download the freshly generated workbook.
         with open(excel_path, "rb") as f:
             file_bytes = f.read()
 
-        filename = os.path.basename(excel_path)
+        now_tag = datetime.now(timezone.utc).strftime("%d-%b-%Y_%H%MUTC")
+        download_filename = f"Swing_Trade_Audit_Cycle_{cycle_num}_({now_tag}).xlsx"
+
         content_to_send = b"" if request.method == "HEAD" else file_bytes
         return Response(
             content=content_to_send,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Disposition": f'attachment; filename="{download_filename}"',
                 "Content-Length": str(len(file_bytes)),
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
                 "Pragma": "no-cache",
@@ -225,6 +225,18 @@ async def download_latest_audit_excel(
             status_code=500,
             detail=f"Failed to generate or retrieve swing audit Excel workbook: {str(e)}"
         )
+
+
+@router.get("/download-latest-file")
+async def download_latest_file_direct(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Direct browser link endpoint for downloading the active 11-day audit spreadsheet.
+    Allows native <a href="..." download> interaction bypassing client-side JavaScript Blobs.
+    """
+    return await download_latest_audit_excel(request=request, db=db)
 
 
 @router.get("/files")
@@ -341,27 +353,38 @@ async def download_specific_audit_excel(
         except Exception:
             raise HTTPException(status_code=403, detail="Invalid path.")
 
-        # If file doesn't exist on disk, attempt generation if matching cycle exists in DB
-        if not file_path.exists():
-            cycle_stmt = select(SwingTradeAuditCycle).where(
-                SwingTradeAuditCycle.excel_file_path.ilike(f"%{safe_name}%")
-            )
-            cycle = (await db.execute(cycle_stmt)).scalars().first()
-            if cycle:
-                cycle_fname = Path(cycle.excel_file_path).name if cycle.excel_file_path else ""
-                if cycle_fname.lower() == safe_name.lower():
-                    gen_path = await swing_audit_service.generate_excel_workbook(db, cycle.id)
-                    if gen_path and gen_path.exists() and gen_path.name.lower() == safe_name.lower():
-                        file_path = gen_path
+        # Check if requested file matches an active cycle in DB; if active, always regenerate freshly
+        cycle_stmt = select(SwingTradeAuditCycle).where(
+            (SwingTradeAuditCycle.excel_file_path.ilike(f"%{safe_name}%")) |
+            (SwingTradeAuditCycle.status == "ACTIVE")
+        )
+        matching_cycle = (await db.execute(cycle_stmt)).scalars().first()
+        if matching_cycle and matching_cycle.status == "ACTIVE":
+            gen_path = await swing_audit_service.generate_excel_workbook(db, matching_cycle.id)
+            if gen_path and gen_path.exists():
+                file_path = gen_path
+        elif not file_path.exists() and matching_cycle:
+            gen_path = await swing_audit_service.generate_excel_workbook(db, matching_cycle.id)
+            if gen_path and gen_path.exists():
+                file_path = gen_path
 
         if not file_path.exists():
             raise HTTPException(status_code=404, detail=f"Audit file '{safe_name}' not found.")
 
-        return FileResponse(
-            path=str(file_path),
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+
+        from fastapi.responses import Response
+        return Response(
+            content=file_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=safe_name,
-            headers={"Content-Disposition": f'attachment; filename="{safe_name}"'}
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}"',
+                "Content-Length": str(len(file_bytes)),
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
         )
     except HTTPException:
         raise

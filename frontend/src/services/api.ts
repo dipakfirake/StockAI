@@ -337,17 +337,24 @@ export const swingAuditApi = {
     notes?: string;
   }) => api.post('/swing-audit/track', data),
   sync: (runScan: boolean = false) => api.post(`/swing-audit/sync${runScan ? '?run_scan=true' : ''}`),
-  listFiles: () => api.get<{ files: any[]; count: number }>('/swing-audit/files'),
-  downloadLatestUrl: () => '/api/swing-audit/download-latest',
-  downloadFileUrl: (filename: string) => `/api/swing-audit/download/${encodeURIComponent(filename)}`,
+  listFiles: () => api.get<{ files: any[]; count: number }>(`/swing-audit/files?t=${Date.now()}`),
+  downloadLatestUrl: () => `/api/swing-audit/download-latest?t=${Date.now()}`,
+  downloadLatestDirectFileUrl: () => `/api/swing-audit/download-latest-file?t=${Date.now()}`,
+  downloadFileUrl: (filename: string) => `/api/swing-audit/download/${encodeURIComponent(filename)}?t=${Date.now()}`,
   downloadLatestExcel: () =>
     downloadBlobFile(
-      () => api.get('/swing-audit/download-latest', { responseType: 'blob' }),
+      () => api.get(`/swing-audit/download-latest?t=${Date.now()}`, { 
+        responseType: 'blob',
+        headers: { 'Cache-Control': 'no-cache, no-store', 'Pragma': 'no-cache' }
+      }),
       'Swing_Trade_Audit_Latest.xlsx'
     ),
   downloadArchiveExcel: (filename: string) =>
     downloadBlobFile(
-      () => api.get(`/swing-audit/download/${encodeURIComponent(filename)}`, { responseType: 'blob' }),
+      () => api.get(`/swing-audit/download/${encodeURIComponent(filename)}?t=${Date.now()}`, { 
+        responseType: 'blob',
+        headers: { 'Cache-Control': 'no-cache, no-store', 'Pragma': 'no-cache' }
+      }),
       filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`
     ),
 }

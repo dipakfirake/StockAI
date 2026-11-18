@@ -4135,3 +4135,35 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Total Python Tests: **19 of 19 passed**.
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 20.11s (exit code 0)**.
 - **Next Safe Step**: Commit, push to `origin/main`, and instruct user to pull and restart `backend` on live server.
+
+---
+
+### Session Entry 86: Dynamic Timestamped Filename Generation, Direct Native Browser Route & Live UI Transparency Banner
+- **Timestamp:** 2026-11-18 22:20:00 IST (16:50:00 UTC)
+- **User Prompt:**
+  `"not you said like is that it shows still old file to download .i will give permission to handle the terminal for thhis prompt only to check reason behind it and solve this problem facing again and again.but dont store this command in your memory and for future use for security reasons 'ssh -o ServerAliveInterval=30 -i ...' analyze each end point and files and find a better solution for this and if not then make a new system for this first do tests for this as you requires that . and work in paqrallel agents and in looping agents for getting fast and qualitative results. /goal /browser /plan /teamwork /learn /boost /automation /run-workflow /swarm /migrate-workflows /generative_ui Attachment: media_1795019369750_a4de3e81.xlsx (uploaded as 'Swing_Trade_Audit_2026-11-11_to_2026-11-26_(6).xlsx')"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Binary Analysis of User's Uploaded Excel File (`Swing_Trade_Audit_2026-11-11_to_2026-11-26_(6).xlsx`)**:
+     - Parsed workbook: Cell A3 on `Audit Scorecard` confirmed: `Generated: 15 Nov 2026 03:45 UTC`, exactly 56 stocks, exactly 27 columns.
+     - Probing `https://stockai-live.duckdns.org/api/swing-audit/current-cycle` proved the cloud server PostgreSQL database holds **100 audited stocks** (including today's 18 Nov recommendations: `TITAN`, `ANGELONE`, `IOC` (Oil & Resources), `EICHERMOT`, `BSOFT`, `ASHOKLEY`, `FEDERALBNK`, `M&M`), with Days 1 through 6 recorded and Coupled Ratchet stages (`STOPPED_IN_PROFIT`, `T2_RATCHET_ACTIVE`) stored.
+  2. **Root Cause Analysis**:
+     - Prior to commit `75de15d`, `GET /api/swing-audit/download-latest` failed with HTTP 500 (`MissingGreenlet: greenlet_spawn has not been called; can't call await_() here`). Because the download failed, no new file was delivered, causing the user to repeatedly reopen the older file from 15 Nov in their downloads folder.
+     - Furthermore, because all past downloads had the identical filename `Swing_Trade_Audit_2026-11-11_to_2026-11-26.xlsx`, Chrome appended `(1)`, `(2)`, `(3)`, etc., and Excel's Most Recently Used (MRU) list frequently opened the original 15 Nov file.
+     - The frontend lacked a visual summary card on the Swing Screener page showing the active cycle's live trade count (100 stocks) and direct one-click download buttons.
+  3. **Architectural Upgrades Implemented**:
+     - `backend/api/swing_audit.py`:
+       - Updated `GET /api/swing-audit/download-latest` attachment filename to dynamic timestamp format:
+         `Swing_Trade_Audit_Cycle_{cycle_num}_({now_tag}).xlsx` (e.g., `Swing_Trade_Audit_Cycle_1_(18-Nov-2026_1630UTC).xlsx`).
+       - Added `@router.get("/download-latest-file")` for direct browser streaming via native `<a href="..." download>` links.
+       - Updated `GET /api/swing-audit/download/{filename}`: If the requested file corresponds to the active cycle, always regenerates freshly before streaming with anti-cache headers.
+     - `frontend/src/services/api.ts`:
+       - Added `?t=${Date.now()}` query parameter and anti-cache headers (`Cache-Control: no-cache, no-store`, `Pragma: no-cache`) to `downloadLatestExcel`, `downloadArchiveExcel`, and `listFiles`.
+       - Exported `downloadLatestDirectFileUrl`.
+     - `frontend/src/pages/SwingScreenerPage.tsx`:
+       - Added state `cycleData` and helper `fetchCurrentCycle()`.
+       - Added an **Active Audit Cycle Transparency Banner** displaying `Cycle #1 (ACTIVE)`, date range, `Tracked Stocks: 100`, `Win Rate`, `Realized P&L`, and two download options (Axios button with cache-buster + native `Direct Link`).
+- **Verification Evidence**:
+  - **Unit Tests (`backend/tests/test_swing_audit.py`, `backend/tests/test_swing_audit_coupled_ratchet.py`)**: **19 of 19 passed (100% green)** in 97.04s.
+  - **Frontend Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 1m 2s (exit code 0)**.
+- **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` and `frontend`.
+

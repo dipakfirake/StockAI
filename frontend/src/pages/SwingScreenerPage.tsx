@@ -106,6 +106,18 @@ export default function SwingScreenerPage() {
   const [archiveFiles, setArchiveFiles] = useState<any[]>([])
   const [loadingArchives, setLoadingArchives] = useState(false)
   const [downloadingExcel, setDownloadingExcel] = useState(false)
+  const [cycleData, setCycleData] = useState<any>(null)
+
+  const fetchCurrentCycle = async () => {
+    try {
+      const res = await swingAuditApi.getCurrentCycle()
+      if (res.data?.cycle) {
+        setCycleData(res.data.cycle)
+      }
+    } catch (e) {
+      console.debug('Failed to load current cycle summary:', e)
+    }
+  }
 
   const handleDownloadLatestExcel = async () => {
     setDownloadingExcel(true)
@@ -166,8 +178,9 @@ export default function SwingScreenerPage() {
           `Evaluated ${updated} stocks (${cataloged} new cataloged) | Win Rate: ${res.data.win_rate ?? 0}% | P&L: ₹${res.data.total_pnl_rupees ?? 0}`
         )
       }
-      // Refresh screener and archives to display latest state
+      // Refresh screener, cycle summary, and archives to display latest state
       fetchScreener(true)
+      fetchCurrentCycle()
       fetchArchiveFiles()
     } catch (err: any) {
       console.error('Audit sync failed:', err)
@@ -196,6 +209,7 @@ export default function SwingScreenerPage() {
 
   useEffect(() => {
     fetchScreener(false)
+    fetchCurrentCycle()
   }, [sector])
 
   // Quick Paper Trade action directly from screener
@@ -367,6 +381,76 @@ export default function SwingScreenerPage() {
           </button>
         </div>
       </div>
+
+      {/* Active Audit Cycle Transparency Banner */}
+      {cycleData && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 18px',
+          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%)',
+          border: '1px solid rgba(56, 189, 248, 0.25)',
+          borderRadius: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{
+              background: 'rgba(56, 189, 248, 0.15)',
+              color: '#38bdf8',
+              padding: '4px 10px',
+              borderRadius: 6,
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase'
+            }}>
+              Cycle #{cycleData.cycle_number} ({cycleData.status})
+            </span>
+            <span style={{ fontSize: 13, color: '#f8fafc', fontWeight: 600 }}>
+              {cycleData.from_date} to {cycleData.to_date}
+            </span>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+              Tracked Stocks: <strong style={{ color: '#38bdf8' }}>{cycleData.total_trades || 0}</strong>
+            </span>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+              Win Rate: <strong style={{ color: (cycleData.win_rate || 0) >= 50 ? '#34d399' : '#fbbf24' }}>{cycleData.win_rate || 0}%</strong>
+            </span>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+              Realized P&L: <strong style={{ color: (cycleData.total_pnl_rupees || 0) >= 0 ? '#34d399' : '#f87171' }}>₹{(cycleData.total_pnl_rupees || 0).toLocaleString('en-IN')}</strong>
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={handleDownloadLatestExcel}
+              disabled={downloadingExcel}
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, fontSize: 12, padding: '0 12px' }}
+              title="Download freshly generated Excel spreadsheet directly"
+            >
+              <Download size={14} className={downloadingExcel ? 'spin' : ''} />
+              <span>{downloadingExcel ? 'Downloading...' : 'Download Current Excel (.xlsx)'}</span>
+            </button>
+            <a
+              href={`/api/swing-audit/download-latest-file?t=${Date.now()}`}
+              download
+              style={{
+                fontSize: 12,
+                color: '#94a3b8',
+                textDecoration: 'underline',
+                padding: '4px 8px',
+                cursor: 'pointer'
+              }}
+              title="Native direct download link fallback"
+            >
+              Direct Link
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Institutional Summary Cards */}
       {data && data.summary && (

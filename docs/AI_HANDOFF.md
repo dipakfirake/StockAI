@@ -14,6 +14,47 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **SWING AUDIT DYNAMIC TIMESTAMPED FILENAMES, DIRECT BROWSER DOWNLOAD ROUTE & LIVE UI TRANSPARENCY BANNER (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    1. User observed that after clicking download on the website, they were still receiving older spreadsheets generated on 15 Nov (`Generated: 15 Nov 2026 03:45 UTC`, 56 stocks, 27 columns).
+    2. Even after applying backend lazy-loading fixes and verifying that PostgreSQL holds **100 audited stocks** (including 18 Nov recommendations: `IOC`, `ANGELONE`, `TITAN`, `EICHERMOT`, `BSOFT`, etc.) with Days 1–6 populated, browser caching and static file naming (`Swing_Trade_Audit_2026-11-11_to_2026-11-26.xlsx`) led Chrome to name downloads `(1).xlsx`, `(2).xlsx`, `(3).xlsx`, causing users to accidentally open older downloads from Excel's MRU list.
+    3. The frontend lacked a visual summary card on the Swing Screener page showing the active cycle's live trade count (100 stocks) and direct one-click download buttons.
+  - **Root Cause & Fixes Implemented**:
+    1. **Dynamic Timestamped Filename Generation (`backend/api/swing_audit.py`)**:
+       - Updated `GET /api/swing-audit/download-latest` to format `Content-Disposition` with an explicit dynamic UTC timestamp tag:
+         `Swing_Trade_Audit_Cycle_{cycle_num}_({now_tag}).xlsx` (e.g., `Swing_Trade_Audit_Cycle_1_(18-Nov-2026_1630UTC).xlsx`).
+       - Guarantees every download has a unique, instantly identifiable filename in the user's Downloads folder so stale files are never confused with current files.
+    2. **Direct Native Browser Streaming Route (`backend/api/swing_audit.py`)**:
+       - Added `@router.get("/download-latest-file")` enabling standard `<a href="..." download>` native browser links that bypass client-side JavaScript Blob processing.
+       - Updated `GET /api/swing-audit/download/{filename}`: If the requested file corresponds to the active cycle, always regenerates freshly before streaming with anti-cache headers.
+    3. **Cache-Busting Client API (`frontend/src/services/api.ts`)**:
+       - Added `?t=${Date.now()}` query parameter and anti-cache headers (`Cache-Control: no-cache, no-store`, `Pragma: no-cache`) to `downloadLatestExcel`, `downloadArchiveExcel`, and `listFiles`.
+       - Exported `downloadLatestDirectFileUrl`.
+    4. **Active Audit Cycle Transparency Banner (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+       - Added `cycleData` state populated via `swingAuditApi.getCurrentCycle()`.
+       - Rendered a sleek glassmorphic transparency banner above the summary cards displaying:
+         - `Cycle #{cycle_number} ({status})`
+         - Date range (`from_date` to `to_date`)
+         - Tracked Stocks count (`100` stocks)
+         - Win Rate and Realized P&L in ₹
+         - "Download Current Excel (.xlsx)" primary action button
+         - "Direct Link" native anchor fallback
+  - **Verification Evidence**:
+    - **Unit Tests (`backend/tests/test_swing_audit.py`, `backend/tests/test_swing_audit_coupled_ratchet.py`)**: **19 of 19 passed (100% green)** in 97.04s.
+    - **Frontend Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 1m 2s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server (`stockai-server` at `92.4.71.210`):
+    ```bash
+    cd ~/StockAI
+    git fetch origin main && git reset --hard origin/main
+
+    # Rebuild and restart both backend and frontend containers
+    docker compose up -d --build backend frontend celery_worker celery_beat
+
+    # Verify download route responds HTTP 200 with dynamic timestamped filename
+    sleep 15
+    curl -I -k "https://stockai-live.duckdns.org/api/swing-audit/download-latest"
+    ```
+
 - **ASYNCIO/POSTGRESQL LAZY-LOADING CRASH ELIMINATION IN EXCEL EXPORT (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     1. Direct HTTP probe of `https://stockai-live.duckdns.org/api/swing-audit/download-latest` revealed the server was failing with HTTP 500:
