@@ -53,8 +53,14 @@ export default function SettingsPage() {
   const handleSyncAudit = async () => {
     setSyncingAudit(true)
     try {
-      const res = await swingAuditApi.sync()
-      alert(`11-Day Audit Synchronized!\nEvaluated ${res.data.updated_count || 0} stocks\nWin Rate: ${res.data.win_rate ?? 0}%\nTotal P&L: ₹${res.data.total_pnl_rupees ?? 0}`)
+      const res = await swingAuditApi.sync(true)
+      const cataloged = res.data.cataloged_count || 0
+      const updated = res.data.updated_count || 0
+      if (res.data.status === 'partial_success' || (updated === 0 && (res.data.total_trades || 0) > 0)) {
+        alert(`Audit Sync Incomplete:\n${res.data.message || 'No active stock prices could be updated.'}`)
+      } else {
+        alert(`11-Day Audit Synchronized!\nEvaluated ${updated} stocks (${cataloged} new cataloged)\nWin Rate: ${res.data.win_rate ?? 0}%\nTotal P&L: ₹${res.data.total_pnl_rupees ?? 0}`)
+      }
       await fetchAuditData()
     } catch (err: any) {
       alert(`Audit sync failed: ${err?.response?.data?.detail || err.message}`)

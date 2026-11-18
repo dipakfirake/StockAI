@@ -114,6 +114,11 @@ async def ensure_swing_audit_schema(db: AsyncSession):
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_price NUMERIC(12, 4);
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_time TIMESTAMPTZ;
                     END IF;
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audit_prices') THEN
+                        ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS dynamic_sl_day NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS atr_value NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS ratchet_event VARCHAR(40);
+                    END IF;
                     IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audit_cycles') THEN
                         ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS excel_file_path VARCHAR(500);
                         ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_gain_loss_pct NUMERIC(8, 2) DEFAULT 0.00;
@@ -385,6 +390,7 @@ class SwingAuditService:
         - If Day 11 reached -> Square off at Day 11 Close price.
         """
         try:
+            await ensure_swing_audit_schema(db)
             if cycle_id:
                 stmt = select(SwingTradeAuditCycle).where(SwingTradeAuditCycle.id == cycle_id)
             else:
@@ -495,6 +501,15 @@ class SwingAuditService:
                         curr_price = float(quote.get("price") or quote.get("ltp") or quote.get("close") or 0.0)
                         prev_close = float(quote.get("previous_close") or curr_price)
 
+                    # Defensive fallback: If live quote is missing, use latest candle close or recommendation buy price
+                    if curr_price <= 0:
+                        if valid_candles:
+                            curr_price = float(valid_candles[-1][1].get("close") or audit.buy_price or 0.0)
+                        else:
+                            curr_price = float(audit.buy_price or 0.0)
+                    if prev_close <= 0:
+                        prev_close = curr_price
+
                     if valid_candles:
                         last_c_date = valid_candles[-1][0]
                         if last_c_date < today_dt and len(valid_candles) < 11 and curr_price > 0:
@@ -504,7 +519,7 @@ class SwingAuditService:
                                 if cur_step.weekday() < 5:  # Monday to Friday
                                     is_today = (cur_step == today_dt)
                                     step_close = curr_price if is_today else prev_close
-                                    step_open = float(quote.get("open") or prev_close) if is_today else prev_close
+                                    step_open = float(quote.get("open") or prev_close) if (is_today and quote) else prev_close
                                     step_high = max(step_open, step_close)
                                     step_low = min(step_open, step_close)
                                     step_candle = {
@@ -513,7 +528,7 @@ class SwingAuditService:
                                         "high": step_high,
                                         "low": step_low,
                                         "close": step_close,
-                                        "volume": int(quote.get("volume") or 0) if is_today else 0
+                                        "volume": int(quote.get("volume") or 0) if (is_today and quote) else 0
                                     }
                                     valid_candles.append((cur_step, step_candle))
                                 cur_step += timedelta(days=1)
@@ -524,14 +539,14 @@ class SwingAuditService:
                             if cur_step.weekday() < 5:
                                 is_today = (cur_step == today_dt)
                                 step_close = curr_price if is_today else prev_close
-                                step_open = float(quote.get("open") or prev_close) if is_today else prev_close
+                                step_open = float(quote.get("open") or prev_close) if (is_today and quote) else prev_close
                                 step_candle = {
                                     "timestamp": datetime(cur_step.year, cur_step.month, cur_step.day, 10, 0, tzinfo=timezone.utc).isoformat(),
                                     "open": step_open,
                                     "high": max(step_open, step_close),
                                     "low": min(step_open, step_close),
                                     "close": step_close,
-                                    "volume": int(quote.get("volume") or 0) if is_today else 0
+                                    "volume": int(quote.get("volume") or 0) if (is_today and quote) else 0
                                 }
                                 valid_candles.append((cur_step, step_candle))
                             cur_step += timedelta(days=1)
@@ -1245,6 +1260,7 @@ class SwingAuditService:
     async def get_cycle_summary(db: AsyncSession, cycle_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
         """Returns JSON representation of active or specified audit cycle for dashboard API."""
         try:
+            await ensure_swing_audit_schema(db)
             if cycle_id:
                 stmt = (
                     select(SwingTradeAuditCycle)

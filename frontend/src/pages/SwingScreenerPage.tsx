@@ -155,10 +155,17 @@ export default function SwingScreenerPage() {
       const res = await swingAuditApi.sync(true)
       const cataloged = res.data.cataloged_count || 0
       const updated = res.data.updated_count || 0
-      toast.success(
-        '11-Day Audit Synced!',
-        `Evaluated ${updated} stocks (${cataloged} new cataloged) | Win Rate: ${res.data.win_rate ?? 0}% | P&L: ₹${res.data.total_pnl_rupees ?? 0}`
-      )
+      if (res.data.status === 'partial_success' || (updated === 0 && (res.data.total_trades || 0) > 0)) {
+        toast.warning(
+          'Audit Sync Incomplete',
+          res.data.message || `0 active stock prices could be updated. Please verify database columns.`
+        )
+      } else {
+        toast.success(
+          '11-Day Audit Synced!',
+          `Evaluated ${updated} stocks (${cataloged} new cataloged) | Win Rate: ${res.data.win_rate ?? 0}% | P&L: ₹${res.data.total_pnl_rupees ?? 0}`
+        )
+      }
       // Refresh screener and archives to display latest state
       fetchScreener(true)
       fetchArchiveFiles()

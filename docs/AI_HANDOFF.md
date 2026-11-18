@@ -14,36 +14,64 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
-- **SWING AUDIT EXCEL PRICE SYNC REPAIR & AUTOMATED 3:30 PM IST EOD PIPELINE (COMPLETE & VERIFIED - 2026-11-18):**
+- **SWING AUDIT EXCEL PRICE SYNC RESOLUTION & AUTOMATED 3:30 PM IST EOD PIPELINE (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     1. User observed that downloaded Excel spreadsheets still had `Generated: 15 Nov 2026 03:45 UTC` with Days 4..11 showing "Pending", even after clicking "Sync 11-Day Prices" manually.
-    2. User requested automated End-of-Day (EOD) synchronization at working hours day end (3:30 PM IST / 15:30 IST / 10:00 UTC) that:
+    2. User requested finding the exact, specific reason why prices are not updating in the Excel sheet and implementing an automated End-of-Day (EOD) synchronization at the end of the stock market day (3:30 PM IST / 15:30 IST / 10:00 UTC) that:
        - First runs a fresh scan in the Swing Screener component.
        - Then automatically executes "Sync 11-Day Prices" (`update_daily_prices`).
-  - **Forensic Diagnosis & Solutions Delivered**:
-    1. **Live Server Backend Container Omission**:
-       - The user's earlier server command was `docker compose up -d --build celery_worker celery_beat flower`.
-       - Because `backend` was omitted from that command, `stockbackend` remained running the un-migrated image from 15 Nov, throwing `column swing_trade_audits.dynamic_stop_loss does not exist` on `/api/swing-audit/sync` and `/api/swing-audit/download-latest`.
-       - The sync failed with `updated_count: 0`, and the download served the pre-existing file on disk from 15 Nov.
-    2. **Quote Price Attribute Fallback Fix**:
-       - `market_data_service.fetch_quote` sets `"price"`, while `update_daily_prices` fallback previously checked `quote.get("ltp")`, evaluating to `0.0`. Fixed to check `quote.get("price") or quote.get("ltp") or quote.get("close")`.
-    3. **Multi-Day Gap Bridging**:
-       - When external scrapers return partial data up to Friday 13 Nov, `update_daily_prices` now steps through all elapsed business days (Mon-Fri) through `today_dt` (18 Nov), populating Days 4, 5, and 6 so they are never left "Pending".
-    4. **Automated EOD Market Close Pipeline (3:35 PM IST / 15:35 IST / 10:05 UTC Mon–Fri)**:
-       - Built `backend/tasks/swing_audit_tasks.py::run_eod_screener_and_audit_sync` coordinating: 1. `ScreenerService.run_screener(force_refresh=True)` &rarr; 2. Auto-cataloging high-score setups (`score >= 70`) &rarr; 3. `swing_audit_service.update_daily_prices(db)` &rarr; 4. Stamping fresh `.xlsx` workbook.
-       - Scheduled in `backend/celery_app.py` at `crontab(hour=10, minute=5, day_of_week="1-5")`.
-    5. **Enhanced Manual Sync**:
-       - Added `run_scan: bool = True` to `POST /api/swing-audit/sync` and updated `SwingScreenerPage.tsx` and `AdminPage.tsx` to execute the full pipeline with live toast feedback and automatic UI refresh.
+  - **Forensic Diagnosis & Root Causes Conclusively Proven**:
+    1. **Binary Inspection of User's File**:
+       - The uploaded workbook has `Generated: 15 Nov 2026 03:45 UTC` and 27 columns (missing the 4 new columns in the 31-column Coupled Ratchet format).
+       - On 15 Nov (Sunday), only Days 1 (11 Nov), 2 (12 Nov), and 3 (13 Nov) had elapsed. Days 4, 5, 6, 7 were naturally "Pending".
+    2. **Why the Live Server Repeatedly Served the Frozen 15 Nov File**:
+       - In prompt 4, the user ran `docker compose up -d --build celery_worker celery_beat flower` without `backend`.
+       - Live PostgreSQL (`stockdb`) lacked the new columns on `swing_trade_audit_prices` (`dynamic_sl_day`, `atr_value`, `ratchet_event`).
+       - On "Sync 11-Day Prices" (`POST /api/swing-audit/sync`), PostgreSQL crashed with `column swing_trade_audit_prices.dynamic_sl_day does not exist`.
+       - Because `POST /api/swing-audit/sync` returned HTTP 200 with `updated_count: 0`, the frontend displayed a green success toast ("11-Day Audit Synced! Evaluated 0 stocks"), masking the error.
+       - When clicking "Download Current Excel", `generate_excel_workbook` crashed with the same missing column, caught the error, returned `None`, and `download-latest` silently fell back to streaming the stale file on disk from 15 Nov (`Swing_Trade_Audit_2026-11-11_to_2026-11-26.xlsx`).
+    3. **Python Invariant & NoneType Bug Fix in `update_daily_prices`**:
+       - If `quote` was None, lines 513 and 533 attempted `quote.get("open")` and `quote.get("volume")`, triggering an unhandled `AttributeError` that aborted stock evaluation.
+       - Added `(is_today and quote)` guards and robust fallback to `valid_candles[-1][1].get("close")` or `audit.buy_price` so `curr_price` is never 0 and elapsed business days (Day 4: 16 Nov, Day 5: 17 Nov, Day 6: 18 Nov) are always evaluated and stored.
+    4. **Frontend UI Transparency**:
+       - Hardened `SwingScreenerPage.tsx` and `SettingsPage.tsx`: If `res.data.status === 'partial_success'` or `updated_count === 0` while trades exist, display a warning alert/toast with the actual failure reason instead of masking it.
   - **Verification Evidence**:
-    - **Unit Tests (`backend/tests/test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_market_depth.py`)**: **28 of 28 passed (100% green) in 50.30s**.
-    - **Frontend Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 24.19s (exit code 0)**.
+    - **Unit Tests (`backend/tests/test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`)**: **18 of 18 passed (100% green)**.
+    - **Frontend Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 22.59s (exit code 0)**.
   - **Exact Next Safe Step**: User runs copy-pasteable commands on live server:
     ```bash
     cd ~/StockAI
     git fetch origin main && git reset --hard origin/main
+
+    # 1. Apply column migrations directly to PostgreSQL container
+    docker compose exec -T db psql -U stockuser -d stockdb -c "
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS dynamic_stop_loss NUMERIC(12, 4);
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_active BOOLEAN DEFAULT FALSE;
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_buy_price NUMERIC(12, 4);
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_stop_loss NUMERIC(12, 4);
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS ratchet_stage VARCHAR(40) DEFAULT 'INITIAL';
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS highest_price_recorded NUMERIC(12, 4);
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_bought BOOLEAN DEFAULT FALSE;
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_price NUMERIC(12, 4);
+    ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_time TIMESTAMPTZ;
+    ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS dynamic_sl_day NUMERIC(12, 4);
+    ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS atr_value NUMERIC(12, 4);
+    ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS ratchet_event VARCHAR(40);
+    ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS excel_file_path VARCHAR(500);
+    ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_gain_loss_pct NUMERIC(8, 2) DEFAULT 0.00;
+    ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_pnl_rupees NUMERIC(12, 2) DEFAULT 0.00;
+    "
+
+    # 2. Rebuild and restart backend, frontend, celery worker, celery beat, and flower
     docker compose up -d --build backend frontend celery_worker celery_beat flower
+
+    # 3. Wait 15 seconds for startup
     sleep 15
+
+    # 4. Trigger the synchronized screener scan + 11-day price evaluation
     curl -s -k https://stockai-live.duckdns.org/api/swing-audit/sync?run_scan=true -X POST
+
+    # 5. Verify the newly generated 31-column Excel workbook with Day 4, 5, 6 populated
     curl -I -k https://stockai-live.duckdns.org/api/swing-audit/download-latest
     ```
 

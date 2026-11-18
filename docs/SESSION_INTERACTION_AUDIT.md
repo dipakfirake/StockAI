@@ -4047,3 +4047,32 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Frontend Production Build**: `1,994 modules transformed, 0 TypeScript errors, built in 24.19s (exit code 0)`.
 - **Deployment Guidance**:
   - Full copy-pasteable commands provided for user to rebuild `backend`, `frontend`, `celery_worker`, `celery_beat`, and `flower` on `stockai-server`.
+
+---
+
+### Session Entry 83: Conclusive Forensic Resolution of Stale 15 Nov Excel Download & Missing PostgreSQL Columns
+- **Timestamp:** 2026-11-18 18:35:00 IST (13:05:00 UTC)
+- **User Prompt:**
+  `"Check still same values and not updated values at day 4,5,6,7 like that still i clicked on run full scan and synced all 11 days button then also you are not solving this issue from previous 3 -4 prompts and not able to find the specific and exact reason for it . Attachment: media_1795006035254_c01c59cd.xlsx (uploaded as 'Swing_Trade_Audit_2026-11-11_to_2026-11-26_(5).xlsx')"`
+- **Forensic Investigation & Root Cause Proof**:
+  1. **Binary Analysis of User's Uploaded Excel File (`Swing_Trade_Audit_2026-11-11_to_2026-11-26_(5).xlsx`)**:
+     - Parsed workbook using openpyxl: Sheet `Audit Scorecard`, cell A3 reads: `Audit Cycle #1 | Period: 11 Nov 2026 to 26 Nov 2026 | Status: ACTIVE | Generated: 15 Nov 2026 03:45 UTC`.
+     - Sheet `11-Day Price Tracking` has exactly **27 columns** (the legacy format), missing the 4 new columns present in current codebase (`Dynamic Trailing SL (₹)`, `Tranche 2 Buy (₹)`, `Tranche 2 SL (₹)`, `Ratchet Milestone` &rarr; 31 columns total).
+     - **Irrefutable Proof**: The file downloaded by the user was generated on **Sunday, 15 Nov 2026 at 03:45 UTC**. On 15 Nov, only Days 1, 2, and 3 had elapsed since 11 Nov (14 and 15 Nov were weekends). Days 4 (16 Nov), 5 (17 Nov), and 6 (18 Nov) were in the future on 15 Nov.
+  2. **Why the Server Served the Frozen 15 Nov File Even After User Clicked Sync**:
+     - In prompt 4, the user rebuilt only Celery: `docker compose up -d --build celery_worker celery_beat flower`. The `backend` container (`stockbackend`) was omitted.
+     - Live PostgreSQL (`stockdb`) lacked the new columns on `swing_trade_audit_prices` (`dynamic_sl_day`, `atr_value`, `ratchet_event`).
+     - When the user clicked "Sync 11-Day Prices" (`POST /api/swing-audit/sync`), PostgreSQL crashed with:
+       `(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) column swing_trade_audit_prices.dynamic_sl_day does not exist`.
+     - Because `POST /api/swing-audit/sync` returned HTTP 200 with `status: "partial_success", updated_count: 0`, the frontend displayed a green toast (*"11-Day Audit Synced! Evaluated 0 stocks"*), giving the false impression that prices had synchronized.
+     - When the user clicked "Download Current Excel" (`GET /api/swing-audit/download-latest`), `generate_excel_workbook` crashed with the same missing column, caught the error, returned `None`, and `download-latest` silently fell back to streaming the stale file on disk from 15 Nov (`Swing_Trade_Audit_2026-11-11_to_2026-11-26.xlsx`)!
+  3. **Python Invariant & NoneType Bug Fix in `update_daily_prices`**:
+     - If `quote` was None, lines 513 and 533 attempted `quote.get("open")` and `quote.get("volume")`, triggering an unhandled `AttributeError` that aborted stock evaluation.
+     - Added `(is_today and quote)` guards and robust fallback to `valid_candles[-1][1].get("close")` or `audit.buy_price` so `curr_price` is never 0 and elapsed business days (Day 4: 16 Nov, Day 5: 17 Nov, Day 6: 18 Nov) are always evaluated and stored.
+  4. **Frontend UI Transparency**:
+     - Hardened `SwingScreenerPage.tsx` and `SettingsPage.tsx`: If `res.data.status === 'partial_success'` or `updated_count === 0` while trades exist, display a warning alert/toast with the actual failure reason instead of masking it.
+- **Verification Evidence**:
+  - **Unit Tests**: `backend/tests/test_swing_audit.py` (13/13 passed) and `backend/tests/test_swing_audit_coupled_ratchet.py` (5/5 passed) &rarr; **18 of 18 passed (100% green)**.
+  - **Frontend Production Build**: `npm --prefix frontend run build` &rarr; **1,994 modules transformed, 0 TypeScript errors, built in 22.59s (exit code 0)**.
+- **Required Live Server Execution**:
+  - User must run the complete migration SQL on PostgreSQL, rebuild `backend` and `frontend`, and execute the pipeline.

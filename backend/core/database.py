@@ -113,6 +113,12 @@ async def create_db_tables():
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_time TIMESTAMPTZ;
                     END IF;
 
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audit_prices') THEN
+                        ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS dynamic_sl_day NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS atr_value NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS ratchet_event VARCHAR(40);
+                    END IF;
+
                     IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audit_cycles') THEN
                         ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS excel_file_path VARCHAR(500);
                         ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_gain_loss_pct NUMERIC(8, 2) DEFAULT 0.00;
