@@ -14,6 +14,25 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **CUSTOM INDICATOR MULTI-SELECT ENGINE, 1-CLICK PRESETS & ACTIVE CHIP BAR (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Resolved**:
+    1. User observed: "and if indicators are on then chart is seen to much messy instead of this do ont thing add indicators dropdown and in it we can add only 1 or multiple indicators of our choices also."
+    2. Root cause: Enabling indicators previously toggled all 10 indicators simultaneously (EMA 9, 21, 50, 200, Bollinger Bands, VWAP, Supertrend, RSI, MACD, Volume), creating visual clutter and covering candlesticks.
+    3. Remediations Implemented in `frontend/src/pages/ChartPage.tsx`:
+       - **Custom Multi-Select Choice Architecture**: Users can pick and choose *only 1* (e.g. single EMA 21) or *any multiple indicators* of their choice.
+       - **Clean Default State**: Initial state defaults to clean candlesticks + volume with only EMA 21 base line, preventing screen clutter.
+       - **Active Indicator Chips Bar (TradingView Style)**: Placed directly above the main chart. Shows clean active chips (e.g. `[● EMA 21 (15.38) ×]`, `[● RSI 14 (45.70) ×]`). Clicking `×` on any chip immediately removes that individual indicator from the chart without opening the dropdown.
+       - **1-Click Presets**:
+         - `[✨ Clean]`: One-tap clean chart (candlesticks & volume only).
+         - `[🎯 EMA 21 Only]`: Single pullback baseline.
+         - `[📈 EMA 21 + 50]`: Trend following baseline.
+         - `[⚡ Bollinger]`: 20-SMA volatility bands.
+         - `[📊 RSI 14]`: Momentum oscillator.
+       - **Enhanced Dropdown UI**: Expanded width (320px), search filtering, descriptions, live values, and clickable row toggles.
+  - **Verification Evidence**:
+    - Frontend production build: **1,994 modules transformed, 0 TypeScript errors, built in 41.71s (exit code 0)**.
+  - **Exact Next Safe Step**: Deploy on live server with `docker compose up -d --build frontend`.
+
 - **CHART INDICATOR DROPDOWN REFACTOR & FULL MODULE COMPLETION AUDIT (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Resolved**:
     1. User reported: "indicators dropdown is not opening or empty."

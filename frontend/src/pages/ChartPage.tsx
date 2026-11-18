@@ -83,17 +83,18 @@ export default function ChartPage() {
   const [isHeikinAshi, setIsHeikinAshi] = useLocalStorage('chart_is_heikin_ashi', false)
   const [showIndicators, setShowIndicators] = useLocalStorage('chart_show_indicators', true)
   const [indicatorToggles, setIndicatorToggles] = useLocalStorage<Record<string, boolean>>('chart_indicator_toggles', {
-    ema9: true,
-    ema21: true,
-    ema50: true,
-    ema200: true,
-    vwap: true,
-    supertrend: true,
-    bb: true,
     volume: true,
-    rsi: true,
-    macd: true,
+    ema21: true,
+    ema9: false,
+    ema50: false,
+    ema200: false,
+    vwap: false,
+    supertrend: false,
+    bb: false,
+    rsi: false,
+    macd: false,
   })
+  const [indicatorSearch, setIndicatorSearch] = useState('')
   const [showIndicatorMenu, setShowIndicatorMenu] = useState(false)
   const indicatorMenuRef = useRef<HTMLDivElement>(null)
 
@@ -1567,6 +1568,110 @@ export default function ChartPage() {
     }
   };
 
+  const ALL_INDICATORS = [
+    { key: 'ema21', label: 'EMA 21', category: 'overlay', group: 'Moving Averages', color: '#f59e0b', desc: 'Pullback Base & Dynamic Support', val: indicators?.ema_21 ? indicators.ema_21.toFixed(2) : null },
+    { key: 'ema9', label: 'EMA 9', category: 'overlay', group: 'Moving Averages', color: '#3b82f6', desc: 'Fast Momentum & Short-Term Trend', val: indicators?.ema_9 ? indicators.ema_9.toFixed(2) : null },
+    { key: 'ema50', label: 'EMA 50', category: 'overlay', group: 'Moving Averages', color: '#8b5cf6', desc: 'Intermediate Trend & Golden/Death Cross', val: indicators?.ema_50 ? indicators.ema_50.toFixed(2) : null },
+    { key: 'ema200', label: 'EMA 200', category: 'overlay', group: 'Moving Averages', color: '#ec4899', desc: 'Long-Term Macro Institutional Line', val: indicators?.ema_200 ? indicators.ema_200.toFixed(2) : null },
+    { key: 'vwap', label: 'VWAP', category: 'overlay', group: 'Volume Weighted', color: '#d946ef', desc: 'Volume Weighted Average Price Benchmark', val: indicators?.vwap ? Number(indicators.vwap).toFixed(2) : null },
+    { key: 'supertrend', label: 'Supertrend', category: 'overlay', group: 'Trend Following', color: '#10b981', desc: 'Dynamic Trailing Stop & Direction', val: indicators?.supertrend ? (typeof indicators.supertrend === 'object' ? Number(indicators.supertrend.value || 0).toFixed(2) : Number(indicators.supertrend).toFixed(2)) : null },
+    { key: 'bb', label: 'Bollinger Bands', category: 'overlay', group: 'Volatility', color: '#06b6d4', desc: '20-SMA Upper/Lower Volatility Bands', val: indicators?.bb_upper ? `${indicators.bb_upper.toFixed(1)} / ${indicators.bb_lower?.toFixed(1)}` : null },
+    { key: 'rsi', label: 'RSI (14)', category: 'subchart', group: 'Oscillators', color: '#a855f7', desc: 'Relative Strength Index (30 Oversold / 70 Overbought)', val: indicators?.rsi_14 ? indicators.rsi_14.toFixed(1) : null },
+    { key: 'macd', label: 'MACD (12, 26, 9)', category: 'subchart', group: 'Oscillators', color: '#3b82f6', desc: 'Moving Average Convergence Divergence', val: indicators?.macd ? indicators.macd.toFixed(2) : null },
+    { key: 'volume', label: 'Volume Histogram', category: 'subchart', group: 'Volume', color: '#26a69a', desc: 'Trading Volume with Up/Down Coloring', val: null },
+  ];
+
+  const activeIndicators = ALL_INDICATORS.filter(ind => showIndicators && (indicatorToggles[ind.key] ?? false));
+
+  const applyPreset = (preset: 'clean' | 'ema21' | 'trend' | 'bb' | 'momentum' | 'all') => {
+    setShowIndicators(true);
+    if (preset === 'clean') {
+      setIndicatorToggles({
+        volume: true,
+        ema9: false,
+        ema21: false,
+        ema50: false,
+        ema200: false,
+        vwap: false,
+        supertrend: false,
+        bb: false,
+        rsi: false,
+        macd: false,
+      });
+      toast.info('Clean Chart: Overlays cleared');
+    } else if (preset === 'ema21') {
+      setIndicatorToggles({
+        volume: true,
+        ema21: true,
+        ema9: false,
+        ema50: false,
+        ema200: false,
+        vwap: false,
+        supertrend: false,
+        bb: false,
+        rsi: false,
+        macd: false,
+      });
+      toast.info('Active: Single EMA 21 (Pullback Base)');
+    } else if (preset === 'trend') {
+      setIndicatorToggles({
+        volume: true,
+        ema21: true,
+        ema50: true,
+        ema9: false,
+        ema200: false,
+        vwap: false,
+        supertrend: false,
+        bb: false,
+        rsi: false,
+        macd: false,
+      });
+      toast.info('Active: Trend Following (EMA 21 + EMA 50)');
+    } else if (preset === 'bb') {
+      setIndicatorToggles({
+        volume: true,
+        bb: true,
+        ema9: false,
+        ema21: false,
+        ema50: false,
+        ema200: false,
+        vwap: false,
+        supertrend: false,
+        rsi: false,
+        macd: false,
+      });
+      toast.info('Active: Bollinger Bands');
+    } else if (preset === 'momentum') {
+      setIndicatorToggles({
+        volume: true,
+        rsi: true,
+        ema9: true,
+        ema21: false,
+        ema50: false,
+        ema200: false,
+        vwap: false,
+        supertrend: false,
+        bb: false,
+        macd: false,
+      });
+      toast.info('Active: Momentum (RSI 14 + EMA 9)');
+    } else if (preset === 'all') {
+      setIndicatorToggles({
+        volume: true,
+        ema9: true,
+        ema21: true,
+        ema50: true,
+        ema200: true,
+        vwap: true,
+        supertrend: true,
+        bb: true,
+        rsi: true,
+        macd: true,
+      });
+      toast.info('Active: All indicators');
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -1636,30 +1741,30 @@ export default function ChartPage() {
                   fontSize: 13, 
                   padding: '4px 8px', 
                   height: '28px', 
-                  color: showIndicators ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', 
-                  fontWeight: showIndicators ? 600 : 400, 
+                  color: showIndicators && activeIndicators.length > 0 ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', 
+                  fontWeight: showIndicators && activeIndicators.length > 0 ? 600 : 400, 
                   display: 'flex', 
                   alignItems: 'center',
                   gap: 5
                 }}
-                title="Open Indicator & Overlay Settings"
+                title="Choose individual indicators for your chart"
               >
                 <Activity size={14} />
                 <span>Indicators</span>
                 <span style={{
                   fontSize: 10,
-                  padding: '1px 5px',
+                  padding: '1px 6px',
                   borderRadius: 10,
-                  background: showIndicators ? 'rgba(56, 189, 248, 0.2)' : 'rgba(100, 116, 139, 0.2)',
-                  color: showIndicators ? '#38bdf8' : '#94a3b8',
+                  background: showIndicators && activeIndicators.length > 0 ? 'rgba(56, 189, 248, 0.2)' : 'rgba(100, 116, 139, 0.2)',
+                  color: showIndicators && activeIndicators.length > 0 ? '#38bdf8' : '#94a3b8',
                   fontWeight: 700
                 }}>
-                  {showIndicators ? `${Object.values(indicatorToggles).filter(Boolean).length}/10` : 'OFF'}
+                  {showIndicators ? `${activeIndicators.length} active` : 'OFF'}
                 </span>
                 <ChevronDown size={13} style={{ transform: showIndicatorMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
               </button>
 
-              {/* Individual Indicator Toggle Dropdown */}
+              {/* TradingView-Style Indicator Selection Dropdown */}
               {showIndicatorMenu && (
                 <div 
                   onClick={(e) => e.stopPropagation()}
@@ -1671,83 +1776,160 @@ export default function ChartPage() {
                     background: 'rgba(15, 23, 42, 0.98)',
                     backdropFilter: 'blur(12px)',
                     border: '1px solid rgba(56, 189, 248, 0.3)',
-                    borderRadius: 8,
-                    padding: '12px 14px',
+                    borderRadius: 10,
+                    padding: '14px',
                     zIndex: 9999,
-                    width: 270,
-                    maxHeight: '440px',
+                    width: 320,
+                    maxHeight: '480px',
                     overflowY: 'auto',
-                    boxShadow: '0 12px 30px -5px rgba(0, 0, 0, 0.7)'
+                    boxShadow: '0 16px 36px -5px rgba(0, 0, 0, 0.75)'
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Indicators & Overlays
-                    </span>
-                    <button
-                      onClick={() => setShowIndicators(prev => !prev)}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Choose Indicators
+                      </div>
+                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                        Add only 1 or multiple of your choice
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button
+                        onClick={() => applyPreset('clean')}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          borderRadius: 4,
+                          padding: '2px 6px',
+                          fontSize: 10,
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                          fontWeight: 600
+                        }}
+                        title="Clear all overlays for a clean chart"
+                      >
+                        Clean Chart
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 1-Click Quick Presets */}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                      Quick Presets:
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => applyPreset('clean')}
+                        style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#cbd5e1', cursor: 'pointer' }}
+                      >
+                        ✨ Clean
+                      </button>
+                      <button
+                        onClick={() => applyPreset('ema21')}
+                        style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 4, color: '#f59e0b', cursor: 'pointer' }}
+                      >
+                        🎯 EMA 21 Only
+                      </button>
+                      <button
+                        onClick={() => applyPreset('trend')}
+                        style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(139, 92, 246, 0.15)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: 4, color: '#8b5cf6', cursor: 'pointer' }}
+                      >
+                        📈 EMA 21 + 50
+                      </button>
+                      <button
+                        onClick={() => applyPreset('bb')}
+                        style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(6, 182, 212, 0.15)', border: '1px solid rgba(6, 182, 212, 0.3)', borderRadius: 4, color: '#06b6d4', cursor: 'pointer' }}
+                      >
+                        ⚡ Bollinger
+                      </button>
+                      <button
+                        onClick={() => applyPreset('momentum')}
+                        style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(168, 85, 247, 0.15)', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: 4, color: '#a855f7', cursor: 'pointer' }}
+                      >
+                        📊 RSI 14
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Search box */}
+                  <div style={{ marginBottom: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="Search indicator..."
+                      value={indicatorSearch}
+                      onChange={(e) => setIndicatorSearch(e.target.value)}
                       style={{
-                        background: showIndicators ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                        border: 'none',
+                        width: '100%',
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        background: 'rgba(0,0,0,0.3)',
+                        border: '1px solid rgba(255,255,255,0.12)',
                         borderRadius: 4,
-                        padding: '2px 6px',
-                        fontSize: 10,
-                        color: showIndicators ? '#10b981' : '#ef4444',
-                        cursor: 'pointer',
-                        fontWeight: 600
+                        color: '#f8fafc',
+                        outline: 'none'
                       }}
-                    >
-                      {showIndicators ? 'Hide All' : 'Show All'}
-                    </button>
+                    />
                   </div>
 
-                  <div style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 6 }}>
-                    Chart Overlays
+                  {/* Indicator Checklist */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {ALL_INDICATORS
+                      .filter(ind => !indicatorSearch || ind.label.toLowerCase().includes(indicatorSearch.toLowerCase()) || ind.desc.toLowerCase().includes(indicatorSearch.toLowerCase()))
+                      .map(ind => {
+                        const isChecked = showIndicators && (indicatorToggles[ind.key] ?? false);
+                        return (
+                          <div
+                            key={ind.key}
+                            onClick={() => {
+                              setShowIndicators(true);
+                              setIndicatorToggles(prev => ({ ...prev, [ind.key]: !prev[ind.key] }));
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '5px 8px',
+                              borderRadius: 6,
+                              background: isChecked ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                              border: isChecked ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid transparent',
+                              cursor: 'pointer',
+                              transition: 'background 0.15s'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  setShowIndicators(true);
+                                  setIndicatorToggles(prev => ({ ...prev, [ind.key]: e.target.checked }));
+                                }}
+                                style={{ cursor: 'pointer' }}
+                              />
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <span style={{ color: ind.color, fontWeight: 700, fontSize: 10 }}>●</span>
+                                  <span style={{ fontSize: 12, fontWeight: isChecked ? 600 : 400, color: isChecked ? '#f8fafc' : '#cbd5e1' }}>
+                                    {ind.label}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 10, color: '#64748b' }}>
+                                  {ind.desc}
+                                </div>
+                              </div>
+                            </div>
+                            {ind.val && (
+                              <span style={{ fontSize: 11, color: isChecked ? '#38bdf8' : '#94a3b8', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>
+                                {ind.val}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
                   </div>
-                  {[
-                    { key: 'ema9', label: 'EMA 9 (Fast)', color: '#3b82f6', val: indicators?.ema_9 ? indicators.ema_9.toFixed(2) : null },
-                    { key: 'ema21', label: 'EMA 21 (Pullback)', color: '#f59e0b', val: indicators?.ema_21 ? indicators.ema_21.toFixed(2) : null },
-                    { key: 'ema50', label: 'EMA 50 (Trend)', color: '#8b5cf6', val: indicators?.ema_50 ? indicators.ema_50.toFixed(2) : null },
-                    { key: 'ema200', label: 'EMA 200 (Macro)', color: '#ec4899', val: indicators?.ema_200 ? indicators.ema_200.toFixed(2) : null },
-                    { key: 'vwap', label: 'VWAP', color: '#d946ef', val: null },
-                    { key: 'supertrend', label: 'Supertrend', color: '#10b981', val: indicators?.supertrend ? (typeof indicators.supertrend === 'object' ? Number(indicators.supertrend.value || 0).toFixed(2) : Number(indicators.supertrend).toFixed(2)) : null },
-                    { key: 'bb', label: 'Bollinger Bands', color: '#06b6d4', val: indicators?.bb_upper ? `${indicators.bb_upper.toFixed(1)} / ${indicators.bb_lower?.toFixed(1)}` : null },
-                  ].map(ind => (
-                    <label key={ind.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: '#f8fafc', padding: '3px 0', cursor: 'pointer' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                        <input 
-                          type="checkbox" 
-                          checked={indicatorToggles[ind.key] ?? true} 
-                          onChange={(e) => setIndicatorToggles({ ...indicatorToggles, [ind.key]: e.target.checked })} 
-                        />
-                        <span style={{ color: ind.color, fontWeight: 700, fontSize: 10 }}>●</span>
-                        <span>{ind.label}</span>
-                      </div>
-                      {ind.val && <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ind.val}</span>}
-                    </label>
-                  ))}
-
-                  <div style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', marginTop: 10, marginBottom: 6, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 6 }}>
-                    Sub-Chart Panes
-                  </div>
-                  {[
-                    { key: 'rsi', label: 'RSI (14)', color: '#a855f7', val: indicators?.rsi_14 ? indicators.rsi_14.toFixed(1) : null },
-                    { key: 'macd', label: 'MACD (12, 26, 9)', color: '#3b82f6', val: indicators?.macd ? indicators.macd.toFixed(2) : null },
-                    { key: 'volume', label: 'Volume Histogram', color: '#26a69a', val: null },
-                  ].map(ind => (
-                    <label key={ind.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: '#f8fafc', padding: '3px 0', cursor: 'pointer' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                        <input 
-                          type="checkbox" 
-                          checked={indicatorToggles[ind.key] ?? true} 
-                          onChange={(e) => setIndicatorToggles({ ...indicatorToggles, [ind.key]: e.target.checked })} 
-                        />
-                        <span style={{ color: ind.color, fontWeight: 700, fontSize: 10 }}>●</span>
-                        <span>{ind.label}</span>
-                      </div>
-                      {ind.val && <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ind.val}</span>}
-                    </label>
-                  ))}
                 </div>
               )}
             </div>
@@ -1875,6 +2057,75 @@ export default function ChartPage() {
             onClose={() => { setReplayMode(false); setIsReplaying(false); }}
           />
         )}
+
+        {/* Active Indicators Chips Bar (TradingView Style) */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: '6px 10px', background: 'var(--color-bg-secondary)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Activity size={12} /> Active On Chart:
+          </span>
+          {activeIndicators.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+              Clean Candlesticks (No messy overlays)
+            </span>
+          ) : (
+            activeIndicators.map(ind => (
+              <span
+                key={ind.key}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  padding: '2px 8px',
+                  borderRadius: 12,
+                  background: 'rgba(255,255,255,0.06)',
+                  border: `1px solid ${ind.color}88`,
+                  color: 'var(--color-text-primary)'
+                }}
+              >
+                <span style={{ color: ind.color, fontSize: 10 }}>●</span>
+                <span style={{ fontWeight: 600 }}>{ind.label}</span>
+                {ind.val && <span style={{ color: 'var(--color-text-muted)', fontFamily: 'monospace' }}>({ind.val})</span>}
+                <button
+                  onClick={() => setIndicatorToggles(prev => ({ ...prev, [ind.key]: false }))}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--color-text-muted)',
+                    cursor: 'pointer',
+                    padding: '0 2px',
+                    fontSize: 13,
+                    lineHeight: 1
+                  }}
+                  title={`Remove ${ind.label} from chart`}
+                >
+                  ×
+                </button>
+              </span>
+            ))
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button
+              onClick={() => setShowIndicatorMenu(true)}
+              className="btn btn-ghost"
+              style={{ fontSize: 11, padding: '3px 8px', height: '24px', color: 'var(--color-accent-blue)', gap: 4 }}
+              title="Add or remove indicators of your choice"
+            >
+              + Add / Choose Indicators
+            </button>
+            {activeIndicators.length > 0 && (
+              <button
+                onClick={() => applyPreset('clean')}
+                className="btn btn-ghost"
+                style={{ fontSize: 11, padding: '3px 8px', height: '24px', color: 'var(--color-bearish, #ef4444)' }}
+                title="Clear all overlays for an uncluttered clean chart"
+              >
+                Clear All (Clean Chart)
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
           <div style={{ display: 'flex' }}>
             <div ref={chartContainerRef} style={{ flex: 1, position: 'relative', minHeight: 450 }}>

@@ -4246,3 +4246,27 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 42.44s (exit code 0)**.
 - **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
 
+---
+
+### Session Entry 89: Custom Multi-Select Indicator Engine, 1-Click Presets & TradingView-Style Active Chips Bar
+- **Timestamp:** 2026-11-19 00:30:00 IST (19:00:00 UTC)
+- **User Prompt:**
+  `"and if indicators are on then chart is seen to much messy instead of this do ont thing add indicators dropdown and in it we can add only 1 or multiple indicators of our choices also."`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Visual Clutter Root Cause**:
+     - Previously, toggling indicators on activated all 10 indicators simultaneously (EMA 9, 21, 50, 200, Bollinger Bands, VWAP, Supertrend, RSI, MACD, Volume), creating visual clutter where candlesticks were obscured by a dense mesh of crossing lines.
+  2. **Architectural Upgrades Implemented in `frontend/src/pages/ChartPage.tsx`**:
+     - **Custom Choice Multi-Select Architecture**: Replaced all-or-nothing logic with an individual selector. Users can enable *only 1* indicator of their choice (e.g. just EMA 21) or *any custom combination* (e.g. EMA 21 + RSI).
+     - **Clean Default State**: Initial state defaults to clean candlesticks + volume with only EMA 21 as dynamic baseline.
+     - **Active Indicators Chips Bar (TradingView Style)**: Placed immediately above the candlestick chart. Renders clean active badges (e.g. `[● EMA 21 (15.38) ×]`, `[● RSI 14 (45.70) ×]`). Clicking `×` on any chip immediately removes that individual indicator from the chart without opening any menu.
+     - **1-Click Presets**:
+       - `[✨ Clean]`: Instantly clears all overlays for an uncluttered chart.
+       - `[🎯 EMA 21 Only]`: Single pullback baseline.
+       - `[📈 EMA 21 + 50]`: Trend following baseline.
+       - `[⚡ Bollinger]`: 20-SMA volatility bands.
+       - `[📊 RSI 14]`: Momentum oscillator.
+     - **Enhanced Dropdown UI**: 320px wide modal with search input, indicator group tags, descriptions, live values, and full row click-to-toggle.
+- **Verification Evidence**:
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 41.71s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
