@@ -4009,3 +4009,41 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Frontend Production Build**: `npm --prefix frontend run build` &rarr; **1,994 modules transformed, 0 TypeScript errors, built in 21.36s (exit code 0)**.
 - **Deployment Guidance**:
   - Full instructions provided to rebuild backend and frontend containers on `stockai-server`.
+
+
+---
+
+### Session Entry 82: Swing Audit Excel Price Sync Resolution & Automated 3:30 PM IST EOD Pipeline
+- **Timestamp:** 2026-11-18 18:15:00 IST (12:45:00 UTC)
+- **User Prompt:**
+  `"still same problem. Analyze every file for this to br happening and find the real issue that the price is not updating in excel sheet . and fix this issue ASAP because if it is not solved the audit wont be fully completed thats why and also . i want that automated sync in it at every day end of stock market means at 3.30 pm or days trading hours over. sync means that first in swing screener component that run fresh scan and when scan is over after that Sync 11-Day Prices this want to be done automatically at working hours days end and also find that problem first and find a real reason that the prices are not updating in excel sheet after clicking also manually. /goal /compact /browser /plan /teamwork /learn /boost /agy-customizations /automation /generative_ui /migrate-workflows /plugin /run-workflow /swarm"`
+- **Forensic Diagnosis & Root Causes**:
+  1. **Server Container Image & Database Mismatch**:
+     - User's previous deployment command only rebuilt `celery_worker`, `celery_beat`, and `flower` (`docker compose up -d --build celery_worker celery_beat flower`).
+     - The `backend` container (`stockbackend`) was omitted and remained running on the 15 Nov image, throwing `column swing_trade_audits.dynamic_stop_loss does not exist` on `/api/swing-audit/sync` and `/api/swing-audit/download-latest`.
+     - Sync aborted with `updated_count: 0`, and the download route served the stale file on disk created on 15 Nov (`Generated: 15 Nov 2026 03:45 UTC`) where Days 4..11 were naturally "Pending" because 16–18 Nov had not yet arrived.
+  2. **Quote Price Attribute Invariant**:
+     - `MarketDataService.fetch_quote` sets `"price"`, while fallback 3 in `update_daily_prices` checked `quote.get("ltp")`, causing `float(quote.get("ltp", 0) or 0)` to evaluate to `0.0` and skip the live fallback.
+     - Fixed to check `float(quote.get("price") or quote.get("ltp") or quote.get("close") or 0.0)`.
+  3. **Multi-Day Trading Gap Bridging**:
+     - When external scrapers return partial data up to Friday 13 Nov, `update_daily_prices` now steps through all elapsed business days (Mon-Fri) through `today_dt` (18 Nov), populating Days 4, 5, and 6 so they are never left "Pending".
+  4. **Automated EOD Market Close Pipeline (3:30 PM IST / 15:35 IST / 10:05 UTC Mon–Fri)**:
+     - User requested automated market close workflow: 1. Fresh scan in swing screener component &rarr; 2. Sync 11-Day Prices &rarr; 3. Refresh Excel.
+     - Built `backend/tasks/swing_audit_tasks.py::run_eod_screener_and_audit_sync` and scheduled it in `backend/celery_app.py` at `crontab(hour=10, minute=5, day_of_week="1-5")`.
+  5. **Enhanced Manual Sync**:
+     - Updated `POST /api/swing-audit/sync` with `run_scan: bool = True` query parameter.
+     - `SwingScreenerPage.tsx` and `AdminPage.tsx` now call `swingAuditApi.sync(true)`, executing the full screener + price sync pipeline with informative progress toasts and automatic UI refresh.
+- **Engineering Changes Delivered**:
+  1. `backend/tasks/swing_audit_tasks.py`: Added `run_eod_screener_and_audit_sync` with safe async execution helper `_run_async`.
+  2. `backend/celery_app.py`: Scheduled `eod-swing-screener-and-audit-sync` at 15:35 IST (10:05 UTC) Mon–Fri.
+  3. `backend/api/swing_audit.py`: Added `run_scan: bool = False` to `POST /sync`.
+  4. `backend/services/swing_audit_service.py`: Fixed quote price fallback and added multi-day business day gap bridging through today.
+  5. `frontend/src/services/api.ts`: Updated `swingAuditApi.sync(runScan: boolean = false)`.
+  6. `frontend/src/pages/SwingScreenerPage.tsx`: Enhanced `handleSyncAudit` to call `sync(true)` with multi-stage toast and automatic screener/archive re-fetching.
+  7. `frontend/src/pages/AdminPage.tsx`: Updated `handleAdminSyncAudit` to call `sync(true)`.
+  8. `backend/tests/test_swing_audit.py`: Added unit tests `test_run_eod_screener_and_audit_sync_task` and `test_sync_audit_prices_endpoint_with_run_scan`.
+- **Verification Evidence**:
+  - **Unit Tests**: `28 of 28 passed (100% green)` in 50.30s.
+  - **Frontend Production Build**: `1,994 modules transformed, 0 TypeScript errors, built in 24.19s (exit code 0)`.
+- **Deployment Guidance**:
+  - Full copy-pasteable commands provided for user to rebuild `backend`, `frontend`, `celery_worker`, `celery_beat`, and `flower` on `stockai-server`.

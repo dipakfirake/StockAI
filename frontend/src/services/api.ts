@@ -336,7 +336,7 @@ export const swingAuditApi = {
     user_buy_price?: number;
     notes?: string;
   }) => api.post('/swing-audit/track', data),
-  sync: () => api.post('/swing-audit/sync'),
+  sync: (runScan: boolean = false) => api.post(`/swing-audit/sync${runScan ? '?run_scan=true' : ''}`),
   listFiles: () => api.get<{ files: any[]; count: number }>('/swing-audit/files'),
   downloadLatestUrl: () => '/api/swing-audit/download-latest',
   downloadFileUrl: (filename: string) => `/api/swing-audit/download/${encodeURIComponent(filename)}`,

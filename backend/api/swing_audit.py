@@ -104,15 +104,45 @@ async def get_current_audit_cycle(
 
 @router.post("/sync")
 async def sync_audit_prices(
+    run_scan: bool = Query(False, description="If True, runs fresh Swing Screener scan before price sync"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional)
 ):
     """
     Evaluate daily price milestones (Day 1..11), check Stop Loss and Target hits,
     update booked PnL, and refresh the Excel report file.
+    If run_scan=True, runs fresh market scan via Swing Screener and catalogs qualifying setups first.
     """
     try:
+        cataloged_count = 0
+        if run_scan:
+            try:
+                from backend.services.screener import ScreenerService
+                from backend.data.ingestion.candle_ingestion import NSE_NIFTY50_SYMBOLS
+                screener_data = await ScreenerService.run_screener(NSE_NIFTY50_SYMBOLS, force_refresh=True)
+                buy_candidates = screener_data.get("buy_stocks", []) if isinstance(screener_data, dict) else []
+                for item in buy_candidates:
+                    score = float(item.get("total_score", 0.0) or 0.0)
+                    plan = item.get("trade_plan")
+                    sym = item.get("symbol")
+                    if score >= 70.0 and plan and sym:
+                        try:
+                            await swing_audit_service.track_swing_trade(
+                                db=db,
+                                symbol=sym,
+                                trade_plan=plan,
+                                company_name=item.get("name") or sym,
+                                total_score=score
+                            )
+                            cataloged_count += 1
+                        except Exception:
+                            pass
+            except Exception as scan_err:
+                logger.warning(f"Screener scan step in manual sync encountered error: {scan_err}")
+
         res = await swing_audit_service.update_daily_prices(db)
+        if isinstance(res, dict):
+            res["cataloged_count"] = cataloged_count
         return res
     except Exception as e:
         logger.error(f"Failed to sync audit prices: {e}", exc_info=True)

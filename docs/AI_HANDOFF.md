@@ -14,6 +14,40 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **SWING AUDIT EXCEL PRICE SYNC REPAIR & AUTOMATED 3:30 PM IST EOD PIPELINE (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    1. User observed that downloaded Excel spreadsheets still had `Generated: 15 Nov 2026 03:45 UTC` with Days 4..11 showing "Pending", even after clicking "Sync 11-Day Prices" manually.
+    2. User requested automated End-of-Day (EOD) synchronization at working hours day end (3:30 PM IST / 15:30 IST / 10:00 UTC) that:
+       - First runs a fresh scan in the Swing Screener component.
+       - Then automatically executes "Sync 11-Day Prices" (`update_daily_prices`).
+  - **Forensic Diagnosis & Solutions Delivered**:
+    1. **Live Server Backend Container Omission**:
+       - The user's earlier server command was `docker compose up -d --build celery_worker celery_beat flower`.
+       - Because `backend` was omitted from that command, `stockbackend` remained running the un-migrated image from 15 Nov, throwing `column swing_trade_audits.dynamic_stop_loss does not exist` on `/api/swing-audit/sync` and `/api/swing-audit/download-latest`.
+       - The sync failed with `updated_count: 0`, and the download served the pre-existing file on disk from 15 Nov.
+    2. **Quote Price Attribute Fallback Fix**:
+       - `market_data_service.fetch_quote` sets `"price"`, while `update_daily_prices` fallback previously checked `quote.get("ltp")`, evaluating to `0.0`. Fixed to check `quote.get("price") or quote.get("ltp") or quote.get("close")`.
+    3. **Multi-Day Gap Bridging**:
+       - When external scrapers return partial data up to Friday 13 Nov, `update_daily_prices` now steps through all elapsed business days (Mon-Fri) through `today_dt` (18 Nov), populating Days 4, 5, and 6 so they are never left "Pending".
+    4. **Automated EOD Market Close Pipeline (3:35 PM IST / 15:35 IST / 10:05 UTC Mon–Fri)**:
+       - Built `backend/tasks/swing_audit_tasks.py::run_eod_screener_and_audit_sync` coordinating: 1. `ScreenerService.run_screener(force_refresh=True)` &rarr; 2. Auto-cataloging high-score setups (`score >= 70`) &rarr; 3. `swing_audit_service.update_daily_prices(db)` &rarr; 4. Stamping fresh `.xlsx` workbook.
+       - Scheduled in `backend/celery_app.py` at `crontab(hour=10, minute=5, day_of_week="1-5")`.
+    5. **Enhanced Manual Sync**:
+       - Added `run_scan: bool = True` to `POST /api/swing-audit/sync` and updated `SwingScreenerPage.tsx` and `AdminPage.tsx` to execute the full pipeline with live toast feedback and automatic UI refresh.
+  - **Verification Evidence**:
+    - **Unit Tests (`backend/tests/test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_market_depth.py`)**: **28 of 28 passed (100% green) in 50.30s**.
+    - **Frontend Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 24.19s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server:
+    ```bash
+    cd ~/StockAI
+    git fetch origin main && git reset --hard origin/main
+    docker compose up -d --build backend frontend celery_worker celery_beat flower
+    sleep 15
+    curl -s -k https://stockai-live.duckdns.org/api/swing-audit/sync?run_scan=true -X POST
+    curl -I -k https://stockai-live.duckdns.org/api/swing-audit/download-latest
+    ```
+
+
 - **ZERODHA KITE 5-LEVEL MARKET DEPTH POST-MARKET ZEROES & SWING AUDIT LIVE PRICE AUTO-SYNC (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     1. User uploaded mobile screenshot of Zerodha Kite app for `PCJEWELLER BSE 15.51 -0.44 (-2.76%)` showing 5-level market depth order book with all zero bids/offers (`0.00 | 0 | 0`, `Total: 0 | Total: 0`).

@@ -481,48 +481,69 @@ class SwingAuditService:
                             if c_date >= rec_date:
                                 valid_candles.append((c_date, c))
 
-                    # Multi-tier fallback 3: Append today's active live price if market traded today but candle not yet closed
+                    # Multi-tier fallback 3: Append trading day prices up through today
                     today_dt = date.today()
+                    quote = None
+                    try:
+                        quote = await market_data_service.fetch_quote(audit.symbol)
+                    except Exception as q_err:
+                        logger.debug(f"Quote fetch fallback failed for {audit.symbol}: {q_err}")
+
+                    curr_price = 0.0
+                    prev_close = 0.0
+                    if quote and isinstance(quote, dict):
+                        curr_price = float(quote.get("price") or quote.get("ltp") or quote.get("close") or 0.0)
+                        prev_close = float(quote.get("previous_close") or curr_price)
+
                     if valid_candles:
                         last_c_date = valid_candles[-1][0]
-                        if last_c_date < today_dt and len(valid_candles) < 11:
-                            try:
-                                quote = await market_data_service.fetch_quote(audit.symbol)
-                                if quote and float(quote.get("ltp", 0) or 0) > 0:
-                                    ltp = float(quote["ltp"])
-                                    today_candle = {
-                                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                                        "open": float(quote.get("open") or ltp),
-                                        "high": float(quote.get("high") or ltp),
-                                        "low": float(quote.get("low") or ltp),
-                                        "close": ltp,
-                                        "volume": int(quote.get("volume") or 0)
+                        if last_c_date < today_dt and len(valid_candles) < 11 and curr_price > 0:
+                            # Advance day by day (skipping weekends) from last_c_date to today_dt
+                            cur_step = last_c_date + timedelta(days=1)
+                            while cur_step <= today_dt and len(valid_candles) < 11:
+                                if cur_step.weekday() < 5:  # Monday to Friday
+                                    is_today = (cur_step == today_dt)
+                                    step_close = curr_price if is_today else prev_close
+                                    step_open = float(quote.get("open") or prev_close) if is_today else prev_close
+                                    step_high = max(step_open, step_close)
+                                    step_low = min(step_open, step_close)
+                                    step_candle = {
+                                        "timestamp": datetime(cur_step.year, cur_step.month, cur_step.day, 10, 0, tzinfo=timezone.utc).isoformat(),
+                                        "open": step_open,
+                                        "high": step_high,
+                                        "low": step_low,
+                                        "close": step_close,
+                                        "volume": int(quote.get("volume") or 0) if is_today else 0
                                     }
-                                    valid_candles.append((today_dt, today_candle))
-                            except Exception as q_err:
-                                logger.debug(f"Live quote fallback for today's price failed: {q_err}")
-                    elif not valid_candles:
-                        # If zero candles could be fetched, try live quote for Day 1
-                        try:
-                            quote = await market_data_service.fetch_quote(audit.symbol)
-                            if quote and float(quote.get("ltp", 0) or 0) > 0:
-                                ltp = float(quote["ltp"])
-                                valid_candles.append((rec_date, {
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                    "open": float(quote.get("open") or ltp),
-                                    "high": float(quote.get("high") or ltp),
-                                    "low": float(quote.get("low") or ltp),
-                                    "close": ltp,
-                                    "volume": int(quote.get("volume") or 0)
-                                }))
-                        except Exception:
-                            pass
+                                    valid_candles.append((cur_step, step_candle))
+                                cur_step += timedelta(days=1)
+                    elif not valid_candles and curr_price > 0:
+                        # If zero historical candles could be fetched, populate trading days from rec_date to today_dt
+                        cur_step = rec_date
+                        while cur_step <= today_dt and len(valid_candles) < 11:
+                            if cur_step.weekday() < 5:
+                                is_today = (cur_step == today_dt)
+                                step_close = curr_price if is_today else prev_close
+                                step_open = float(quote.get("open") or prev_close) if is_today else prev_close
+                                step_candle = {
+                                    "timestamp": datetime(cur_step.year, cur_step.month, cur_step.day, 10, 0, tzinfo=timezone.utc).isoformat(),
+                                    "open": step_open,
+                                    "high": max(step_open, step_close),
+                                    "low": min(step_open, step_close),
+                                    "close": step_close,
+                                    "volume": int(quote.get("volume") or 0) if is_today else 0
+                                }
+                                valid_candles.append((cur_step, step_candle))
+                            cur_step += timedelta(days=1)
 
                     if not valid_candles:
                         continue
 
-                    # Sort chronologically
-                    valid_candles.sort(key=lambda x: x[0])
+                    # Deduplicate by calendar date and sort chronologically
+                    date_candle_dict = {}
+                    for c_date, c_data in valid_candles:
+                        date_candle_dict[c_date] = c_data
+                    valid_candles = sorted(date_candle_dict.items(), key=lambda x: x[0])
 
                     existing_price_map = {p.day_number: p for p in audit.daily_prices}
                     # Effective buy price: User's execution price if bought, else system recommendation price

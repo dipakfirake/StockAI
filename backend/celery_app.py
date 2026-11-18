@@ -73,12 +73,18 @@ celery_app.conf.beat_schedule = {
         "task": "backend.tasks.market_tasks.end_of_day_processing",
         "schedule": crontab(hour=10, minute=5),  # 15:35 IST = 10:05 UTC
     },
+    # Automated EOD Market Close Pipeline (15:35 IST / 10:05 UTC Mon-Fri):
+    # 1. Fresh Swing Screener scan -> 2. Auto-catalog high-score setups -> 3. Sync 11-Day Prices & Excel
+    "eod-swing-screener-and-audit-sync": {
+        "task": "backend.tasks.swing_audit_tasks.run_eod_screener_and_audit_sync",
+        "schedule": crontab(hour=10, minute=5, day_of_week="1-5"),
+    },
     # Auto Square-off Intraday: 15:20 IST
     "square-off-intraday": {
         "task": "backend.tasks.trading_tasks.square_off_intraday",
         "schedule": crontab(hour=9, minute=50),  # 15:20 IST = 09:50 UTC
     },
-    # Daily 11-Day Swing Trade Audit Sync: 15:45 IST (10:15 UTC) Mon-Fri
+    # Secondary Swing Trade Audit Sync: 15:45 IST (10:15 UTC) Mon-Fri
     "sync-swing-trade-audits": {
         "task": "backend.tasks.swing_audit_tasks.sync_swing_trade_audits",
         "schedule": crontab(hour=10, minute=15, day_of_week="1-5"),

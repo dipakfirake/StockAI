@@ -151,11 +151,17 @@ export default function SwingScreenerPage() {
   const handleSyncAudit = async () => {
     setSyncingAudit(true)
     try {
-      const res = await swingAuditApi.sync()
+      toast.info('Synchronizing Audit', 'Running fresh screener scan and evaluating 11-day price milestones...')
+      const res = await swingAuditApi.sync(true)
+      const cataloged = res.data.cataloged_count || 0
+      const updated = res.data.updated_count || 0
       toast.success(
         '11-Day Audit Synced!',
-        `Evaluated ${res.data.updated_count || 0} stocks | Win Rate: ${res.data.win_rate ?? 0}% | P&L: ₹${res.data.total_pnl_rupees ?? 0}`
+        `Evaluated ${updated} stocks (${cataloged} new cataloged) | Win Rate: ${res.data.win_rate ?? 0}% | P&L: ₹${res.data.total_pnl_rupees ?? 0}`
       )
+      // Refresh screener and archives to display latest state
+      fetchScreener(true)
+      fetchArchiveFiles()
     } catch (err: any) {
       console.error('Audit sync failed:', err)
       toast.error('Audit sync failed', err?.response?.data?.detail || err.message)

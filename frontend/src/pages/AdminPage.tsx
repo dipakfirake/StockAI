@@ -105,7 +105,7 @@ export default function AdminPage() {
   const handleAdminSyncAudit = async () => {
     setAuditSyncing(true);
     try {
-      const res = await swingAuditApi.sync();
+      const res = await swingAuditApi.sync(true);
       alert(`11-Day Audit Synchronized Successfully!\nEvaluated ${res.data.updated_count || 0} stocks\nWin Rate: ${res.data.win_rate ?? 0}%\nTotal P&L: ₹${res.data.total_pnl_rupees ?? 0}`);
       await fetchAuditData();
     } catch (err: any) {

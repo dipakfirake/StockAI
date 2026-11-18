@@ -599,3 +599,94 @@ async def test_swing_audit_api_files_and_specific_download(tmp_path):
             assert not_found_resp.status_code == 404
 
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_run_eod_screener_and_audit_sync_task():
+    """Verify Celery task run_eod_screener_and_audit_sync coordinates screener + auto-catalog + price sync."""
+    from backend.tasks.swing_audit_tasks import run_eod_screener_and_audit_sync
+
+    fake_screener_data = {
+        "buy_stocks": [
+            {
+                "symbol": "RELIANCE.NS",
+                "name": "Reliance Industries Ltd",
+                "action": "BUY",
+                "total_score": 85.0,
+                "trade_plan": {
+                    "entry_price": 1335.0,
+                    "target_price": 1400.0,
+                    "stop_loss": 1300.0,
+                    "target_1": 1380.0,
+                    "target_2": 1410.0,
+                    "reward_to_risk": 2.1
+                }
+            },
+            {
+                "symbol": "TCS.NS",
+                "name": "Tata Consultancy Services",
+                "action": "BUY",
+                "total_score": 62.0,  # Below 70 threshold; should NOT catalog
+                "trade_plan": {"entry_price": 2400.0, "target_price": 2500.0, "stop_loss": 2350.0}
+            }
+        ]
+    }
+
+    mock_sync_result = {
+        "status": "success",
+        "total_trades": 10,
+        "updated_count": 10,
+        "win_rate": 50.0,
+        "total_pnl_rupees": 5000.0
+    }
+
+    with patch("backend.services.screener.ScreenerService.run_screener", new=AsyncMock(return_value=fake_screener_data)), \
+         patch("backend.services.swing_audit_service.swing_audit_service.track_swing_trade", new=AsyncMock()) as mock_track, \
+         patch("backend.services.swing_audit_service.swing_audit_service.update_daily_prices", new=AsyncMock(return_value=mock_sync_result)), \
+         patch("backend.core.database.AsyncSessionLocal"):
+
+        result = run_eod_screener_and_audit_sync()
+        assert result["status"] == "success"
+        assert result["screener_candidates"] == 2
+        assert result["cataloged_count"] == 1
+        assert mock_track.call_count == 1
+        assert result["sync_result"]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_sync_audit_prices_endpoint_with_run_scan():
+    """Verify POST /api/swing-audit/sync?run_scan=true executes fresh scan step."""
+    from httpx import AsyncClient, ASGITransport
+    from backend.main import app
+    from backend.core.database import get_db
+
+    mock_db = AsyncMock()
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    fake_screener = {
+        "buy_stocks": [
+            {
+                "symbol": "INFY.NS",
+                "name": "Infosys",
+                "total_score": 75.0,
+                "trade_plan": {"entry_price": 1150.0, "target_price": 1220.0, "stop_loss": 1110.0}
+            }
+        ]
+    }
+
+    fake_sync = {"status": "success", "updated_count": 5, "win_rate": 60.0, "total_pnl_rupees": 3500.0}
+
+    with patch("backend.services.screener.ScreenerService.run_screener", new=AsyncMock(return_value=fake_screener)), \
+         patch("backend.services.swing_audit_service.swing_audit_service.track_swing_trade", new=AsyncMock()), \
+         patch("backend.services.swing_audit_service.swing_audit_service.update_daily_prices", new=AsyncMock(return_value=fake_sync)):
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/api/swing-audit/sync?run_scan=true")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "success"
+            assert data["cataloged_count"] == 1
+            assert data["updated_count"] == 5
+
+    app.dependency_overrides.clear()
