@@ -39,6 +39,8 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     worker_send_task_events=True,
     task_send_sent_event=True,
+    broker_heartbeat=30,
+    event_queue_expires=60,
 )
 
 # Beat schedule — periodic tasks

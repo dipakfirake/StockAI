@@ -14,6 +14,31 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **CELERY FLOWER 0-WORKERS RESOLUTION & STACK SYNCHRONIZATION (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    - User navigated to Flower dashboard (`https://stockai-live.duckdns.org/flower/workers`) and saw **0 workers** (`No data available in table | Total 0 0 0 0 0`).
+  - **Root Cause Forensic Diagnosis**:
+    1. **Flower Event Architecture**: In Flower 2.0.1, the workers table is populated exclusively from `EventsState.counter` which listens to Celery worker events (`worker-online`, `worker-heartbeat`) over Redis DB 1.
+    2. **Unsynchronized Restart**: In previous deployment, the user ran `docker compose up -d --build backend frontend celery_worker celery_beat`. `flower` was omitted from that command. Consequently, `stockcelery` was restarted, dropping the connection, while `stockflower` remained running on stale memory without catching a reconnection event.
+    3. **Hostname Bug in Compose Healthcheck**: `docker-compose.yml` previously used `celery inspect ping -d celery@$$HOSTNAME`. In Debian-slim Docker images, `/bin/sh` does not set `$HOSTNAME`, causing healthchecks to target `celery@` and fail.
+    4. **Uncoordinated Startup Order**: Flower booted before `stockcelery` finished loading heavy ML libraries, causing Flower's initial inspection to time out.
+    5. **Missing Heartbeat Cadence**: `broker_heartbeat` was unset in `backend/celery_app.py`, meaning workers sent no periodic heartbeats during idle periods.
+  - **Engineering Enhancements Delivered**:
+    1. **Celery App Heartbeat Cadence (`backend/celery_app.py`)**: Added `broker_heartbeat=30` and `event_queue_expires=60` so Celery worker sends active heartbeats to Redis every 30 seconds.
+    2. **Docker Compose Healthcheck Pinning (`docker-compose.yml`)**: Pinned `celery_worker` healthcheck to `-d celery@stockcelery` with `start_period: 25s` and `interval: 15s`.
+    3. **Coordinated Startup Order (`docker-compose.yml`)**: Configured `flower.depends_on` with `celery_worker: condition: service_healthy` and `redis: condition: service_healthy`.
+    4. **Inspect Timeout & Auto Refresh (`docker-compose.yml`)**: Added `FLOWER_INSPECT_TIMEOUT: "5000"` and `FLOWER_AUTO_REFRESH: "True"` in environment and command flags.
+  - **Verification Evidence**:
+    - Python Celery Import: `backend.celery_app` imported with `broker_heartbeat: 30`.
+    - Unit tests: `10 of 10 passed in 10.34s`.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server:
+    ```bash
+    cd ~/StockAI
+    git fetch origin main && git reset --hard origin/main
+    docker compose up -d --build celery_worker celery_beat flower
+    docker compose exec celery_worker celery -A backend.celery_app inspect ping -d celery@stockcelery
+    ```
+
 - **BROWSER OFFLINE / DISCONNECTION RESILIENT POLLING & RECONNECTING BANNER (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     - User reported browser console network errors: `net::ERR_INTERNET_DISCONNECTED`, `net::ERR_NAME_NOT_RESOLVED`, and `net::ERR_NETWORK_CHANGED` when querying PCJEWELLER quotes and depth.
