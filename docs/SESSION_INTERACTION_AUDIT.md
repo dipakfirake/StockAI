@@ -4248,6 +4248,24 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 90: Indicator Object Type Safety Hardening (`indicators.macd.toFixed` Elimination)
+- **Timestamp:** 2026-11-19 00:35:00 IST (19:05:00 UTC)
+- **User Prompt:**
+  `"ChartPage.tsx:1580 Uncaught TypeError: indicators.macd.toFixed is not a function at ChartPage (ChartPage.tsx:1580:196) ..."`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - In `backend/services/indicators.py`, `compute_all()` returns `macd` and `bb` as nested objects (`{ "macd": ..., "signal": ..., "histogram": ... }` and `{ "upper": ..., "middle": ..., "lower": ... }`).
+     - In `frontend/src/pages/ChartPage.tsx`, line 1580 attempted to call `indicators.macd.toFixed(2)` directly on the MACD dictionary object, causing React to crash during component render.
+  2. **Architectural Upgrades Implemented**:
+     - Built `getSafeIndicatorVal(val, path?, decimals?)` in `frontend/src/pages/ChartPage.tsx` to handle nested objects (`val.macd`, `val.value`, `val.upper`), scalar numbers, strings, nulls, and NaNs defensively.
+     - Extracted MACD value with `getSafeIndicatorVal(indicators?.macd, 'macd', 2)`.
+     - Extracted Bollinger Bands with `getSafeIndicatorVal(indicators?.bb?.upper ?? indicators?.bb_upper, undefined, 1)` and lower band.
+- **Verification Evidence**:
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 1m 9s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
+---
+
 ### Session Entry 89: Custom Multi-Select Indicator Engine, 1-Click Presets & TradingView-Style Active Chips Bar
 - **Timestamp:** 2026-11-19 00:30:00 IST (19:00:00 UTC)
 - **User Prompt:**
@@ -4268,5 +4286,23 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
      - **Enhanced Dropdown UI**: 320px wide modal with search input, indicator group tags, descriptions, live values, and full row click-to-toggle.
 - **Verification Evidence**:
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 41.71s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
+---
+
+### Session Entry 90: Indicator Object Type Safety Hardening (`indicators.macd.toFixed` Elimination)
+- **Timestamp:** 2026-11-19 00:35:00 IST (19:05:00 UTC)
+- **User Prompt:**
+  `"ChartPage.tsx:1580 Uncaught TypeError: indicators.macd.toFixed is not a function at ChartPage (ChartPage.tsx:1580:196) ..."`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - In `backend/services/indicators.py`, `compute_all()` returns `macd` and `bb` as nested objects (`{ "macd": ..., "signal": ..., "histogram": ... }` and `{ "upper": ..., "middle": ..., "lower": ... }`).
+     - In `frontend/src/pages/ChartPage.tsx`, line 1580 attempted to call `indicators.macd.toFixed(2)` directly on the MACD dictionary object, causing React to crash during component render.
+  2. **Architectural Upgrades Implemented**:
+     - Built `getSafeIndicatorVal(val, path?, decimals?)` in `frontend/src/pages/ChartPage.tsx` to handle nested objects (`val.macd`, `val.value`, `val.upper`), scalar numbers, strings, nulls, and NaNs defensively.
+     - Extracted MACD value with `getSafeIndicatorVal(indicators?.macd, 'macd', 2)`.
+     - Extracted Bollinger Bands with `getSafeIndicatorVal(indicators?.bb?.upper ?? indicators?.bb_upper, undefined, 1)` and lower band.
+- **Verification Evidence**:
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 1m 9s (exit code 0)**.
 - **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
 

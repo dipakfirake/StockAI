@@ -14,6 +14,19 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **INDICATOR VALUE TYPE SAFETY HARDENING (MACD OBJECT .toFixed RUNTIME FIX) (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Resolved**:
+    1. User reported runtime crash: `ChartPage.tsx:1580 Uncaught TypeError: indicators.macd.toFixed is not a function`.
+    2. Root cause: In `backend/services/indicators.py`, `compute_all` returns `macd` and `bb` as nested dictionaries (`{ "macd": ..., "signal": ..., "histogram": ... }` and `{ "upper": ..., "middle": ..., "lower": ... }`). In `frontend/src/pages/ChartPage.tsx`, line 1580 attempted to execute `indicators.macd.toFixed(2)` directly on the dictionary object, crashing React during render.
+    3. Remediations Implemented:
+       - Created robust polymorphic utility `getSafeIndicatorVal(val, path?, decimals?)` in `frontend/src/pages/ChartPage.tsx`.
+       - Safely handles nested dictionary structures (`val.macd`, `val.value`, `val.upper`), scalar numbers, strings, nulls, and NaNs without throwing runtime exceptions.
+       - Safely formats MACD line readout as `getSafeIndicatorVal(indicators?.macd, 'macd', 2)`.
+       - Safely formats Bollinger Bands readout as `getSafeIndicatorVal(indicators?.bb?.upper ?? indicators?.bb_upper, undefined, 1)` and lower band.
+  - **Verification Evidence**:
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 1m 9s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls latest commit on cloud server and rebuilds `frontend`.
+
 - **CUSTOM INDICATOR MULTI-SELECT ENGINE, 1-CLICK PRESETS & ACTIVE CHIP BAR (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Resolved**:
     1. User observed: "and if indicators are on then chart is seen to much messy instead of this do ont thing add indicators dropdown and in it we can add only 1 or multiple indicators of our choices also."

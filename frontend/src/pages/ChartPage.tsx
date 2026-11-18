@@ -1568,16 +1568,33 @@ export default function ChartPage() {
     }
   };
 
+  // Helper safely extracting numeric values from scalar or nested object indicators
+  const getSafeIndicatorVal = (val: any, path?: string, decimals: number = 2): string | null => {
+    if (val == null) return null;
+    let target = val;
+    if (path && typeof val === 'object') {
+      target = val[path];
+    } else if (typeof val === 'object') {
+      target = val.macd ?? val.value ?? val.upper ?? null;
+    }
+    const num = Number(target);
+    return !isNaN(num) && isFinite(num) ? num.toFixed(decimals) : null;
+  };
+
   const ALL_INDICATORS = [
-    { key: 'ema21', label: 'EMA 21', category: 'overlay', group: 'Moving Averages', color: '#f59e0b', desc: 'Pullback Base & Dynamic Support', val: indicators?.ema_21 ? indicators.ema_21.toFixed(2) : null },
-    { key: 'ema9', label: 'EMA 9', category: 'overlay', group: 'Moving Averages', color: '#3b82f6', desc: 'Fast Momentum & Short-Term Trend', val: indicators?.ema_9 ? indicators.ema_9.toFixed(2) : null },
-    { key: 'ema50', label: 'EMA 50', category: 'overlay', group: 'Moving Averages', color: '#8b5cf6', desc: 'Intermediate Trend & Golden/Death Cross', val: indicators?.ema_50 ? indicators.ema_50.toFixed(2) : null },
-    { key: 'ema200', label: 'EMA 200', category: 'overlay', group: 'Moving Averages', color: '#ec4899', desc: 'Long-Term Macro Institutional Line', val: indicators?.ema_200 ? indicators.ema_200.toFixed(2) : null },
-    { key: 'vwap', label: 'VWAP', category: 'overlay', group: 'Volume Weighted', color: '#d946ef', desc: 'Volume Weighted Average Price Benchmark', val: indicators?.vwap ? Number(indicators.vwap).toFixed(2) : null },
-    { key: 'supertrend', label: 'Supertrend', category: 'overlay', group: 'Trend Following', color: '#10b981', desc: 'Dynamic Trailing Stop & Direction', val: indicators?.supertrend ? (typeof indicators.supertrend === 'object' ? Number(indicators.supertrend.value || 0).toFixed(2) : Number(indicators.supertrend).toFixed(2)) : null },
-    { key: 'bb', label: 'Bollinger Bands', category: 'overlay', group: 'Volatility', color: '#06b6d4', desc: '20-SMA Upper/Lower Volatility Bands', val: indicators?.bb_upper ? `${indicators.bb_upper.toFixed(1)} / ${indicators.bb_lower?.toFixed(1)}` : null },
-    { key: 'rsi', label: 'RSI (14)', category: 'subchart', group: 'Oscillators', color: '#a855f7', desc: 'Relative Strength Index (30 Oversold / 70 Overbought)', val: indicators?.rsi_14 ? indicators.rsi_14.toFixed(1) : null },
-    { key: 'macd', label: 'MACD (12, 26, 9)', category: 'subchart', group: 'Oscillators', color: '#3b82f6', desc: 'Moving Average Convergence Divergence', val: indicators?.macd ? indicators.macd.toFixed(2) : null },
+    { key: 'ema21', label: 'EMA 21', category: 'overlay', group: 'Moving Averages', color: '#f59e0b', desc: 'Pullback Base & Dynamic Support', val: getSafeIndicatorVal(indicators?.ema_21, undefined, 2) },
+    { key: 'ema9', label: 'EMA 9', category: 'overlay', group: 'Moving Averages', color: '#3b82f6', desc: 'Fast Momentum & Short-Term Trend', val: getSafeIndicatorVal(indicators?.ema_9, undefined, 2) },
+    { key: 'ema50', label: 'EMA 50', category: 'overlay', group: 'Moving Averages', color: '#8b5cf6', desc: 'Intermediate Trend & Golden/Death Cross', val: getSafeIndicatorVal(indicators?.ema_50, undefined, 2) },
+    { key: 'ema200', label: 'EMA 200', category: 'overlay', group: 'Moving Averages', color: '#ec4899', desc: 'Long-Term Macro Institutional Line', val: getSafeIndicatorVal(indicators?.ema_200, undefined, 2) },
+    { key: 'vwap', label: 'VWAP', category: 'overlay', group: 'Volume Weighted', color: '#d946ef', desc: 'Volume Weighted Average Price Benchmark', val: getSafeIndicatorVal(indicators?.vwap, undefined, 2) },
+    { key: 'supertrend', label: 'Supertrend', category: 'overlay', group: 'Trend Following', color: '#10b981', desc: 'Dynamic Trailing Stop & Direction', val: indicators?.supertrend ? (typeof indicators.supertrend === 'object' ? getSafeIndicatorVal(indicators.supertrend.value, undefined, 2) : getSafeIndicatorVal(indicators.supertrend, undefined, 2)) : null },
+    { key: 'bb', label: 'Bollinger Bands', category: 'overlay', group: 'Volatility', color: '#06b6d4', desc: '20-SMA Upper/Lower Volatility Bands', val: (() => {
+      const up = getSafeIndicatorVal(indicators?.bb?.upper ?? indicators?.bb_upper, undefined, 1);
+      const low = getSafeIndicatorVal(indicators?.bb?.lower ?? indicators?.bb_lower, undefined, 1);
+      return up && low ? `${up} / ${low}` : up || low || null;
+    })() },
+    { key: 'rsi', label: 'RSI (14)', category: 'subchart', group: 'Oscillators', color: '#a855f7', desc: 'Relative Strength Index (30 Oversold / 70 Overbought)', val: getSafeIndicatorVal(indicators?.rsi_14, undefined, 1) },
+    { key: 'macd', label: 'MACD (12, 26, 9)', category: 'subchart', group: 'Oscillators', color: '#3b82f6', desc: 'Moving Average Convergence Divergence', val: getSafeIndicatorVal(indicators?.macd, 'macd', 2) },
     { key: 'volume', label: 'Volume Histogram', category: 'subchart', group: 'Volume', color: '#26a69a', desc: 'Trading Volume with Up/Down Coloring', val: null },
   ];
 
