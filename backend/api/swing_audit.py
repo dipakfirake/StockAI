@@ -160,7 +160,10 @@ async def download_latest_audit_excel(
     """
     Download the latest 11-day audit Excel workbook (.xlsx) with formatting and formulas.
     Always generates or validates an up-to-date workbook before streaming.
+    Streams file bytes directly (never cached by nginx or browser).
     """
+    import io
+    from fastapi.responses import Response
     try:
         cycle = await swing_audit_service.get_or_create_active_cycle(db)
         if not cycle:
@@ -171,6 +174,10 @@ async def download_latest_audit_excel(
             await swing_audit_service.update_daily_prices(db, cycle.id)
         except Exception as sync_err:
             logger.warning(f"Auto-sync during audit Excel download encountered warning: {sync_err}")
+
+        # Expire all SQLAlchemy identity-map caches so generate_excel_workbook sees freshly committed rows
+        await db.commit()
+        db.expire_all()
 
         # Always generate fresh workbook to reflect up-to-the-minute trade prices, trailing stops and PnL
         excel_path_obj = await swing_audit_service.generate_excel_workbook(db, cycle.id)
@@ -183,8 +190,8 @@ async def download_latest_audit_excel(
 
         # Defensive fallback: check target filename directly in audit directory
         if not excel_path or not os.path.exists(excel_path):
-            filename = f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
-            fallback_file = get_audit_dir() / filename
+            fname_fallback = f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
+            fallback_file = get_audit_dir() / fname_fallback
             if fallback_file.exists():
                 excel_path = str(fallback_file)
 
@@ -194,12 +201,22 @@ async def download_latest_audit_excel(
                 detail=f"Audit Excel file for cycle {cycle.cycle_number} ({cycle.from_date} to {cycle.to_date}) could not be generated or found."
             )
 
+        # Read file bytes directly into memory and return as a streaming Response.
+        # This bypasses nginx static-file caching (which would serve the old file)
+        # and forces the browser to always download the freshly generated workbook.
+        with open(excel_path, "rb") as f:
+            file_bytes = f.read()
+
         filename = os.path.basename(excel_path)
-        return FileResponse(
-            path=excel_path,
+        return Response(
+            content=file_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=filename,
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
         )
     except HTTPException:
         raise
