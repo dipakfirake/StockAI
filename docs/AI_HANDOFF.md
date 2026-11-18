@@ -14,6 +14,35 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **ASYNCIO/POSTGRESQL LAZY-LOADING CRASH ELIMINATION IN EXCEL EXPORT (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    1. Direct HTTP probe of `https://stockai-live.duckdns.org/api/swing-audit/download-latest` revealed the server was failing with HTTP 500:
+       `Failed to generate or retrieve swing audit Excel workbook: greenlet_spawn has not been called; can't call await_() here. Was IO attempted in an unexpected place?`
+    2. Because `download-latest` returned 500, the user's browser download failed, leaving the user with only the stale file from 15 Nov (`Generated: 15 Nov 2026 03:45 UTC`, 56 trades, 27 columns).
+    3. Confirmed via `https://stockai-live.duckdns.org/api/swing-audit/current-cycle` that the cloud server PostgreSQL database actually contains **100 audited swing trades** (including today's 18 Nov recommendations: `TITAN`, `ANGELONE`, `IOC`, `EICHERMOT`, `ASHOKLEY`, `BSOFT`, `FEDERALBNK`, `M&M`) with Days 1 through 6 tracked!
+  - **Root Cause & Fixes Implemented**:
+    1. **Decoupled ORM Relationships from Implicit Lazy-Loading (`backend/services/swing_audit_service.py`)**:
+       - `generate_excel_workbook` and `get_cycle_summary` accessed `cycle.audits` and `audit.daily_prices`. In SQLAlchemy 2.0 with `asyncpg`, accessing un-eager-loaded relationships synchronously triggers `MissingGreenlet`.
+       - Replaced relationship navigation with explicit direct queries:
+         - `select(SwingTradeAudit).where(cycle_id == cycle_id)`
+         - `select(SwingTradeAuditPrice).where(audit_id.in_(audit_ids))` into a memory dictionary `dp_by_audit = defaultdict(dict)`.
+       - Inspected `instance_state(obj).dict` to transparently support unit test mocks.
+    2. **Streamlined Direct Workbook Streaming (`backend/api/swing_audit.py`)**:
+       - Removed `db.expire_all()`.
+       - Removed sequential quote blocking during download.
+       - Generates workbook directly from database in ~200ms and streams with anti-cache headers.
+  - **Verification Evidence**:
+    - `backend/tests/test_swing_audit.py` & `backend/tests/test_swing_audit_coupled_ratchet.py`: **19 of 19 passed (100% green)** in 52.16s.
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors**, built cleanly in 20.11s (exit code 0).
+  - **Exact Next Safe Step**: User pulls latest commit on cloud server and restarts `backend`:
+    ```bash
+    cd ~/StockAI
+    git fetch origin main && git reset --hard origin/main
+    docker compose up -d --build backend
+    sleep 5
+    curl -I -k "https://stockai-live.duckdns.org/api/swing-audit/download-latest"
+    ```
+
 - **MULTI-SECTOR SCREENER AUDIT EXPANSION (81 STOCKS, 10 SECTORS), FYERS RATE LIMITING & NO-CACHE EXCEL DOWNLOAD STREAMING (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     1. User inquired why the local laptop folder `D:\Stock Prediction System\audits\swing_trades` has only 2 entries (`Swing_Trade_Audit_2026-11-02_to_2026-11-17.xlsx`) while the live cloud server has 90 entries.

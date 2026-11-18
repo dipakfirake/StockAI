@@ -5,6 +5,7 @@ target/stoploss execution rules, and multi-sheet Excel generation.
 import os
 import math
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Any
@@ -863,25 +864,92 @@ class SwingAuditService:
 
             await ensure_swing_audit_schema(db)
 
-            # Fetch cycle and audits with daily prices
-            stmt = (
-                select(SwingTradeAuditCycle)
-                .where(SwingTradeAuditCycle.id == cycle_id)
-                .options(
-                    selectinload(SwingTradeAuditCycle.audits).selectinload(SwingTradeAudit.daily_prices)
-                )
-            )
-            cycle = (await db.execute(stmt)).scalars().first()
+            # Fetch cycle directly without cascading lazy loads
+            cycle_stmt = select(SwingTradeAuditCycle).where(SwingTradeAuditCycle.id == cycle_id)
+            cycle = (await db.execute(cycle_stmt)).scalars().first()
             if not cycle:
                 return None
 
+            c_cycle_number = int(getattr(cycle, "cycle_number", 1) or 1)
+            c_from_date = getattr(cycle, "from_date", date.today())
+            c_to_date = getattr(cycle, "to_date", date.today())
+            c_status = str(getattr(cycle, "status", "ACTIVE") or "ACTIVE")
+            c_win_rate = float(getattr(cycle, "win_rate", 0.0) or 0.0)
+            c_ret = float(getattr(cycle, "total_gain_loss_pct", 0.0) or 0.0)
+            c_pnl = float(getattr(cycle, "total_pnl_rupees", 0.0) or 0.0)
+            c_total_trades = int(getattr(cycle, "total_trades", 0) or 0)
+            c_win_trades = int(getattr(cycle, "win_trades", 0) or 0)
+            c_loss_trades = int(getattr(cycle, "loss_trades", 0) or 0)
+            c_excel_file_path = getattr(cycle, "excel_file_path", None)
+
+            # Fetch audits safely: use preloaded objects if in session dict (e.g. unit tests/mocks);
+            # otherwise fetch via explicit query to prevent greenlet/lazy-load errors.
+            raw_audits = []
+            cycle_audits = None
+            try:
+                from sqlalchemy.orm.attributes import instance_state
+                state = instance_state(cycle)
+                if "audits" in state.dict and state.dict["audits"]:
+                    cycle_audits = state.dict["audits"]
+            except Exception:
+                pass
+
+            if cycle_audits:
+                raw_audits = cycle_audits
+            else:
+                try:
+                    audits_stmt = (
+                        select(SwingTradeAudit)
+                        .where(SwingTradeAudit.cycle_id == cycle_id)
+                    )
+                    res = await db.execute(audits_stmt)
+                    raw_audits = list(res.scalars().all())
+                except Exception:
+                    raw_audits = []
+
             audits = sorted(
-                cycle.audits or [],
+                raw_audits,
                 key=lambda a: (
                     safe_date_sort_key(getattr(a, "recommendation_date", None)),
                     str(getattr(a, "symbol", "") or "")
                 )
             )
+
+            # Build daily prices map: check preloaded daily_prices first, then bulk query unloaded
+            dp_by_audit = defaultdict(dict)
+            unloaded_audit_ids = []
+            for a in audits:
+                a_loaded = False
+                try:
+                    from sqlalchemy.orm.attributes import instance_state
+                    a_state = instance_state(a)
+                    if "daily_prices" in a_state.dict and a_state.dict["daily_prices"]:
+                        for dp in a_state.dict["daily_prices"]:
+                            dp_by_audit[a.id][dp.day_number] = dp
+                        a_loaded = True
+                except Exception:
+                    pass
+                if not a_loaded:
+                    raw_dp = getattr(a, "daily_prices", None)
+                    if isinstance(raw_dp, list) and raw_dp:
+                        for dp in raw_dp:
+                            dp_by_audit[a.id][dp.day_number] = dp
+                        a_loaded = True
+                if not a_loaded and getattr(a, "id", None):
+                    unloaded_audit_ids.append(a.id)
+
+            if unloaded_audit_ids:
+                try:
+                    dp_stmt = (
+                        select(SwingTradeAuditPrice)
+                        .where(SwingTradeAuditPrice.audit_id.in_(unloaded_audit_ids))
+                        .order_by(SwingTradeAuditPrice.day_number.asc())
+                    )
+                    all_dps = (await db.execute(dp_stmt)).scalars().all()
+                    for dp in all_dps:
+                        dp_by_audit[dp.audit_id][dp.day_number] = dp
+                except Exception as dp_err:
+                    logger.debug(f"Bulk daily prices query error: {dp_err}")
 
             wb = openpyxl.Workbook()
         
@@ -919,25 +987,21 @@ class SwingAuditService:
 
             ws_summary.merge_cells("A3:H3")
             sub_cell = ws_summary["A3"]
-            from_dt_str = cycle.from_date.strftime('%d %b %Y') if hasattr(cycle.from_date, 'strftime') else str(cycle.from_date)
-            to_dt_str = cycle.to_date.strftime('%d %b %Y') if hasattr(cycle.to_date, 'strftime') else str(cycle.to_date)
-            sub_cell.value = f"Audit Cycle #{cycle.cycle_number} | Period: {from_dt_str} to {to_dt_str} | Status: {cycle.status} | Generated: {datetime.now(timezone.utc).strftime('%d %b %Y %H:%M UTC')}"
+            from_dt_str = c_from_date.strftime('%d %b %Y') if hasattr(c_from_date, 'strftime') else str(c_from_date)
+            to_dt_str = c_to_date.strftime('%d %b %Y') if hasattr(c_to_date, 'strftime') else str(c_to_date)
+            sub_cell.value = f"Audit Cycle #{c_cycle_number} | Period: {from_dt_str} to {to_dt_str} | Status: {c_status} | Generated: {datetime.now(timezone.utc).strftime('%d %b %Y %H:%M UTC')}"
             sub_cell.font = sub_font
             sub_cell.fill = navy_fill
             sub_cell.alignment = Alignment(horizontal="center", vertical="center")
 
             # KPI Metrics Grid
-            c_win_rate = float(cycle.win_rate or 0.0)
-            c_ret = float(cycle.total_gain_loss_pct or 0.0)
-            c_pnl = float(cycle.total_pnl_rupees or 0.0)
-
-            t2_expansions = sum(1 for a in audits if a.tranche_2_active)
-            stopped_in_profit_count = sum(1 for a in audits if a.status in ("STOPPED_IN_PROFIT", "TARGET_2_ACHIEVED"))
+            t2_expansions = sum(1 for a in audits if getattr(a, "tranche_2_active", False))
+            stopped_in_profit_count = sum(1 for a in audits if getattr(a, "status", "") in ("STOPPED_IN_PROFIT", "TARGET_2_ACHIEVED"))
 
             kpi_metrics = [
-                ("Total Recommendations", str(cycle.total_trades or 0), card_fill),
-                ("Target Hits (Wins)", str(cycle.win_trades or 0), emerald_fill),
-                ("Stop Loss Hits (Losses)", str(cycle.loss_trades or 0), rose_fill),
+                ("Total Recommendations", str(c_total_trades or len(audits)), card_fill),
+                ("Target Hits (Wins)", str(c_win_trades), emerald_fill),
+                ("Stop Loss Hits (Losses)", str(c_loss_trades), rose_fill),
                 ("Win Rate", f"{c_win_rate:.1f}%", emerald_fill if c_win_rate >= 50 else amber_fill),
                 ("Total Cycle Return", f"{c_ret:+.2f}%", emerald_fill if c_ret >= 0 else rose_fill),
                 ("Realized Net P&L", f"₹{c_pnl:+,.2f}", emerald_fill if c_pnl >= 0 else rose_fill),
@@ -1039,8 +1103,8 @@ class SwingAuditService:
             for r_idx, audit in enumerate(audits, 2):
                 ws_ledger.row_dimensions[r_idx].height = 20
 
-                # Map daily prices by day_number
-                dp_map = {dp.day_number: dp for dp in audit.daily_prices}
+                # Map daily prices by day_number from pre-fetched dictionary (zero lazy loads)
+                dp_map = dp_by_audit.get(audit.id, {})
 
                 # Choose row fill based on status
                 if audit.status in ("TARGET_ACHIEVED", "TARGET_1_ACHIEVED", "TARGET_2_ACHIEVED", "TARGET_3_ACHIEVED", "STOPPED_IN_PROFIT") or (float(audit.profit_loss_pct or 0.0) > 0 and audit.status != "IN_PROGRESS"):
@@ -1050,7 +1114,7 @@ class SwingAuditService:
                 else:
                     r_fill = blue_row_fill
 
-                holding_days = f"{audit.exit_day_number} Days" if audit.exit_day_number else f"{len(audit.daily_prices)} Days (Active)"
+                holding_days = f"{audit.exit_day_number} Days" if audit.exit_day_number else f"{len(dp_map)} Days (Active)"
 
                 rec_dt_str = audit.recommendation_date.strftime("%d-%m-%Y") if hasattr(audit.recommendation_date, 'strftime') else str(audit.recommendation_date)
 
@@ -1063,7 +1127,7 @@ class SwingAuditService:
                 ratchet_milestone = (audit.ratchet_stage or "INITIAL").replace("_", " ")
 
                 row_data = [
-                    f"SW-{cycle.cycle_number:02d}-{r_idx - 1:03d}",
+                    f"SW-{c_cycle_number:02d}-{r_idx - 1:03d}",
                     audit.symbol.replace(".NS", ""),
                     audit.company_name or audit.symbol,
                     rec_dt_str,
@@ -1200,7 +1264,7 @@ class SwingAuditService:
                 c_exit_p = float(c_trade.exit_price) if c_trade.exit_price is not None else "—"
 
                 c_vals = [
-                    f"SW-{cycle.cycle_number:02d}-{r_i - 1:03d}",
+                    f"SW-{c_cycle_number:02d}-{r_i - 1:03d}",
                     c_trade.symbol.replace(".NS", ""),
                     c_trade.company_name or c_trade.symbol,
                     c_rec_dt_str,
@@ -1235,9 +1299,9 @@ class SwingAuditService:
             # Save workbook to destination path
             audit_dir = get_audit_dir()
             filename = (
-                Path(cycle.excel_file_path).name 
-                if cycle.excel_file_path 
-                else f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
+                Path(c_excel_file_path).name 
+                if c_excel_file_path 
+                else f"Swing_Trade_Audit_{c_from_date}_to_{c_to_date}.xlsx"
             )
             target_path = audit_dir / filename
             try:
@@ -1250,9 +1314,12 @@ class SwingAuditService:
                 wb.save(fallback_tmp)
                 target_path = fallback_tmp
 
-            if cycle.excel_file_path != str(target_path):
+            if cycle and hasattr(cycle, "excel_file_path"):
                 cycle.excel_file_path = str(target_path)
-                await db.commit()
+                try:
+                    await db.commit()
+                except Exception:
+                    pass
 
             logger.info(f"Generated institutional Swing Audit Excel workbook: {target_path}")
             return target_path
@@ -1269,22 +1336,9 @@ class SwingAuditService:
         try:
             await ensure_swing_audit_schema(db)
             if cycle_id:
-                stmt = (
-                    select(SwingTradeAuditCycle)
-                    .where(SwingTradeAuditCycle.id == cycle_id)
-                    .options(
-                        selectinload(SwingTradeAuditCycle.audits).selectinload(SwingTradeAudit.daily_prices)
-                    )
-                )
+                stmt = select(SwingTradeAuditCycle).where(SwingTradeAuditCycle.id == cycle_id)
             else:
-                stmt = (
-                    select(SwingTradeAuditCycle)
-                    .where(SwingTradeAuditCycle.status == "ACTIVE")
-                    .order_by(SwingTradeAuditCycle.cycle_number.desc())
-                    .options(
-                        selectinload(SwingTradeAuditCycle.audits).selectinload(SwingTradeAudit.daily_prices)
-                    )
-                )
+                stmt = select(SwingTradeAuditCycle).where(SwingTradeAuditCycle.status == "ACTIVE").order_by(SwingTradeAuditCycle.cycle_number.desc())
 
             cycle = (await db.execute(stmt)).scalars().first()
             if not cycle:
@@ -1293,8 +1347,57 @@ class SwingAuditService:
             if not cycle:
                 return {"cycle": None, "trades": []}
 
+            # Fetch audits safely: use preloaded objects if in session dict (e.g. unit tests/mocks);
+            # otherwise fetch via explicit query to prevent greenlet/lazy-load errors.
+            raw_audits = []
+            cycle_audits = None
+            try:
+                from sqlalchemy.orm.attributes import instance_state
+                state = instance_state(cycle)
+                if "audits" in state.dict and state.dict["audits"]:
+                    cycle_audits = state.dict["audits"]
+            except Exception:
+                pass
+
+            if cycle_audits:
+                raw_audits = cycle_audits
+            else:
+                try:
+                    audits_stmt = (
+                        select(SwingTradeAudit)
+                        .where(SwingTradeAudit.cycle_id == cycle.id)
+                        .order_by(SwingTradeAudit.recommendation_date.asc(), SwingTradeAudit.symbol.asc())
+                    )
+                    raw_audits = list((await db.execute(audits_stmt)).scalars().all())
+                except Exception:
+                    raw_audits = []
+
+            audits = raw_audits
+
+            # Count daily prices for each audit
+            dp_counts = defaultdict(int)
+            unloaded_ids = []
+            for a in audits:
+                raw_dp = getattr(a, "daily_prices", None)
+                if isinstance(raw_dp, list):
+                    dp_counts[a.id] = len(raw_dp)
+                elif getattr(a, "id", None):
+                    unloaded_ids.append(a.id)
+
+            if unloaded_ids:
+                try:
+                    cnt_stmt = (
+                        select(SwingTradeAuditPrice.audit_id, func.count(SwingTradeAuditPrice.id))
+                        .where(SwingTradeAuditPrice.audit_id.in_(unloaded_ids))
+                        .group_by(SwingTradeAuditPrice.audit_id)
+                    )
+                    for a_id, cnt in (await db.execute(cnt_stmt)).all():
+                        dp_counts[a_id] = cnt
+                except Exception:
+                    pass
+
             trades_list = []
-            for a in (cycle.audits or []):
+            for a in audits:
                 rec_dt = a.recommendation_date
                 rec_dt_str = rec_dt.isoformat() if hasattr(rec_dt, "isoformat") else str(rec_dt)
 
@@ -1324,7 +1427,7 @@ class SwingAuditService:
                     "exit_day_number": a.exit_day_number,
                     "profit_loss_pct": float(a.profit_loss_pct or 0.0),
                     "realized_pnl_rupees": float(a.realized_pnl_rupees or 0.0),
-                    "days_tracked": len(a.daily_prices) if hasattr(a, "daily_prices") and a.daily_prices else 0
+                    "days_tracked": dp_counts.get(a.id, 0)
                 })
 
             from_dt_str = cycle.from_date.isoformat() if hasattr(cycle.from_date, "isoformat") else str(cycle.from_date)

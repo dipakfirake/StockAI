@@ -160,39 +160,34 @@ async def download_latest_audit_excel(
 ):
     """
     Download the latest 11-day audit Excel workbook (.xlsx) with formatting and formulas.
-    Always generates or validates an up-to-date workbook before streaming.
-    Streams file bytes directly (never cached by nginx or browser).
+    Always generates an up-to-date workbook directly from active database state before streaming.
+    Streams file bytes directly with anti-cache headers.
     Supports HEAD method for uptime monitors, curl -I, and health probes.
     """
-    import io
     from fastapi.responses import Response
     try:
         cycle = await swing_audit_service.get_or_create_active_cycle(db)
         if not cycle:
             raise HTTPException(status_code=404, detail="No active swing audit cycle found.")
 
-        # Actively synchronize daily price snapshots with latest live market data before workbook export
-        try:
-            await swing_audit_service.update_daily_prices(db, cycle.id)
-        except Exception as sync_err:
-            logger.warning(f"Auto-sync during audit Excel download encountered warning: {sync_err}")
+        cycle_id = cycle.id
+        from_date_str = str(cycle.from_date)
+        to_date_str = str(cycle.to_date)
+        cycle_num = int(getattr(cycle, "cycle_number", 1) or 1)
+        cached_excel_path = getattr(cycle, "excel_file_path", None)
 
-        # Expire all SQLAlchemy identity-map caches so generate_excel_workbook sees freshly committed rows
-        await db.commit()
-        db.expire_all()
-
-        # Always generate fresh workbook to reflect up-to-the-minute trade prices, trailing stops and PnL
-        excel_path_obj = await swing_audit_service.generate_excel_workbook(db, cycle.id)
+        # Fast direct generation of workbook directly from active database state (zero lazy loads)
+        excel_path_obj = await swing_audit_service.generate_excel_workbook(db, cycle_id)
         excel_path = str(excel_path_obj) if excel_path_obj else None
 
         # Check existing cycle.excel_file_path if generator returned None
         if not excel_path or not os.path.exists(excel_path):
-            if cycle.excel_file_path and os.path.exists(cycle.excel_file_path):
-                excel_path = cycle.excel_file_path
+            if cached_excel_path and os.path.exists(cached_excel_path):
+                excel_path = cached_excel_path
 
         # Defensive fallback: check target filename directly in audit directory
         if not excel_path or not os.path.exists(excel_path):
-            fname_fallback = f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
+            fname_fallback = f"Swing_Trade_Audit_{from_date_str}_to_{to_date_str}.xlsx"
             fallback_file = get_audit_dir() / fname_fallback
             if fallback_file.exists():
                 excel_path = str(fallback_file)
@@ -200,7 +195,7 @@ async def download_latest_audit_excel(
         if not excel_path or not os.path.exists(excel_path):
             raise HTTPException(
                 status_code=404,
-                detail=f"Audit Excel file for cycle {cycle.cycle_number} ({cycle.from_date} to {cycle.to_date}) could not be generated or found."
+                detail=f"Audit Excel file for cycle {cycle_num} ({from_date_str} to {to_date_str}) could not be generated or found."
             )
 
         # Read file bytes directly into memory and return as a streaming Response.
