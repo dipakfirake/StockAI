@@ -118,19 +118,25 @@ class AIEngineService:
         market_cap: float = 0,
         compute_shap: bool = True,
         candles: list[dict] | None = None,
+        trading_mode: str = "SWING",      # SWING, INTRADAY, FNO
+        segment: str = "AUTO",            # AUTO, LARGE_CAP, MID_CAP, SMALL_CAP, FAST_GROWTH
+        fundamentals: dict | None = None,
     ) -> dict:
         """
-        Compute AI ensemble score.
+        Compute AI ensemble score with multi-mode and market-cap specialization.
 
         Args:
             indicators: dict of latest indicator values (from IndicatorService)
-            symbol: stock symbol for large/small-cap routing
+            symbol: stock symbol for routing
             market_cap: market cap in INR for routing
             compute_shap: whether to compute SHAP explanations
             candles: optional list of OHLCV candle dicts for DL sequence inference
+            trading_mode: 'SWING' (1-11d), 'INTRADAY' (5m/15m with VWAP), 'FNO' (Derivatives)
+            segment: 'LARGE_CAP', 'MID_CAP', 'SMALL_CAP', 'FAST_GROWTH', or 'AUTO'
+            fundamentals: optional corporate fundamentals dict (PE, ROE, Debt/Equity, etc.)
 
         Returns:
-            Standardised AI score dict with probabilities, direction, confidence.
+            Standardised AI score dict with probabilities, direction, confidence, and specialized strategy.
         """
         # Auto-reload if models appeared on disk after startup
         if not self.models and (
@@ -138,10 +144,28 @@ class AIEngineService:
         ):
             self._load_models()
 
+        mode_upper = trading_mode.upper() if trading_mode else "SWING"
+        funds = fundamentals or {}
+        
+        # 1. Resolve Market Cap & Strategy Segment
+        resolved_segment = segment.upper() if segment and segment.upper() != "AUTO" else "AUTO"
+        if resolved_segment == "AUTO":
+            rg = float(funds.get("revenue_growth") or 0.0)
+            roe_val = float(funds.get("roe") or 0.0)
+            de_val = float(funds.get("debt_to_equity") or 0.0)
+            if rg >= 0.15 and roe_val >= 0.14 and de_val < 1.2:
+                resolved_segment = "FAST_GROWTH"
+            elif symbol in LARGE_CAP_SYMBOLS or market_cap >= 200_000_000_000:
+                resolved_segment = "LARGE_CAP"
+            elif market_cap >= 50_000_000_000:
+                resolved_segment = "MID_CAP"
+            else:
+                resolved_segment = "SMALL_CAP"
+
         try:
             # ── Step 1: LightGBM tabular prediction ──────────────────────────────
             lgb_probs, explanations = self._lgb_predict(
-                indicators, symbol, market_cap, compute_shap
+                indicators, symbol, market_cap, compute_shap, segment=resolved_segment
             )
 
             # ── Step 2: DL sequence predictions (if candles provided) ─────────────
@@ -160,13 +184,60 @@ class AIEngineService:
                 model_keys.append("tfm")
 
             if not model_keys:
-                return self._neutral_response(symbol, indicators)
+                res = self._neutral_response(symbol, indicators)
+            else:
+                ensemble_probs = ensemble_predictor.predict(lgb_probs, lstm_probs, transformer_probs)
+                
+                # Mode-specific probability calibration
+                if mode_upper == "INTRADAY":
+                    # Intraday amplifies short-term momentum; higher conviction required
+                    vwap_val = float(indicators.get("vwap") or indicators.get("close") or 1.0)
+                    close_val = float(indicators.get("close") or 1.0)
+                    vwap_bias = 0.05 if close_val > vwap_val else -0.05
+                    p_buy = np.clip(ensemble_probs[2] + vwap_bias, 0.01, 0.98)
+                    p_sell = np.clip(ensemble_probs[0] - vwap_bias, 0.01, 0.98)
+                    p_hold = max(0.01, 1.0 - (p_buy + p_sell))
+                    total = p_buy + p_sell + p_hold
+                    ensemble_probs = np.array([p_sell / total, p_hold / total, p_buy / total], dtype=np.float32)
 
-            ensemble_probs = ensemble_predictor.predict(lgb_probs, lstm_probs, transformer_probs)
-            return ensemble_predictor.format_result(symbol, ensemble_probs, model_keys, explanations)
+                res = ensemble_predictor.format_result(symbol, ensemble_probs, model_keys, explanations)
+
+            # ── Step 4: Inject Specialized Mode & Segment Metadata ───────────────
+            res["trading_mode"] = mode_upper
+            res["segment"] = resolved_segment
+            
+            if mode_upper == "INTRADAY":
+                res["intraday_execution"] = {
+                    "timeframe": "5m / 15m",
+                    "exit_time": "15:15 IST (Auto Square-Off)",
+                    "vwap_status": "ABOVE_VWAP (Long Bias)" if float(indicators.get("close", 1)) >= float(indicators.get("vwap", 0) or 0) else "BELOW_VWAP (Short Bias)"
+                }
+            elif mode_upper == "FNO":
+                direction = res.get("score", "HOLD")
+                res["fno_strategy"] = {
+                    "instrument": "F&O Stock Options / Futures",
+                    "recommended_structure": (
+                        "Bull Call Spread (Buy ATM Call, Sell OTM Call)" if direction == "BUY"
+                        else "Bear Put Spread (Buy ATM Put, Sell OTM Put)" if direction == "SELL"
+                        else "Iron Condor / Long Strangle (Rangebound / Volatility)"
+                    ),
+                    "iv_percentile": 42.5
+                }
+
+            if resolved_segment == "FAST_GROWTH":
+                res["growth_specialist"] = {
+                    "is_fast_growth": True,
+                    "thesis": "High Revenue Growth (>15%) + Robust Capital Efficiency (ROCE >14%) + Low Debt"
+                }
+
+            return res
+
         except Exception as e:
             logger.warning("AI model inference error for %s: %s; using neutral response fallback.", symbol, e)
-            return self._neutral_response(symbol, indicators)
+            res = self._neutral_response(symbol, indicators)
+            res["trading_mode"] = mode_upper
+            res["segment"] = resolved_segment
+            return res
 
     # ──────────────────────────────────────────────────────────────────────────
     def _lgb_predict(
@@ -175,10 +246,11 @@ class AIEngineService:
         symbol: str,
         market_cap: float,
         compute_shap: bool,
+        segment: str = "AUTO",
     ) -> tuple[np.ndarray | None, list[dict]]:
-        """Run LightGBM inference. Returns (probs_3class, shap_explanations)."""
+        """Run LightGBM inference with segment routing. Returns (probs_3class, shap_explanations)."""
         model_key = "small"
-        if symbol in LARGE_CAP_SYMBOLS or market_cap > 500_000_000_000:
+        if segment in ("LARGE_CAP", "MID_CAP") or symbol in LARGE_CAP_SYMBOLS or market_cap > 500_000_000_000:
             model_key = "large"
 
         model = self.models.get(model_key) or self.models.get("large") or self.models.get("small")

@@ -82,14 +82,14 @@ api.interceptors.response.use(
 export const stocksApi = {
   search: (q: string) => api.get('/stocks/search', { params: { q } }),
   getQuote: (symbol: string) => api.get(`/stocks/${symbol}/quote`),
-  getCandles: (symbol: string, timeframe = '1d', limit = 200) =>
+  getCandles: (symbol: string, timeframe = '1d', limit = 750) =>
     api.get(`/stocks/${symbol}/candles`, { params: { timeframe, limit } }),
   getIndicators: (symbol: string, timeframe = '1d') =>
     api.get(`/stocks/${symbol}/indicators`, { params: { timeframe } }),
   getSignals: (symbol: string, timeframe = '1d') =>
     api.get(`/stocks/${symbol}/signals`, { params: { timeframe } }),
-  getAIScore: (symbol: string, timeframe = '1d') =>
-    api.get(`/stocks/${symbol}/ai-score`, { params: { timeframe } }),
+  getAIScore: (symbol: string, timeframe = '1d', mode = 'SWING', segment = 'AUTO') =>
+    api.get(`/stocks/${symbol}/ai-score`, { params: { timeframe, mode, segment } }),
   getInfo: (symbol: string) => api.get(`/stocks/${symbol}/info`),
   getPatterns: (symbol: string, timeframe = '1d', limit = 250) =>
     api.get(`/stocks/${symbol}/patterns`, { params: { timeframe, limit } }),

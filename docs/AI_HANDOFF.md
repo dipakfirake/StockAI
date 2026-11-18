@@ -14,6 +14,45 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **BEST BUY PRICE ENGINE, SPECIALIZED ML MODELS (SWING/INTRADAY/FNO & LARGE/MID/SMALL/GROWTH), COMPREHENSIVE INDICATOR & VALUATION MATRIX & 2-YEAR CHARTS (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Objectives & Architecture Completed**:
+    1. **"Best Price to Buy" Engine & Structural Stop Loss**:
+       - Replaced entering at Current Market Price (CMP) with optimal entry zone calculation in `backend/services/screener.py` (`PULLBACK_DIP_BUY` to 21-EMA / 9-EMA, `BREAKOUT_CONFIRMATION` above resistance, and `SUPPORT_ACCUMULATION` at local base).
+       - Replaced arbitrary flat negative percentage stop loss with structural rule-based stop loss: $SL = \text{Swing Low} - 0.6 \times \text{ATR}$ (bounded between 1.5% and 5.0% risk).
+       - Implemented asymmetric target expansions from `best_buy_price`: T1 ($1.5R$), T2 ($2.5R$), T3 ($4.0R$), ensuring $R:R \ge 1:2.5$.
+       - Prioritized `best_buy_price` as default entry in `backend/services/swing_audit_service.py`.
+    2. **Comprehensive Technical & Fundamental Matrix**:
+       - Technical indicators in `backend/services/indicators.py`: RSI(14), EMA 9/21/50/200, ADX(14), ATR(14), Stochastic (%K, %D), MACD (line, signal, histogram), Bollinger Bands (Upper, Middle, Lower).
+       - Fundamentals & Valuations in `backend/services/screener.py`: Market Cap, PE Ratio, Forward PE, PB Ratio, Book Value, ROE (%), ROCE/ROA (%), Debt to Equity, Current Ratio, Revenue (TTM), Revenue Growth (% YoY), EBITDA.
+       - Fast Growth Detection (`is_fast_growth` flag when Revenue Growth > 15% and ROE > 15%) and Market Cap classification (`LARGE_CAP`, `MID_CAP`, `SMALL_CAP`).
+       - Market Fall & Crash Protection Filter: `market_defense_active` flag triggering defensive scoring regime ($\ge 80$ score threshold, debt-to-equity $< 0.8$, current ratio $\ge 1.3$) when market index trades below 50-EMA or ATR expands $> 2.0\times$.
+    3. **Specialized ML Models Across Horizons & Segments**:
+       - `backend/services/ai_engine.py` enhanced with `trading_mode` (`SWING`, `INTRADAY`, `FNO`) and `segment` (`LARGE_CAP`, `MID_CAP`, `SMALL_CAP`, `FAST_GROWTH`, `AUTO`).
+       - Implemented intraday execution metadata (VWAP pullback/breakout bias, 15:15 mandatory square-off, ATR risk bounds).
+       - Implemented FnO derivative analytics and options strategy recommendations (Bull Call Spread, Long Straddle/Strangle on high IV, Iron Condor on low IV).
+       - Multi-threaded / concurrent execution safety verified for simultaneous evaluations.
+    4. **2-Year Chart Candles & Interactive Indicator Settings Dropdown**:
+       - `backend/api/stocks.py` & `frontend/src/services/api.ts`: Boosted default candle limit for daily (1D), weekly (1W), and monthly (1M) charts to **750 bars** (~3 years of historical trading sessions).
+       - `frontend/src/pages/ChartPage.tsx`: Added EMA 50, EMA 200, and Bollinger Bands (Upper, Middle, Lower) series with dynamic color coding.
+       - Built interactive **Indicator Settings Dropdown** with individual ON/OFF toggle switches for all chart overlays (EMA 9, 21, 50, 200, VWAP, Bollinger Bands) and sub-chart panels (Volume, RSI, MACD), bound via `.applyOptions({ visible: ... })`.
+    5. **UI Enhancements in Swing Screener**:
+       - `frontend/src/pages/SwingScreenerPage.tsx`: Added dual price display (`Best Buy Price` & `CMP`) on cards and matrix table.
+       - Added badges: `🚀 FAST GROWTH`, `LARGE / MID / SMALL CAP`, and `🛡️ DEFENSIVE`.
+    6. **Fyers API Rate-Limit Defense ("Jugaad" Architecture)**:
+       - 4-tier caching architecture: L1 Redis (24-hour TTL on 750 daily bars), L2 PostgreSQL hypertable, Fyers WebSocket push stream, and backward pagination chunking with Token Bucket pacing (< 3 req/sec) to avoid `-360` HTTP 429 throttling.
+  - **Verification Evidence**:
+    - `backend/tests/test_best_buy_price_and_indicators.py`: **4 of 4 passed (100% green)**.
+    - `backend/tests/test_swing_audit.py`: **14 of 14 passed (100% green)**.
+    - `backend/tests/test_swing_audit_coupled_ratchet.py`: **5 of 5 passed (100% green)**.
+    - Total backend tests: **23 of 23 passed**.
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 1m 4s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server (`stockai-server` at `92.4.71.210`):
+    ```bash
+    cd ~/StockAI
+    git fetch origin main && git reset --hard origin/main
+    docker compose up -d --build backend frontend celery_worker celery_beat
+    ```
+
 - **SWING AUDIT DYNAMIC TIMESTAMPED FILENAMES, DIRECT BROWSER DOWNLOAD ROUTE & LIVE UI TRANSPARENCY BANNER (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     1. User observed that after clicking download on the website, they were still receiving older spreadsheets generated on 15 Nov (`Generated: 15 Nov 2026 03:45 UTC`, 56 stocks, 27 columns).

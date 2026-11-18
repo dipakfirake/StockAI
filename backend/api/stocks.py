@@ -299,22 +299,25 @@ async def get_quote(symbol: str, current_user=Depends(get_current_user)):
 async def get_candles(
     symbol: str,
     timeframe: str = Query("1d", description="Timeframe: 1m, 5m, 15m, 30m, 1h, 1d, 1w"),
-    limit: int = Query(200, ge=1, le=2000),
+    limit: int = Query(750, ge=1, le=2000),
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
     anchor_date: str | None = Query(None, description="ISO date to anchor VWAP calculation"),
     current_user=Depends(get_current_user),
 ):
-    """Get OHLCV candlestick data with indicator series."""
+    """Get OHLCV candlestick data with indicator series. Guarantees minimum 2-year 1D data."""
     safe_symbol = sanitize_symbol(symbol)
     safe_tf = validate_timeframe(timeframe)
-    cache_key = f"candles_series:{safe_symbol}:{safe_tf}:{limit}"
+    # Ensure minimum 2-year historical data (~500-750 trading bars) for daily/weekly/monthly view
+    effective_limit = 750 if (safe_tf in ("1d", "1w", "1mo") and limit <= 300) else limit
+
+    cache_key = f"candles_series:{safe_symbol}:{safe_tf}:{effective_limit}"
     if not anchor_date and not start_date and not end_date:
         cached = await cache_get(cache_key)
         if cached:
             return cached
 
-    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, limit, start_date, end_date)
+    candles = await market_data_service.fetch_candles(safe_symbol, safe_tf, effective_limit, start_date, end_date)
     series_candles = await asyncio.to_thread(indicator_service.compute_for_candles_series, candles)
     
     if anchor_date and len(series_candles) > 0:
@@ -374,20 +377,26 @@ async def get_signals(
 async def get_ai_score(
     symbol: str,
     timeframe: str = Query("1d"),
+    mode: str = Query("SWING", description="Trading mode: SWING, INTRADAY, FNO"),
+    segment: str = Query("AUTO", description="Segment: AUTO, LARGE_CAP, MID_CAP, SMALL_CAP, FAST_GROWTH"),
     current_user=Depends(get_current_user),
 ):
-    """Get AI buy/hold/sell score with SHAP-style explanation."""
+    """Get specialized AI buy/hold/sell score with SHAP-style explanation, horizon & segment routing."""
     safe_symbol = sanitize_symbol(symbol)
     safe_tf = validate_timeframe(timeframe)
     quote_task = market_data_service.fetch_quote(safe_symbol)
     candles_task = market_data_service.fetch_candles(safe_symbol, safe_tf, limit=250)
-    quote, candles = await asyncio.gather(quote_task, candles_task, return_exceptions=True)
+    info_task = market_data_service.get_stock_info(safe_symbol)
+    quote, candles, info = await asyncio.gather(quote_task, candles_task, info_task, return_exceptions=True)
     if isinstance(candles, Exception) or len(candles) < 30:
         raise HTTPException(status_code=422, detail="Insufficient data to compute AI score")
     if not isinstance(quote, Exception) and quote:
         candles = market_data_service.synchronize_candle_tip(candles, quote)
     indicators = indicator_service.compute_all(candles)
-    score = ai_engine_service.score(indicators, safe_symbol, candles=candles)
+    fundamentals = info if not isinstance(info, Exception) else {}
+    score = ai_engine_service.score(
+        indicators, safe_symbol, candles=candles, trading_mode=mode, segment=segment, fundamentals=fundamentals
+    )
     return score
 
 

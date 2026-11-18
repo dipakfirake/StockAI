@@ -19,6 +19,8 @@ interface TargetLevel {
 interface TradePlan {
   entry_price: number
   current_price?: number
+  cmp?: number
+  best_buy_price?: number
   optimal_entry_price?: number
   entry_type?: 'PULLBACK_DIP' | 'BREAKOUT' | 'MARKET_CMP' | 'RALLY_SELL' | 'BREAKDOWN' | 'CONSOLIDATION' | string
   entry_zone?: string
@@ -47,6 +49,10 @@ interface SwingStock {
     fundamental: number
     sentiment: number
   }
+  market_regime?: string
+  market_defense_active?: boolean
+  cap_segment?: string
+  is_fast_growth?: boolean
   trade_plan: TradePlan | null
   news_sentiment?: string
   error?: string
@@ -697,6 +703,21 @@ export default function SwingScreenerPage() {
                       <span className={`badge ${isBuy ? 'badge-buy' : isSell ? 'badge-sell' : 'badge-hold'}`}>
                         {stock.action}
                       </span>
+                      {stock.is_fast_growth && (
+                        <span style={{ fontSize: 10, background: 'rgba(234, 179, 8, 0.15)', color: '#eab308', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          🚀 FAST GROWTH
+                        </span>
+                      )}
+                      {stock.cap_segment && (
+                        <span style={{ fontSize: 10, background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>
+                          {stock.cap_segment.replace('_', ' ')}
+                        </span>
+                      )}
+                      {stock.market_defense_active && (
+                        <span style={{ fontSize: 10, background: 'rgba(244, 63, 94, 0.15)', color: '#f43f5e', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          🛡️ DEFENSIVE
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {stock.name}
@@ -733,9 +754,14 @@ export default function SwingScreenerPage() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 8 }}>
                       <div>
                         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                          Current (CMP)
+                          Best Buy Price
                         </div>
-                        <div style={{ fontSize: 14, fontWeight: 600 }}>₹{plan.entry_price.toFixed(2)}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: '#38bdf8' }}>
+                          ₹{(plan.best_buy_price || plan.optimal_entry_price || plan.entry_price).toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                          CMP: ₹{(plan.current_price || plan.cmp || plan.entry_price).toFixed(2)}
+                        </div>
                       </div>
                       <div>
                         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
@@ -905,19 +931,19 @@ export default function SwingScreenerPage() {
                       {stock.total_score.toFixed(1)}
                     </td>
                     <td style={{ padding: '12px 16px', fontWeight: 500 }}>
-                      ₹{plan ? plan.entry_price.toFixed(2) : '—'}
+                      ₹{plan ? (plan.current_price || plan.cmp || plan.entry_price).toFixed(2) : '—'}
                     </td>
                     <td style={{ padding: '12px 16px' }}>
-                      {plan?.optimal_entry_price ? (
+                      {plan ? (
                         <div>
-                          <div style={{ fontWeight: 600, color: isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : 'inherit' }}>
-                            ₹{plan.optimal_entry_price.toFixed(2)}
+                          <div style={{ fontWeight: 600, color: '#38bdf8' }}>
+                            ₹{(plan.best_buy_price || plan.optimal_entry_price || plan.entry_price).toFixed(2)}
                           </div>
                           <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
-                            {plan.entry_type === 'PULLBACK_DIP' ? 'Dip to 21-EMA' :
-                             plan.entry_type === 'BREAKOUT' ? 'Breakout' :
+                            {plan.entry_type === 'PULLBACK_DIP_BUY' || plan.entry_type === 'PULLBACK_DIP' ? 'Dip to 21-EMA' :
+                             plan.entry_type === 'BREAKOUT_CONFIRMATION' || plan.entry_type === 'BREAKOUT' ? 'Breakout' :
                              plan.entry_type === 'RALLY_SELL' ? 'Rally Short' :
-                             plan.entry_type === 'BREAKDOWN' ? 'Breakdown' : 'At CMP'}
+                             plan.entry_type === 'BREAKDOWN' ? 'Breakdown' : 'Support Base'}
                           </div>
                         </div>
                       ) : (

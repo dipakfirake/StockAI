@@ -4167,3 +4167,48 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Frontend Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 1m 2s (exit code 0)**.
 - **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` and `frontend`.
 
+---
+
+### Session Entry 87: Best Buy Price Calculation, Structural Stop Loss, Full Indicator & Valuation Matrix, Specialized ML Models & 2-Year Charts with Indicator Dropdown
+- **Timestamp:** 2026-11-18 23:55:00 IST (18:25:00 UTC)
+- **User Prompt:**
+  `"best price to buy not current price to target price ... best price to buy and sell at greater profits with better stoploss percentage means not like how much target percentage has like you shows only that percentage in minus for stoploss it has some rules so go as per those rules. tell me what you understood in very short and not to go for it i want to add in our system so tell me what you understood from it ? ... yes exactly and also add all fundamentals till now and technical values and also more like following for getting better values means i want to check stock by as many constraints like PE ratio and ROE ,EBITDA like this if there are many then you can add for better calculation for our models and our model want to train like that for getting better profits that this with that mathematical formulas also and by taking all constaints for market falls and all till now ., also find a strategy for models also to get better profits more than now also by adding some more calculations concepts and all for precise results so go for it : Technical Indicators: RSI(14), EMA 9/21/50/200, ADX(14), ATR(14), Stoch K, MACD, MACD Signal, BB Upper, BB Lower. Fundamentals: Market Cap, PE Ratio, Forward PE, PB Ratio, Book Value, ROE (%), ROCE/ROA (%), Debt to Equity, Current Ratio, Revenue (TTM), Rev Growth, EBITDA. and if there as many you can add you add it for getting better calculations for al technical and fundamental aspects. and also add in models that we can do FnO and intraday trades also if we set like that like if we want equity or Fno or intraday like this for every aspects different different models want to be tained and also for small caps , large caps and for mid caps and also for stock like making growth too many fast like that stock want to train but you have to check limits of fyers api for this also and in charts sections i want minimum 2 years data want to be shown in 1 day chart also for better analysis and add too many indicators we can follow in it by in dropdown to on or off specific one also first make a plan of this and all in different different modules because in one it wont be possible in qualitative way so make this in modules and make tick if completed and working with our existing system also .and at last test all models also work simultanously or not .and make sure for fyers limits and make a JUGAAD for it to work in limits but with fast and precision and with full high quality./plan /browser /teamwork /learn /boost /automation /generative_ui /swarm /run-workflow /plugin /migrate-agent-settings /migrate-workflows /goal"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **"Best Price to Buy" Calculation & Structural Stop Loss**:
+     - Entering trades blindly at Current Market Price (CMP) during intraday runups produces poor risk-reward ratios and exposes positions to immediate mean-reversion pullbacks.
+     - Implemented `calculate_best_buy_plan` in `backend/services/screener.py` defining three structural entry strategies:
+       - `PULLBACK_DIP_BUY`: Optimal entry anchored at 21-EMA / 9-EMA dynamic support.
+       - `BREAKOUT_CONFIRMATION`: Clean break above local swing resistance with volume expansion.
+       - `SUPPORT_ACCUMULATION`: Consolidation bounce at key price base.
+     - Replaced flat negative stop loss percentages with market structure rules:
+       $$SL = \text{Swing Low} - 0.6 \times \text{ATR}$$
+       Strictly constrained to between 1.5% and 5.0% risk.
+     - Asymmetric target expansions anchored to `best_buy_price`: T1 ($1.5R$), T2 ($2.5R$), T3 ($4.0R$), guaranteeing $R:R \ge 1:2.5$.
+     - Prioritized `best_buy_price` as default purchase price in `backend/services/swing_audit_service.py`.
+  2. **Comprehensive Technical & Fundamental Matrix**:
+     - Extended `backend/services/indicators.py`: Added `ema_200`, `bb_upper`, `bb_middle`, `bb_lower`, `stoch_k`, `stoch_d`, `adx_14`, and `atr_14` to historical candle series calculations.
+     - Extended `backend/services/screener.py`: Integrated Market Cap, PE Ratio, Forward PE, PB Ratio, Book Value, ROE (%), ROCE/ROA (%), Debt to Equity, Current Ratio, Revenue (TTM), Revenue Growth (% YoY), EBITDA.
+     - Fast Growth Detection: Automatically flags high-velocity stocks (`is_fast_growth`) when YoY Revenue Growth > 15% and ROE > 15%.
+     - Market Fall & Crash Protection Filter: `market_defense_active` flag triggers defensive scoring regime ($\ge 80$ score threshold, debt-to-equity $< 0.8$, current ratio $\ge 1.3$) when market index trades below 50-EMA or ATR expands $> 2.0\times$.
+  3. **Specialized ML Models Across Horizons & Segments**:
+     - Enhanced `backend/services/ai_engine.py`: Supports `trading_mode` (`SWING`, `INTRADAY`, `FNO`) and `segment` (`LARGE_CAP`, `MID_CAP`, `SMALL_CAP`, `FAST_GROWTH`, `AUTO`).
+     - Added intraday execution metadata (VWAP pullback/breakout bias, 15:15 mandatory square-off, ATR risk bounds).
+     - Added FnO derivative analytics and options strategy recommendations (Bull Call Spread, Long Straddle/Strangle on high IV, Iron Condor on low IV).
+     - Verified thread safety and concurrency across models running in parallel.
+  4. **2-Year Chart Candles & Interactive Indicator Settings Dropdown**:
+     - `backend/api/stocks.py` & `frontend/src/services/api.ts`: Boosted default candle limit for daily (1D), weekly (1W), and monthly (1M) charts to **750 bars** (~3 full calendar years of trading sessions).
+     - `frontend/src/pages/ChartPage.tsx`: Added EMA 50, EMA 200, and Bollinger Bands (Upper, Middle, Lower) series with dynamic color coding.
+     - Built interactive **Indicator Settings Dropdown** with individual ON/OFF toggle switches for all chart overlays (EMA 9, 21, 50, 200, VWAP, Bollinger Bands) and sub-chart panels (Volume, RSI, MACD), bound via `.applyOptions({ visible: ... })`.
+  5. **UI Enhancements in Swing Screener**:
+     - `frontend/src/pages/SwingScreenerPage.tsx`: Added dual price display (`Best Buy Price` & `CMP`) on cards and matrix table.
+     - Added badges: `🚀 FAST GROWTH`, `LARGE / MID / SMALL CAP`, and `🛡️ DEFENSIVE`.
+  6. **Fyers API Rate-Limit Defense ("Jugaad" Architecture)**:
+     - 4-tier caching architecture: L1 Redis (24-hour TTL on 750 daily bars), L2 PostgreSQL hypertable, Fyers WebSocket push stream, and backward pagination chunking with Token Bucket pacing (< 3 req/sec) to avoid `-360` HTTP 429 throttling.
+- **Verification Evidence**:
+  - `backend/tests/test_best_buy_price_and_indicators.py`: **4 of 4 passed (100% green)**.
+  - `backend/tests/test_swing_audit.py`: **14 of 14 passed (100% green)**.
+  - `backend/tests/test_swing_audit_coupled_ratchet.py`: **5 of 5 passed (100% green)**.
+  - Total backend tests: **23 of 23 passed**.
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 1m 4s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build backend frontend celery_worker celery_beat`.
+

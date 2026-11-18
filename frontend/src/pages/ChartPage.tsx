@@ -3,7 +3,7 @@ import { useNavigate, useLocation, useParams, Link } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, HistogramData, LineData } from 'lightweight-charts'
 import { stocksApi, aiApi, swingAuditApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
-import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info, FileSpreadsheet, CheckCircle2, AlignJustify } from 'lucide-react'
+import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info, FileSpreadsheet, CheckCircle2, AlignJustify, ChevronDown } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
 import { toast } from '../components/Toast'
@@ -82,6 +82,19 @@ export default function ChartPage() {
   const [timeframe, setTimeframe] = useLocalStorage<string>('chart_timeframe', '1d')
   const [isHeikinAshi, setIsHeikinAshi] = useLocalStorage('chart_is_heikin_ashi', false)
   const [showIndicators, setShowIndicators] = useLocalStorage('chart_show_indicators', true)
+  const [indicatorToggles, setIndicatorToggles] = useLocalStorage<Record<string, boolean>>('chart_indicator_toggles', {
+    ema9: true,
+    ema21: true,
+    ema50: true,
+    ema200: true,
+    vwap: true,
+    supertrend: true,
+    bb: true,
+    volume: true,
+    rsi: true,
+    macd: true,
+  })
+  const [showIndicatorMenu, setShowIndicatorMenu] = useState(false)
   const [showPatterns, setShowPatterns] = useLocalStorage('chart_show_patterns', false)
   const [showEvents, setShowEvents] = useLocalStorage('chart_show_events', false)
   const [showVolumeProfile, setShowVolumeProfile] = useLocalStorage('chart_show_vp', false)
@@ -122,6 +135,11 @@ export default function ChartPage() {
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
   const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const ema50SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const ema200SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const bbUpperSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const bbMiddleSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const bbLowerSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const avwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const supertrendSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
@@ -355,6 +373,11 @@ export default function ChartPage() {
 
     const ema9Series = chart.addLineSeries({ color: '#3b82f6', lineWidth: 1, title: 'EMA 9' })
     const ema21Series = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, title: 'EMA 21' })
+    const ema50Series = chart.addLineSeries({ color: '#8b5cf6', lineWidth: 1, title: 'EMA 50' })
+    const ema200Series = chart.addLineSeries({ color: '#ec4899', lineWidth: 1, title: 'EMA 200' })
+    const bbUpperSeries = chart.addLineSeries({ color: '#06b6d4', lineWidth: 1, title: 'BB Upper', lineStyle: 2 })
+    const bbMiddleSeries = chart.addLineSeries({ color: '#0891b2', lineWidth: 1, title: 'BB Mid', lineStyle: 1 })
+    const bbLowerSeries = chart.addLineSeries({ color: '#06b6d4', lineWidth: 1, title: 'BB Lower', lineStyle: 2 })
     const vwapSeries = chart.addLineSeries({ color: '#d946ef', lineWidth: 2, title: 'VWAP', lineStyle: 2 })
     const avwapSeries = chart.addLineSeries({ color: '#ff7300', lineWidth: 3, title: 'AVWAP' })
     const supertrendSeries = chart.addLineSeries({ color: '#10b981', lineWidth: 2, title: 'SuperTrend', lineStyle: 0 })
@@ -372,10 +395,15 @@ export default function ChartPage() {
     chartRef.current = chart
     candleSeriesRef.current = candleSeries
     ema9SeriesRef.current = ema9Series
-    ema21SeriesRef.current = ema21Series;
-    vwapSeriesRef.current = vwapSeries;
-    avwapSeriesRef.current = avwapSeries;
-    supertrendSeriesRef.current = supertrendSeries;
+    ema21SeriesRef.current = ema21Series
+    ema50SeriesRef.current = ema50Series
+    ema200SeriesRef.current = ema200Series
+    bbUpperSeriesRef.current = bbUpperSeries
+    bbMiddleSeriesRef.current = bbMiddleSeries
+    bbLowerSeriesRef.current = bbLowerSeries
+    vwapSeriesRef.current = vwapSeries
+    avwapSeriesRef.current = avwapSeries
+    supertrendSeriesRef.current = supertrendSeries
     if (chartRef.current) {
       (chartRef.current as any).supertrendSeries = supertrendSeries;
     }
@@ -674,6 +702,11 @@ export default function ChartPage() {
       if (showIndicators && ema9SeriesRef.current && ema21SeriesRef.current && rsiSeriesRef.current && vwapSeriesRef.current) {
          const ema9Data: LineData[] = []
          const ema21Data: LineData[] = []
+         const ema50Data: LineData[] = []
+         const ema200Data: LineData[] = []
+         const bbUpperData: LineData[] = []
+         const bbMiddleData: LineData[] = []
+         const bbLowerData: LineData[] = []
          const vwapData: LineData[] = []
          const avwapData: LineData[] = []
          const rsiData: LineData[] = []
@@ -686,6 +719,11 @@ export default function ChartPage() {
            const time = getTime(c.timestamp)
            if (c.ema_9 !== null && c.ema_9 !== undefined) ema9Data.push({ time, value: c.ema_9 })
            if (c.ema_21 !== null && c.ema_21 !== undefined) ema21Data.push({ time, value: c.ema_21 })
+           if (c.ema_50 !== null && c.ema_50 !== undefined) ema50Data.push({ time, value: c.ema_50 })
+           if (c.ema_200 !== null && c.ema_200 !== undefined) ema200Data.push({ time, value: c.ema_200 })
+           if (c.bb_upper !== null && c.bb_upper !== undefined) bbUpperData.push({ time, value: c.bb_upper })
+           if (c.bb_middle !== null && c.bb_middle !== undefined) bbMiddleData.push({ time, value: c.bb_middle })
+           if (c.bb_lower !== null && c.bb_lower !== undefined) bbLowerData.push({ time, value: c.bb_lower })
            if (c.vwap !== null && c.vwap !== undefined) vwapData.push({ time, value: c.vwap })
            if (c.anchored_vwap !== null && c.anchored_vwap !== undefined) avwapData.push({ time, value: c.anchored_vwap })
            if (c.rsi_14 !== null && c.rsi_14 !== undefined) rsiData.push({ time, value: c.rsi_14 })
@@ -703,6 +741,11 @@ export default function ChartPage() {
 
          ema9SeriesRef.current.setData(ema9Data)
          ema21SeriesRef.current.setData(ema21Data)
+         ema50SeriesRef.current?.setData(ema50Data)
+         ema200SeriesRef.current?.setData(ema200Data)
+         bbUpperSeriesRef.current?.setData(bbUpperData)
+         bbMiddleSeriesRef.current?.setData(bbMiddleData)
+         bbLowerSeriesRef.current?.setData(bbLowerData)
          vwapSeriesRef.current.setData(vwapData)
          avwapSeriesRef.current?.setData(avwapData)
          rsiSeriesRef.current.setData(rsiData)
@@ -713,9 +756,26 @@ export default function ChartPage() {
          if (supertrendSeriesRef.current) {
            supertrendSeriesRef.current.setData(supertrendData)
          }
+
+         // Dynamic Indicator Visibility
+         ema9SeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.ema9 ?? true) })
+         ema21SeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.ema21 ?? true) })
+         ema50SeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.ema50 ?? true) })
+         ema200SeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.ema200 ?? true) })
+         bbUpperSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.bb ?? true) })
+         bbMiddleSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.bb ?? true) })
+         bbLowerSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.bb ?? true) })
+         vwapSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.vwap ?? true) })
+         supertrendSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.supertrend ?? true) })
+         volumeSeriesRef.current?.applyOptions({ visible: indicatorToggles.volume ?? true })
       } else {
          ema9SeriesRef.current?.setData([])
          ema21SeriesRef.current?.setData([])
+         ema50SeriesRef.current?.setData([])
+         ema200SeriesRef.current?.setData([])
+         bbUpperSeriesRef.current?.setData([])
+         bbMiddleSeriesRef.current?.setData([])
+         bbLowerSeriesRef.current?.setData([])
          vwapSeriesRef.current?.setData([])
          avwapSeriesRef.current?.setData([])
          rsiSeriesRef.current?.setData([])
@@ -1518,15 +1578,88 @@ export default function ChartPage() {
              ))}
           </select>
 
-          <div className="mobile-scroll-tabs" style={{ display: 'flex', gap: 4, alignItems: 'center', background: 'var(--color-bg-secondary)', padding: '4px', borderRadius: '8px', border: '1px solid var(--color-border)', maxWidth: '100%' }}>
-            <button 
-              onClick={() => setShowIndicators(!showIndicators)}
-              className="btn btn-ghost no-shrink" 
-              style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: showIndicators ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showIndicators ? 600 : 400 }}
-              title="Toggle RSI, MACD & EMAs"
-            >
-              <Activity size={14} style={{ marginRight: 4 }} /> Indicators
-            </button>
+          <div className="mobile-scroll-tabs" style={{ display: 'flex', gap: 4, alignItems: 'center', background: 'var(--color-bg-secondary)', padding: '4px', borderRadius: '8px', border: '1px solid var(--color-border)', maxWidth: '100%', position: 'relative' }}>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <button 
+                onClick={() => setShowIndicators(!showIndicators)}
+                className="btn btn-ghost no-shrink" 
+                style={{ fontSize: 13, padding: '4px 6px 4px 10px', height: '28px', color: showIndicators ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showIndicators ? 600 : 400, display: 'flex', alignItems: 'center' }}
+                title="Toggle All Indicators"
+              >
+                <Activity size={14} style={{ marginRight: 4 }} /> Indicators
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); setShowIndicatorMenu(!showIndicatorMenu) }}
+                className="btn btn-ghost no-shrink"
+                style={{ fontSize: 11, padding: '4px 6px', height: '28px', color: 'var(--color-text-muted)' }}
+                title="Configure Individual Indicators"
+              >
+                <ChevronDown size={13} />
+              </button>
+
+              {/* Individual Indicator Toggle Dropdown */}
+              {showIndicatorMenu && (
+                <div 
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: 6,
+                    background: 'rgba(15, 23, 42, 0.98)',
+                    backdropFilter: 'blur(12px)',
+                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                    borderRadius: 8,
+                    padding: '10px 14px',
+                    zIndex: 200,
+                    width: 230,
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.6)'
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4 }}>
+                    Overlay Indicators
+                  </div>
+                  {[
+                    { key: 'ema9', label: 'EMA 9 (Fast)', color: '#3b82f6' },
+                    { key: 'ema21', label: 'EMA 21 (Pullback)', color: '#f59e0b' },
+                    { key: 'ema50', label: 'EMA 50 (Trend)', color: '#8b5cf6' },
+                    { key: 'ema200', label: 'EMA 200 (Macro)', color: '#ec4899' },
+                    { key: 'vwap', label: 'VWAP', color: '#d946ef' },
+                    { key: 'supertrend', label: 'Supertrend', color: '#10b981' },
+                    { key: 'bb', label: 'Bollinger Bands', color: '#06b6d4' },
+                  ].map(ind => (
+                    <label key={ind.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#f8fafc', padding: '3px 0', cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={indicatorToggles[ind.key] ?? true} 
+                        onChange={(e) => setIndicatorToggles({ ...indicatorToggles, [ind.key]: e.target.checked })} 
+                      />
+                      <span style={{ color: ind.color, fontWeight: 700 }}>●</span>
+                      <span>{ind.label}</span>
+                    </label>
+                  ))}
+
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 10, marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4 }}>
+                    Sub-Chart Panes
+                  </div>
+                  {[
+                    { key: 'rsi', label: 'RSI (14)', color: '#a855f7' },
+                    { key: 'macd', label: 'MACD (12, 26, 9)', color: '#3b82f6' },
+                    { key: 'volume', label: 'Volume Histogram', color: '#26a69a' },
+                  ].map(ind => (
+                    <label key={ind.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#f8fafc', padding: '3px 0', cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={indicatorToggles[ind.key] ?? true} 
+                        onChange={(e) => setIndicatorToggles({ ...indicatorToggles, [ind.key]: e.target.checked })} 
+                      />
+                      <span style={{ color: ind.color, fontWeight: 700 }}>●</span>
+                      <span>{ind.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
             <button 
               onClick={() => setShowEvents(!showEvents)}
               className="btn btn-ghost no-shrink" 
@@ -1698,8 +1831,8 @@ export default function ChartPage() {
               </div>
             )}
           </div>
-          <div ref={rsiContainerRef} style={{ width: '100%', borderTop: '1px solid var(--color-border)', display: showIndicators ? 'block' : 'none' }} />
-          <div ref={macdContainerRef} style={{ width: '100%', display: showIndicators ? 'block' : 'none' }} />
+          <div ref={rsiContainerRef} style={{ width: '100%', borderTop: '1px solid var(--color-border)', display: (showIndicators && (indicatorToggles.rsi ?? true)) ? 'block' : 'none' }} />
+          <div ref={macdContainerRef} style={{ width: '100%', display: (showIndicators && (indicatorToggles.macd ?? true)) ? 'block' : 'none' }} />
         </div>
       </div>
 

@@ -343,7 +343,21 @@ class IndicatorService:
             df["ema_9"] = ta.trend.EMAIndicator(close=df["Close"], window=9).ema_indicator()
             df["ema_21"] = ta.trend.EMAIndicator(close=df["Close"], window=21).ema_indicator()
             df["ema_50"] = ta.trend.EMAIndicator(close=df["Close"], window=50).ema_indicator()
+            df["ema_200"] = ta.trend.EMAIndicator(close=df["Close"], window=200).ema_indicator()
             df["cci_20"] = ta.trend.CCIIndicator(high=df["High"], low=df["Low"], close=df["Close"], window=20).cci()
+
+            # Bollinger Bands
+            bb_ind = ta.volatility.BollingerBands(close=df["Close"], window=20, window_dev=2)
+            df["bb_upper"] = bb_ind.bollinger_hband()
+            df["bb_middle"] = bb_ind.bollinger_mavg()
+            df["bb_lower"] = bb_ind.bollinger_lband()
+
+            # Stochastic & Trend Strength
+            stoch_ind = ta.momentum.StochasticOscillator(high=df["High"], low=df["Low"], close=df["Close"], window=14, smooth_window=3)
+            df["stoch_k"] = stoch_ind.stoch()
+            df["stoch_d"] = stoch_ind.stoch_signal()
+            df["adx_14"] = ta.trend.ADXIndicator(high=df["High"], low=df["Low"], close=df["Close"], window=14).adx()
+            df["atr_14"] = ta.volatility.AverageTrueRange(high=df["High"], low=df["Low"], close=df["Close"], window=14).average_true_range()
             
             # Premium Indicators
             st_df = calculate_supertrend(df)
@@ -376,6 +390,14 @@ class IndicatorService:
             ema_9s = _clean_float_list(df["ema_9"], 4)
             ema_21s = _clean_float_list(df["ema_21"], 4)
             ema_50s = _clean_float_list(df["ema_50"], 4)
+            ema_200s = _clean_float_list(df["ema_200"], 4)
+            bb_uppers = _clean_float_list(df["bb_upper"], 4)
+            bb_middles = _clean_float_list(df["bb_middle"], 4)
+            bb_lowers = _clean_float_list(df["bb_lower"], 4)
+            stoch_ks = _clean_float_list(df["stoch_k"], 2)
+            stoch_ds = _clean_float_list(df["stoch_d"], 2)
+            adx_14s = _clean_float_list(df["adx_14"], 2)
+            atr_14s = _clean_float_list(df["atr_14"], 4)
             cci_20s = _clean_float_list(df["cci_20"], 4)
             supertrends = _clean_float_list(df["supertrend"], 4)
             supertrend_dirs = _clean_int_list(df["supertrend_dir"], 0)
@@ -399,6 +421,14 @@ class IndicatorService:
                     "ema_9": e9,
                     "ema_21": e21,
                     "ema_50": e50,
+                    "ema_200": e200,
+                    "bb_upper": bbu,
+                    "bb_middle": bbm,
+                    "bb_lower": bbl,
+                    "stoch_k": sk,
+                    "stoch_d": sd,
+                    "adx_14": adx,
+                    "atr_14": atr,
                     "cci_20": cci,
                     "supertrend": st,
                     "supertrend_dir": std,
@@ -407,9 +437,10 @@ class IndicatorService:
                     "price_return_5d": r5,
                     "price_return_20d": r20,
                 }
-                for t, o, h, l, c, v, rsi, mh, m, ms, e9, e21, e50, cci, st, std, vw, ob, r5, r20 in zip(
+                for t, o, h, l, c, v, rsi, mh, m, ms, e9, e21, e50, e200, bbu, bbm, bbl, sk, sd, adx, atr, cci, st, std, vw, ob, r5, r20 in zip(
                     timestamps, opens, highs, lows, closes, volumes, rsi_14s, macd_hists, macds, macd_signals,
-                    ema_9s, ema_21s, ema_50s, cci_20s, supertrends, supertrend_dirs, vwaps, order_blocks, ret_5ds, ret_20ds
+                    ema_9s, ema_21s, ema_50s, ema_200s, bb_uppers, bb_middles, bb_lowers, stoch_ks, stoch_ds, adx_14s, atr_14s,
+                    cci_20s, supertrends, supertrend_dirs, vwaps, order_blocks, ret_5ds, ret_20ds
                 )
             ]
             return result

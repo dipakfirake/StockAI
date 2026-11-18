@@ -257,7 +257,7 @@ class SwingAuditService:
                 logger.info(f"Audit entry already exists for {norm_symbol} on {rec_date}. Preserving record {existing.id}.")
             return existing
 
-        buy_price = Decimal(str(round(float(trade_plan.get("entry_price") or trade_plan.get("current_price") or 0.0), 2)))
+        buy_price = Decimal(str(round(float(trade_plan.get("best_buy_price") or trade_plan.get("optimal_entry_price") or trade_plan.get("entry_price") or trade_plan.get("current_price") or 0.0), 2)))
         target_price = Decimal(str(round(float(trade_plan.get("target_price") or trade_plan.get("target_2") or (float(buy_price) * 1.06)), 2)))
         stop_loss = Decimal(str(round(float(trade_plan.get("stop_loss") or (float(buy_price) * 0.96)), 2)))
 
@@ -342,7 +342,7 @@ class SwingAuditService:
             if existing:
                 continue
 
-            buy_price = Decimal(str(round(float(trade_plan.get("entry_price") or trade_plan.get("current_price") or 0.0), 2)))
+            buy_price = Decimal(str(round(float(trade_plan.get("best_buy_price") or trade_plan.get("optimal_entry_price") or trade_plan.get("entry_price") or trade_plan.get("current_price") or 0.0), 2)))
             target_price = Decimal(str(round(float(trade_plan.get("target_price") or trade_plan.get("target_2") or (float(buy_price) * 1.06)), 2)))
             stop_loss = Decimal(str(round(float(trade_plan.get("stop_loss") or (float(buy_price) * 0.96)), 2)))
 
