@@ -14,6 +14,43 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **MULTI-SECTOR SCREENER AUDIT EXPANSION (81 STOCKS, 10 SECTORS), FYERS RATE LIMITING & NO-CACHE EXCEL DOWNLOAD STREAMING (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    1. User inquired why the local laptop folder `D:\Stock Prediction System\audits\swing_trades` has only 2 entries (`Swing_Trade_Audit_2026-11-02_to_2026-11-17.xlsx`) while the live cloud server has 90 entries.
+    2. User requested that the entire audit system run 100% online on the cloud server (`stockai-server` on Oracle Cloud) 24/7 without needing their laptop on, downloadable anywhere.
+    3. User noticed the webpage download was serving a 3-day old file (`Generated: 15 Nov 2026 03:45 UTC`) and `curl -I` returned `405 Method Not Allowed`.
+    4. User requested expanding the screener from only Nifty 50 to all sectors in the dropdown (including Oil & Resources, Smallcap Momentum, Banking, IT, Auto, Pharma, FMCG, Metal, Midcap Growth) while strictly enforcing Fyers API rate limits.
+  - **Diagnosis & Fixes Implemented**:
+    1. **Clarified Cloud vs Laptop Audit Separation**:
+       - The 2-entry file in `D:\Stock Prediction System\audits\swing_trades` was generated during local `pytest` test runs.
+       - The cloud server runs in Oracle Cloud independently with Docker containers and its own PostgreSQL database (90 audited trades). The laptop does NOT need to remain turned on.
+    2. **Multi-Sector Universe Expansion (`backend/services/screener.py`)**:
+       - Added `ScreenerService.get_all_sector_symbols()` returning 81 deduplicated symbols from all 10 sector universes (NIFTY_50, BANKING, IT, AUTO, PHARMA, ENERGY, FMCG, METAL, MID_CAP, SMALL_CAP).
+       - Added `ScreenerService.run_all_sectors_screener()` with controlled batching (5 symbols/batch) and 0.3s inter-batch pacing to guarantee Fyers rate limit (< 4 req/sec) is never exceeded.
+       - Filters and auto-catalogs all high-conviction BUY setups (`total_score >= 70.0`) into the active audit cycle.
+    3. **Automated EOD Task Multi-Sector Execution (`backend/tasks/swing_audit_tasks.py`)**:
+       - Updated `run_eod_screener_and_audit_sync_async()` to call `run_all_sectors_screener` at 15:35 IST (10:05 UTC) Mon-Fri, followed immediately by `update_daily_prices`.
+       - Updated `POST /api/swing-audit/sync?run_scan=true` in `backend/api/swing_audit.py` to trigger the multi-sector screener.
+    4. **Direct Streamed Excel Download with HEAD & Anti-Cache Headers (`backend/api/swing_audit.py`)**:
+       - Changed endpoint to `@router.api_route("/download-latest", methods=["GET", "HEAD"])`.
+       - Handles HEAD requests returning HTTP 200 with proper `Content-Length` and headers without reading/sending binary payload.
+       - For GET, directly reads the newly generated Excel bytes and returns `Response(content=file_bytes, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")` with `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` and `Pragma: no-cache` to eliminate intermediate caching.
+       - Flushes SQLAlchemy session cache (`db.expire_all()`) before loading cycle and trades.
+    5. **Defensive Storage Permissions (`backend/services/swing_audit_service.py`)**:
+       - In `generate_excel_workbook`, added fallback to `tempfile.gettempdir()` if container directory permissions prevent writes to `/app/audits/swing_trades`.
+  - **Verification Evidence**:
+    - `backend/tests/test_swing_audit.py` & `backend/tests/test_swing_audit_coupled_ratchet.py`: **19 of 19 passed (100% green)** in 54.86s.
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 18.50s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server:
+    ```bash
+    cd ~/StockAI
+    git fetch origin main && git reset --hard origin/main
+    docker compose up -d --build backend celery_worker celery_beat
+    sleep 15
+    curl -s -k "https://stockai-live.duckdns.org/api/swing-audit/sync?run_scan=true" -X POST
+    curl -I -k "https://stockai-live.duckdns.org/api/swing-audit/download-latest"
+    ```
+
 - **SWING AUDIT EXCEL PRICE SYNC RESOLUTION & AUTOMATED 3:30 PM IST EOD PIPELINE (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     1. User observed that downloaded Excel spreadsheets still had `Generated: 15 Nov 2026 03:45 UTC` with Days 4..11 showing "Pending", even after clicking "Sync 11-Day Prices" manually.

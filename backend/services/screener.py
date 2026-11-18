@@ -179,6 +179,61 @@ class ScreenerService:
         return output
 
     @staticmethod
+    def get_all_sector_symbols() -> list[str]:
+        """
+        Returns a deduplicated list of all symbols across all 10 sector universes
+        (NIFTY_50, BANKING, IT, AUTO, PHARMA, ENERGY/Oil & Resources, FMCG, METAL, MID_CAP, SMALL_CAP).
+        """
+        seen = set()
+        all_symbols = []
+        for sec_name, syms in SECTOR_UNIVERSES.items():
+            for s in syms:
+                norm = s.strip().upper()
+                if norm not in seen:
+                    seen.add(norm)
+                    all_symbols.append(norm)
+        return all_symbols
+
+    @staticmethod
+    async def run_all_sectors_screener(
+        force_refresh: bool = False,
+        min_score: float = 70.0
+    ) -> dict:
+        """
+        Runs multi-factor screening across ALL 10 screener sectors in paced batches of 5 symbols
+        with inter-batch pauses to strictly protect Fyers API budget (< 4 req/sec).
+        Returns aggregated buy candidates and top setups.
+        """
+        all_symbols = ScreenerService.get_all_sector_symbols()
+        logger.info(f"Starting Multi-Sector Swing Screener for all {len(all_symbols)} unique symbols across {len(SECTOR_UNIVERSES)} sectors...")
+
+        batch_size = 5
+        all_results = []
+        for i in range(0, len(all_symbols), batch_size):
+            batch = all_symbols[i:i + batch_size]
+            tasks = [ScreenerService._analyze_symbol(sym, force_refresh=force_refresh) for sym in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for res in results:
+                if isinstance(res, dict) and res.get("total_score", 0) > 0 and not res.get("error"):
+                    all_results.append(res)
+
+            if i + batch_size < len(all_symbols):
+                # Pacing delay between batches to respect rate limits
+                await asyncio.sleep(0.3)
+
+        buy_stocks = [r for r in all_results if r.get("action") == "BUY" and float(r.get("total_score", 0) or 0) >= min_score]
+        buy_stocks.sort(key=lambda x: float(x.get("total_score", 0) or 0), reverse=True)
+
+        return {
+            "total_scanned": len(all_symbols),
+            "sectors_scanned": list(SECTOR_UNIVERSES.keys()),
+            "buy_stocks": buy_stocks,
+            "all_results": all_results,
+            "setups_found": len(buy_stocks)
+        }
+
+    @staticmethod
     async def _analyze_symbol(symbol: str, force_refresh: bool = False) -> dict:
         """Analyze a single symbol across all three dimensions."""
         cache_key = f"screener_analysis:{symbol}"

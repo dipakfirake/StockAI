@@ -1240,8 +1240,15 @@ class SwingAuditService:
                 else f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
             )
             target_path = audit_dir / filename
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            wb.save(target_path)
+            try:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                wb.save(target_path)
+            except Exception as save_err:
+                logger.warning(f"Could not save directly to {target_path} ({save_err}). Attempting temporary directory fallback.")
+                import tempfile
+                fallback_tmp = Path(tempfile.gettempdir()) / filename
+                wb.save(fallback_tmp)
+                target_path = fallback_tmp
 
             if cycle.excel_file_path != str(target_path):
                 cycle.excel_file_path = str(target_path)

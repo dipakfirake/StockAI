@@ -4,7 +4,7 @@ import os
 from datetime import date, datetime, timezone
 from typing import Optional, List, Dict, Any
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -118,8 +118,8 @@ async def sync_audit_prices(
         if run_scan:
             try:
                 from backend.services.screener import ScreenerService
-                from backend.data.ingestion.candle_ingestion import NSE_NIFTY50_SYMBOLS
-                screener_data = await ScreenerService.run_screener(NSE_NIFTY50_SYMBOLS, force_refresh=True)
+                # Run multi-sector screener across ALL 10 sectors (including Energy/Oil & Resources and Smallcap Momentum)
+                screener_data = await ScreenerService.run_all_sectors_screener(force_refresh=True, min_score=70.0)
                 buy_candidates = screener_data.get("buy_stocks", []) if isinstance(screener_data, dict) else []
                 for item in buy_candidates:
                     score = float(item.get("total_score", 0.0) or 0.0)
@@ -138,7 +138,7 @@ async def sync_audit_prices(
                         except Exception:
                             pass
             except Exception as scan_err:
-                logger.warning(f"Screener scan step in manual sync encountered error: {scan_err}")
+                logger.warning(f"Multi-sector screener scan step in manual sync encountered error: {scan_err}")
 
         res = await swing_audit_service.update_daily_prices(db)
         if isinstance(res, dict):
@@ -153,14 +153,16 @@ async def sync_audit_prices(
         }
 
 
-@router.get("/download-latest")
+@router.api_route("/download-latest", methods=["GET", "HEAD"])
 async def download_latest_audit_excel(
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
     Download the latest 11-day audit Excel workbook (.xlsx) with formatting and formulas.
     Always generates or validates an up-to-date workbook before streaming.
     Streams file bytes directly (never cached by nginx or browser).
+    Supports HEAD method for uptime monitors, curl -I, and health probes.
     """
     import io
     from fastapi.responses import Response
@@ -208,11 +210,13 @@ async def download_latest_audit_excel(
             file_bytes = f.read()
 
         filename = os.path.basename(excel_path)
+        content_to_send = b"" if request.method == "HEAD" else file_bytes
         return Response(
-            content=file_bytes,
+            content=content_to_send,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
                 "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(file_bytes)),
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
                 "Pragma": "no-cache",
                 "Expires": "0",

@@ -528,7 +528,16 @@ async def test_swing_audit_api_download_latest_route(tmp_path):
             assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             assert "attachment" in resp.headers["content-disposition"]
             assert "Swing_Trade_Audit_" in resp.headers["content-disposition"]
+            assert "no-store" in resp.headers.get("cache-control", "")
             assert len(resp.content) > 0
+
+            # Test HEAD request (used by curl -I, health monitors)
+            head_resp = await client.head("/api/swing-audit/download-latest")
+            assert head_resp.status_code == 200
+            assert head_resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            assert "no-store" in head_resp.headers.get("cache-control", "")
+            assert int(head_resp.headers.get("content-length", 0)) > 0
+            assert len(head_resp.content) == 0  # HEAD body must be empty per HTTP RFC
 
     app.dependency_overrides.clear()
 
@@ -640,7 +649,7 @@ async def test_run_eod_screener_and_audit_sync_task():
         "total_pnl_rupees": 5000.0
     }
 
-    with patch("backend.services.screener.ScreenerService.run_screener", new=AsyncMock(return_value=fake_screener_data)), \
+    with patch("backend.services.screener.ScreenerService.run_all_sectors_screener", new=AsyncMock(return_value=fake_screener_data)), \
          patch("backend.services.swing_audit_service.swing_audit_service.track_swing_trade", new=AsyncMock()) as mock_track, \
          patch("backend.services.swing_audit_service.swing_audit_service.update_daily_prices", new=AsyncMock(return_value=mock_sync_result)), \
          patch("backend.core.database.AsyncSessionLocal"):
@@ -655,7 +664,7 @@ async def test_run_eod_screener_and_audit_sync_task():
 
 @pytest.mark.asyncio
 async def test_sync_audit_prices_endpoint_with_run_scan():
-    """Verify POST /api/swing-audit/sync?run_scan=true executes fresh scan step."""
+    """Verify POST /api/swing-audit/sync?run_scan=true executes multi-sector scan step."""
     from httpx import AsyncClient, ASGITransport
     from backend.main import app
     from backend.core.database import get_db
@@ -676,7 +685,7 @@ async def test_sync_audit_prices_endpoint_with_run_scan():
 
     fake_sync = {"status": "success", "updated_count": 5, "win_rate": 60.0, "total_pnl_rupees": 3500.0}
 
-    with patch("backend.services.screener.ScreenerService.run_screener", new=AsyncMock(return_value=fake_screener)), \
+    with patch("backend.services.screener.ScreenerService.run_all_sectors_screener", new=AsyncMock(return_value=fake_screener)), \
          patch("backend.services.swing_audit_service.swing_audit_service.track_swing_trade", new=AsyncMock()), \
          patch("backend.services.swing_audit_service.swing_audit_service.update_daily_prices", new=AsyncMock(return_value=fake_sync)):
 
@@ -690,3 +699,27 @@ async def test_sync_audit_prices_endpoint_with_run_scan():
             assert data["updated_count"] == 5
 
     app.dependency_overrides.clear()
+
+
+def test_screener_service_get_all_sector_symbols():
+    """Verify get_all_sector_symbols includes Energy/Oil & Resources, Smallcap Momentum, and all 10 universes."""
+    from backend.services.screener import ScreenerService, SECTOR_UNIVERSES
+
+    symbols = ScreenerService.get_all_sector_symbols()
+    assert len(symbols) >= 80
+    assert len(symbols) == len(set(symbols))  # Deduplicated
+
+    # Verify key symbols across requested user categories
+    # Oil & Resources
+    assert "ONGC.NS" in symbols
+    assert "BPCL.NS" in symbols
+    assert "RELIANCE.NS" in symbols
+
+    # Smallcap Momentum
+    assert "SUZLON.NS" in symbols
+    assert "CDSL.NS" in symbols
+    assert "BSE.NS" in symbols
+
+    # Midcap Growth
+    assert "POLYCAB.NS" in symbols
+    assert "DIXON.NS" in symbols

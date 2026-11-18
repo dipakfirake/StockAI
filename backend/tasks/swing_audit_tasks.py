@@ -33,11 +33,11 @@ async def run_eod_screener_and_audit_sync_async():
     from backend.services.swing_audit_service import swing_audit_service
     from backend.data.ingestion.candle_ingestion import NSE_NIFTY50_SYMBOLS
 
-    # Phase 1: Fresh market scan
-    logger.info("EOD Pipeline Step 1/3: Running fresh Swing Screener scan...")
-    screener_data = await ScreenerService.run_screener(NSE_NIFTY50_SYMBOLS, force_refresh=True)
+    # Phase 1: Fresh market scan across ALL 10 screener sectors (Oil & Resources, Small Momentum, Midcap, Nifty 50, Banking, IT, etc.)
+    logger.info("EOD Pipeline Step 1/3: Running fresh multi-sector Swing Screener scan across all universes...")
+    screener_data = await ScreenerService.run_all_sectors_screener(force_refresh=True, min_score=70.0)
     buy_candidates = screener_data.get("buy_stocks", []) if isinstance(screener_data, dict) else []
-    logger.info(f"EOD Pipeline: Found {len(buy_candidates)} BUY candidate(s) in market scan.")
+    logger.info(f"EOD Pipeline: Found {len(buy_candidates)} BUY candidate(s) across all {screener_data.get('total_scanned', 0)} symbols scanned.")
 
     cataloged_count = 0
     async with AsyncSessionLocal() as db:
