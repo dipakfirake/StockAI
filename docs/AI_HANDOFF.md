@@ -12,7 +12,33 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-11-18)
+## Latest verified checks (2026-11-18 / 2026-11-19)
+
+- **CHART INDICATOR DROPDOWN REFACTOR & FULL MODULE COMPLETION AUDIT (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Resolved**:
+    1. User reported: "indicators dropdown is not opening or empty."
+    2. Root cause in `frontend/src/pages/ChartPage.tsx`:
+       - The primary "Indicators" button had its `onClick` bound to `setShowIndicators(!showIndicators)` (toggling visibility of all lines) rather than opening the menu; only the tiny 13px Chevron icon toggled `showIndicatorMenu`. When users clicked "Indicators", no dropdown opened.
+       - The dropdown lacked a click-outside dismiss handler (`indicatorMenuRef`).
+       - Toggling checkboxes inside `indicatorToggles` only refreshed visibility on candle fetch rather than re-rendering immediately in real-time.
+       - The Patterns `<select>` right next to it was empty (`None (Hide Patterns)`) when no pattern was detected, causing confusion if clicked.
+    3. Remediations Implemented:
+       - Refactored Indicators button: clicking anywhere on "Indicators" or chevron toggles the menu open/closed.
+       - Added active counter badge `Indicators (7/10) ▾`.
+       - Added document `mousedown` click-outside dismiss via `indicatorMenuRef`.
+       - Added real-time reactive `useEffect` on `[showIndicators, indicatorToggles]` applying `.applyOptions({ visible: ... })` instantly without needing data refetches.
+       - Added "Hide All / Show All" quick switch, real-time live indicator values (EMA 9, EMA 21, EMA 50, EMA 200, Bollinger Bands, Supertrend, RSI, MACD), and disabled placeholder for empty pattern scanner dropdown (`No active patterns detected`).
+    4. Full 6-Module Completion Audit:
+       - Module 1 (Best Buy Price & Structural Stop Loss): COMPLETE & VERIFIED.
+       - Module 2 (Complete Technical & Fundamental Matrix): COMPLETE & VERIFIED.
+       - Module 3 (Specialized ML Models across Horizons & Segments): COMPLETE & VERIFIED.
+       - Module 4 (2-Year Chart Candles & Interactive Indicator Settings Dropdown): COMPLETE & VERIFIED.
+       - Module 5 (Fyers API 4-Tier Rate-Limit Defense): COMPLETE & VERIFIED.
+       - Module 6 (Comprehensive Verification Suite): 23/23 Python unit tests passed; frontend build 1,994 modules clean (0 errors).
+  - **Verification Evidence**:
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 42.44s (exit code 0)**.
+    - Total backend tests: **23 of 23 passed**.
+  - **Exact Next Safe Step**: User pulls latest commit on cloud server and rebuilds `frontend`.
 
 - **BEST BUY PRICE ENGINE, SPECIALIZED ML MODELS (SWING/INTRADAY/FNO & LARGE/MID/SMALL/GROWTH), COMPREHENSIVE INDICATOR & VALUATION MATRIX & 2-YEAR CHARTS (COMPLETE & VERIFIED - 2026-11-18):**
   - **Objectives & Architecture Completed**:

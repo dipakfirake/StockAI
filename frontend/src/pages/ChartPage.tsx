@@ -95,6 +95,22 @@ export default function ChartPage() {
     macd: true,
   })
   const [showIndicatorMenu, setShowIndicatorMenu] = useState(false)
+  const indicatorMenuRef = useRef<HTMLDivElement>(null)
+
+  // Click-outside listener to close indicator dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (indicatorMenuRef.current && !indicatorMenuRef.current.contains(event.target as Node)) {
+        setShowIndicatorMenu(false)
+      }
+    }
+    if (showIndicatorMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showIndicatorMenu])
   const [showPatterns, setShowPatterns] = useLocalStorage('chart_show_patterns', false)
   const [showEvents, setShowEvents] = useLocalStorage('chart_show_events', false)
   const [showVolumeProfile, setShowVolumeProfile] = useLocalStorage('chart_show_vp', false)
@@ -978,6 +994,33 @@ export default function ChartPage() {
     }
   }, [selectedPattern, patterns, rawCandles]);
 
+  // Dynamic Indicator Series & Sub-Chart Visibility Sync
+  useEffect(() => {
+    ema9SeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.ema9 ?? true) })
+    ema21SeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.ema21 ?? true) })
+    ema50SeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.ema50 ?? true) })
+    ema200SeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.ema200 ?? true) })
+    bbUpperSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.bb ?? true) })
+    bbMiddleSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.bb ?? true) })
+    bbLowerSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.bb ?? true) })
+    vwapSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.vwap ?? true) })
+    supertrendSeriesRef.current?.applyOptions({ visible: showIndicators && (indicatorToggles.supertrend ?? true) })
+    volumeSeriesRef.current?.applyOptions({ visible: indicatorToggles.volume ?? true })
+
+    const timer = setTimeout(() => {
+      if (chartContainerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({ width: chartContainerRef.current.clientWidth })
+      }
+      if (rsiContainerRef.current && rsiChartRef.current) {
+        rsiChartRef.current.applyOptions({ width: rsiContainerRef.current.clientWidth })
+      }
+      if (macdContainerRef.current && macdChartRef.current) {
+        macdChartRef.current.applyOptions({ width: macdContainerRef.current.clientWidth })
+      }
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [showIndicators, indicatorToggles])
+
   // Fix Lightweight Charts 0-width issue when container changes from display: none to display: block
   useEffect(() => {
     setTimeout(() => {
@@ -1571,6 +1614,9 @@ export default function ChartPage() {
              <option value="" disabled>👁️ Patterns Overlay</option>
              <option value="clear">None (Hide Patterns)</option>
              <option disabled>──────────</option>
+             {visiblePatterns.length === 0 && (
+               <option value="" disabled>No active patterns detected</option>
+             )}
              {Array.from(new Set(visiblePatterns.map(p => p.pattern))).map(patternName => (
                <option key={patternName as string} value={patternName as string}>
                  {patternName as string}
@@ -1579,22 +1625,38 @@ export default function ChartPage() {
           </select>
 
           <div className="mobile-scroll-tabs" style={{ display: 'flex', gap: 4, alignItems: 'center', background: 'var(--color-bg-secondary)', padding: '4px', borderRadius: '8px', border: '1px solid var(--color-border)', maxWidth: '100%', position: 'relative' }}>
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <div ref={indicatorMenuRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
               <button 
-                onClick={() => setShowIndicators(!showIndicators)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowIndicatorMenu(prev => !prev);
+                }}
                 className="btn btn-ghost no-shrink" 
-                style={{ fontSize: 13, padding: '4px 6px 4px 10px', height: '28px', color: showIndicators ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showIndicators ? 600 : 400, display: 'flex', alignItems: 'center' }}
-                title="Toggle All Indicators"
+                style={{ 
+                  fontSize: 13, 
+                  padding: '4px 8px', 
+                  height: '28px', 
+                  color: showIndicators ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', 
+                  fontWeight: showIndicators ? 600 : 400, 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  gap: 5
+                }}
+                title="Open Indicator & Overlay Settings"
               >
-                <Activity size={14} style={{ marginRight: 4 }} /> Indicators
-              </button>
-              <button 
-                onClick={(e) => { e.stopPropagation(); setShowIndicatorMenu(!showIndicatorMenu) }}
-                className="btn btn-ghost no-shrink"
-                style={{ fontSize: 11, padding: '4px 6px', height: '28px', color: 'var(--color-text-muted)' }}
-                title="Configure Individual Indicators"
-              >
-                <ChevronDown size={13} />
+                <Activity size={14} />
+                <span>Indicators</span>
+                <span style={{
+                  fontSize: 10,
+                  padding: '1px 5px',
+                  borderRadius: 10,
+                  background: showIndicators ? 'rgba(56, 189, 248, 0.2)' : 'rgba(100, 116, 139, 0.2)',
+                  color: showIndicators ? '#38bdf8' : '#94a3b8',
+                  fontWeight: 700
+                }}>
+                  {showIndicators ? `${Object.values(indicatorToggles).filter(Boolean).length}/10` : 'OFF'}
+                </span>
+                <ChevronDown size={13} style={{ transform: showIndicatorMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
               </button>
 
               {/* Individual Indicator Toggle Dropdown */}
@@ -1610,51 +1672,80 @@ export default function ChartPage() {
                     backdropFilter: 'blur(12px)',
                     border: '1px solid rgba(56, 189, 248, 0.3)',
                     borderRadius: 8,
-                    padding: '10px 14px',
-                    zIndex: 200,
-                    width: 230,
-                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.6)'
+                    padding: '12px 14px',
+                    zIndex: 9999,
+                    width: 270,
+                    maxHeight: '440px',
+                    overflowY: 'auto',
+                    boxShadow: '0 12px 30px -5px rgba(0, 0, 0, 0.7)'
                   }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4 }}>
-                    Overlay Indicators
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Indicators & Overlays
+                    </span>
+                    <button
+                      onClick={() => setShowIndicators(prev => !prev)}
+                      style={{
+                        background: showIndicators ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '2px 6px',
+                        fontSize: 10,
+                        color: showIndicators ? '#10b981' : '#ef4444',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                    >
+                      {showIndicators ? 'Hide All' : 'Show All'}
+                    </button>
+                  </div>
+
+                  <div style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 6 }}>
+                    Chart Overlays
                   </div>
                   {[
-                    { key: 'ema9', label: 'EMA 9 (Fast)', color: '#3b82f6' },
-                    { key: 'ema21', label: 'EMA 21 (Pullback)', color: '#f59e0b' },
-                    { key: 'ema50', label: 'EMA 50 (Trend)', color: '#8b5cf6' },
-                    { key: 'ema200', label: 'EMA 200 (Macro)', color: '#ec4899' },
-                    { key: 'vwap', label: 'VWAP', color: '#d946ef' },
-                    { key: 'supertrend', label: 'Supertrend', color: '#10b981' },
-                    { key: 'bb', label: 'Bollinger Bands', color: '#06b6d4' },
+                    { key: 'ema9', label: 'EMA 9 (Fast)', color: '#3b82f6', val: indicators?.ema_9 ? indicators.ema_9.toFixed(2) : null },
+                    { key: 'ema21', label: 'EMA 21 (Pullback)', color: '#f59e0b', val: indicators?.ema_21 ? indicators.ema_21.toFixed(2) : null },
+                    { key: 'ema50', label: 'EMA 50 (Trend)', color: '#8b5cf6', val: indicators?.ema_50 ? indicators.ema_50.toFixed(2) : null },
+                    { key: 'ema200', label: 'EMA 200 (Macro)', color: '#ec4899', val: indicators?.ema_200 ? indicators.ema_200.toFixed(2) : null },
+                    { key: 'vwap', label: 'VWAP', color: '#d946ef', val: null },
+                    { key: 'supertrend', label: 'Supertrend', color: '#10b981', val: indicators?.supertrend ? (typeof indicators.supertrend === 'object' ? Number(indicators.supertrend.value || 0).toFixed(2) : Number(indicators.supertrend).toFixed(2)) : null },
+                    { key: 'bb', label: 'Bollinger Bands', color: '#06b6d4', val: indicators?.bb_upper ? `${indicators.bb_upper.toFixed(1)} / ${indicators.bb_lower?.toFixed(1)}` : null },
                   ].map(ind => (
-                    <label key={ind.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#f8fafc', padding: '3px 0', cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={indicatorToggles[ind.key] ?? true} 
-                        onChange={(e) => setIndicatorToggles({ ...indicatorToggles, [ind.key]: e.target.checked })} 
-                      />
-                      <span style={{ color: ind.color, fontWeight: 700 }}>●</span>
-                      <span>{ind.label}</span>
+                    <label key={ind.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: '#f8fafc', padding: '3px 0', cursor: 'pointer' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <input 
+                          type="checkbox" 
+                          checked={indicatorToggles[ind.key] ?? true} 
+                          onChange={(e) => setIndicatorToggles({ ...indicatorToggles, [ind.key]: e.target.checked })} 
+                        />
+                        <span style={{ color: ind.color, fontWeight: 700, fontSize: 10 }}>●</span>
+                        <span>{ind.label}</span>
+                      </div>
+                      {ind.val && <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ind.val}</span>}
                     </label>
                   ))}
 
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 10, marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', marginTop: 10, marginBottom: 6, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 6 }}>
                     Sub-Chart Panes
                   </div>
                   {[
-                    { key: 'rsi', label: 'RSI (14)', color: '#a855f7' },
-                    { key: 'macd', label: 'MACD (12, 26, 9)', color: '#3b82f6' },
-                    { key: 'volume', label: 'Volume Histogram', color: '#26a69a' },
+                    { key: 'rsi', label: 'RSI (14)', color: '#a855f7', val: indicators?.rsi_14 ? indicators.rsi_14.toFixed(1) : null },
+                    { key: 'macd', label: 'MACD (12, 26, 9)', color: '#3b82f6', val: indicators?.macd ? indicators.macd.toFixed(2) : null },
+                    { key: 'volume', label: 'Volume Histogram', color: '#26a69a', val: null },
                   ].map(ind => (
-                    <label key={ind.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#f8fafc', padding: '3px 0', cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={indicatorToggles[ind.key] ?? true} 
-                        onChange={(e) => setIndicatorToggles({ ...indicatorToggles, [ind.key]: e.target.checked })} 
-                      />
-                      <span style={{ color: ind.color, fontWeight: 700 }}>●</span>
-                      <span>{ind.label}</span>
+                    <label key={ind.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: '#f8fafc', padding: '3px 0', cursor: 'pointer' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <input 
+                          type="checkbox" 
+                          checked={indicatorToggles[ind.key] ?? true} 
+                          onChange={(e) => setIndicatorToggles({ ...indicatorToggles, [ind.key]: e.target.checked })} 
+                        />
+                        <span style={{ color: ind.color, fontWeight: 700, fontSize: 10 }}>●</span>
+                        <span>{ind.label}</span>
+                      </div>
+                      {ind.val && <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{ind.val}</span>}
                     </label>
                   ))}
                 </div>
