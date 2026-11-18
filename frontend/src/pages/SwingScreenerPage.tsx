@@ -13,6 +13,7 @@ interface TargetLevel {
   level: string
   price: number
   gain_pct: number
+  cmp_gain_pct?: number
   reward_to_risk: number
 }
 
@@ -35,6 +36,8 @@ interface TradePlan {
   expected_gain_pct: number
   risk_pct: number
   reward_to_risk: number
+  cmp_gain_pct?: number
+  cmp_risk_pct?: number
   estimated_hold_time: string
   targets?: TargetLevel[]
 }
@@ -765,20 +768,29 @@ export default function SwingScreenerPage() {
                       </div>
                       <div>
                         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                          {isSell ? 'Target' : isHold ? 'Resistance' : 'Target'}
+                          {isSell ? 'Target Price' : isHold ? 'Resistance' : 'Target Price'}
                         </div>
                         <div style={{ fontSize: 14, fontWeight: 600, color: isSell ? 'var(--color-bearish)' : (isHold ? 'var(--color-text-primary)' : 'var(--color-bullish)') }}>
                           ₹{plan.target_price.toFixed(2)}
-                          <div style={{ fontSize: 10, fontWeight: 500 }}>({isSell ? '-' : '+'}{plan.expected_gain_pct.toFixed(1)}%)</div>
+                          <div style={{ fontSize: 10, fontWeight: 600 }}>
+                            {isSell ? '-' : '+'}{plan.expected_gain_pct.toFixed(1)}% <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--color-text-muted)' }}>from Best Buy</span>
+                          </div>
+                          {plan.cmp_gain_pct !== undefined && Math.abs((plan.best_buy_price || plan.entry_price) - (plan.current_price || plan.cmp || 0)) > 0.05 && (
+                            <div style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>
+                              ({plan.cmp_gain_pct >= 0 ? '+' : ''}{plan.cmp_gain_pct.toFixed(1)}% from CMP)
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div>
                         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                          {isHold ? 'Support' : 'Stop Loss'}
+                          {isHold ? 'Support Base' : 'Stop Loss'}
                         </div>
                         <div style={{ fontSize: 14, fontWeight: 600, color: isHold ? 'var(--color-text-primary)' : 'var(--color-bearish)' }}>
                           ₹{plan.stop_loss.toFixed(2)}
-                          <div style={{ fontSize: 10, fontWeight: 500 }}>(-{plan.risk_pct.toFixed(1)}%)</div>
+                          <div style={{ fontSize: 10, fontWeight: 600 }}>
+                            -{plan.risk_pct.toFixed(1)}% <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--color-text-muted)' }}>from Best Buy</span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -835,7 +847,7 @@ export default function SwingScreenerPage() {
                       <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, fontSize: 10, color: 'var(--color-text-muted)' }}>
                         {plan.targets.map((tgt, i) => (
                           <div key={i} style={{ whiteSpace: 'nowrap' }}>
-                            <span>T{i+1}: <strong>₹{tgt.price}</strong> (+{tgt.gain_pct}%)</span>
+                            <span>T{i+1}: <strong style={{ color: 'var(--color-text-primary)' }}>₹{tgt.price}</strong> (+{tgt.gain_pct}% from Best Buy)</span>
                           </div>
                         ))}
                       </div>
@@ -951,7 +963,21 @@ export default function SwingScreenerPage() {
                       )}
                     </td>
                     <td style={{ padding: '12px 16px', color: isSell ? 'var(--color-bearish)' : (isBuy ? 'var(--color-bullish)' : 'inherit'), fontWeight: 500 }}>
-                      {plan ? `₹${plan.target_price.toFixed(2)} (${isSell ? '-' : '+'}${plan.expected_gain_pct.toFixed(1)}%)` : '—'}
+                      {plan ? (
+                        <div>
+                          <div style={{ fontWeight: 600 }}>₹{plan.target_price.toFixed(2)}</div>
+                          <div style={{ fontSize: 10, color: isSell ? 'var(--color-bearish)' : (isBuy ? 'var(--color-bullish)' : 'var(--color-text-muted)') }}>
+                            {isSell ? '-' : '+'}{plan.expected_gain_pct.toFixed(1)}% from Best Buy
+                          </div>
+                          {plan.cmp_gain_pct !== undefined && Math.abs((plan.best_buy_price || plan.entry_price) - (plan.current_price || plan.cmp || 0)) > 0.05 && (
+                            <div style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>
+                              ({plan.cmp_gain_pct >= 0 ? '+' : ''}{plan.cmp_gain_pct.toFixed(1)}% from CMP)
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td style={{ padding: '12px 16px', color: isBuy ? 'var(--color-bearish)' : 'inherit', fontWeight: 500 }}>
                       {plan ? `₹${plan.stop_loss.toFixed(2)} (-${plan.risk_pct.toFixed(1)}%)` : '—'}

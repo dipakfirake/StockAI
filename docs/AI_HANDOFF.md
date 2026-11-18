@@ -14,6 +14,32 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **TARGET PRICE & STAGED GAINS STRICT ANCHORING TO CALCULATED BEST BUY PRICE (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Resolved**:
+    1. User observed: *"still target price is showing to current price not at after calculation price means below or above or equal to current price because it is set by using analysis and all calculations so i want that."*
+    2. Forensic Root Causes:
+       - In `backend/services/screener.py` lines 523–542, `gain_pct` on `targets_breakdown` ($T_1, T_2, T_3$) was dividing by `current_price` (CMP) instead of `optimal_entry_price` (`best_buy_price`). Users saw the percentage gains computed against CMP rather than the calculated after-analysis entry zone.
+       - In `HOLD` (Consolidation) mode, `optimal_entry_price` was hardcoded to `current_price` and targets were flatly set to `current_price + 1.2 * atr`, bypassing structural technical support/resistance levels.
+       - In `frontend/src/pages/ChartPage.tsx`, `getLiveSetup` used `latestCandle.close` (CMP) as its entry price rather than prioritizing `swingTrade.trade_plan.best_buy_price`.
+       - Target price cards lacked explicit differentiation between `% gain from Best Buy` and `% gain from CMP`.
+    3. Remediations Implemented:
+       - **Backend Target Anchoring (`backend/services/screener.py`)**:
+         - All target prices ($T_1, T_2, T_3$) and expected gain metrics (`expected_gain_pct`, `gain_pct`) are derived and anchored strictly from `optimal_entry_price` (`best_buy_price`).
+         - Added `cmp_gain_pct` and `cmp_risk_pct` across all target levels and top-level trade plan for transparent contrast against CMP.
+         - In `HOLD` mode, structural support (`supp`) and resistance (`res`) are calculated from market structure (`swing_low`, `swing_high`, `bb_mid`), setting optimal entry at the accumulation support base (`supp + 0.15 * atr`), stop loss below floor, and target at the calculated ceiling (`res - 0.15 * atr`).
+       - **Frontend Transparency Upgrades (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+         - Card Target Metric shows: `₹{plan.target_price.toFixed(2)} (+{plan.expected_gain_pct.toFixed(1)}% from Best Buy)` and secondary `({plan.cmp_gain_pct}% from CMP)`.
+         - Staged Targets Breakdown: `T1/T2/T3: ₹{tgt.price} (+{tgt.gain_pct}% from Best Buy)`.
+         - Screener Table Target Column: Clear dual readout with gain from Best Buy and comparison to CMP.
+       - **Interactive Chart Setup Upgrades (`frontend/src/pages/ChartPage.tsx`)**:
+         - `getLiveSetup` prioritizes `swingTrade.trade_plan.best_buy_price`, `target_price`, and `stop_loss`.
+         - Swing Trade Setup banner states exact calculated entry, targets, and percentage gains from Best Buy.
+         - Multi-tier targets card shows dynamic milestones with gain from Best Buy and gain from CMP.
+  - **Verification Evidence**:
+    - Backend test suite: **27 of 27 passed (100% green)** in 90.46s (`test_best_buy_price_and_indicators.py`, `test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_swing_screener_categorization.py`).
+    - Frontend production build: **1,994 modules transformed, 0 TypeScript errors, built in 41.42s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` & `frontend`.
+
 - **INDICATOR INTERACTIVE ON/OFF PILLS & PERMANENT NON-VANISHING TOGGLE BAR (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Resolved**:
     1. User reported: "i want indicators to be on and off in indicators dropdown it shows empty and make on and off pill in front of it so i can turn it on and off at any time , now what happening that when i clicked at time the indicator got vanished and there is no option to turn on also".

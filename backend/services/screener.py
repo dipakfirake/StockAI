@@ -500,20 +500,37 @@ class ScreenerService:
             else:
                 action = "HOLD"
                 entry_type = "CONSOLIDATION"
-                optimal_entry_price = round(current_price, 2)
-                stop_loss = max(0.05, round(current_price - (1.2 * atr), 2))
-                risk_amount = max(0.01, current_price - stop_loss)
-                t1 = round(current_price + (0.8 * atr), 2)
-                t2 = round(current_price + (1.2 * atr), 2)
-                t3 = round(current_price + (1.8 * atr), 2)
+                
+                # Structural support & resistance calculated from market structure & indicators
+                supp = swing_low if swing_low > 0 else (bb_mid - 0.5 * atr if bb_mid > 0 else current_price - (1.0 * atr))
+                res = swing_high if swing_high > 0 else (bb_mid + 0.5 * atr if bb_mid > 0 else current_price + (1.0 * atr))
+                if res <= supp:
+                    res = current_price + (1.5 * atr)
+                    supp = max(0.05, current_price - (1.5 * atr))
+
+                # Optimal entry is at the accumulation base (support zone) - below CMP or at support
+                optimal_entry_price = round(max(0.05, supp + (0.15 * atr)), 2)
+                # Stop loss placed below support floor
+                stop_loss = max(0.05, round(supp - (0.5 * atr), 2))
+                risk_amount = max(0.01, optimal_entry_price - stop_loss)
+
+                # Targets derived strictly from calculated resistance and channel expansion
+                t2 = round(res - (0.15 * atr), 2)  # Primary ceiling target
+                if t2 <= optimal_entry_price:
+                    t2 = round(optimal_entry_price + (2.0 * risk_amount), 2)
+                t1 = round(optimal_entry_price + 0.5 * (t2 - optimal_entry_price), 2)  # Midpoint of range
+                t3 = round(res + (1.0 * atr), 2)  # Channel breakout runner
                 target = t2
-                entry_zone = f"Support: ₹{stop_loss:.2f} | Resistance: ₹{target:.2f}"
-                entry_advice = "Range-bound consolidation. Avoid fresh entries in channel midpoint; wait for breakout or boundary test."
+                entry_zone = f"Support Base: ₹{supp:.2f} | Ceiling: ₹{res:.2f}"
+                entry_advice = f"Range-bound consolidation. Stock is oscillating between Support (₹{supp:.2f}) and Resistance (₹{res:.2f}). Best entry is on accumulation near Support at ₹{optimal_entry_price:.2f} with Target ₹{target:.2f}."
 
             risk_amount = max(0.01, abs(optimal_entry_price - stop_loss))
             gain_pct = abs((target - optimal_entry_price) / optimal_entry_price) * 100 if optimal_entry_price > 0 else 0.0
             risk_pct = abs((optimal_entry_price - stop_loss) / optimal_entry_price) * 100 if optimal_entry_price > 0 else 0.0
             reward_to_risk = round(gain_pct / risk_pct, 2) if risk_pct > 0 else 2.5
+
+            cmp_gain_pct = round(abs(target - current_price) / current_price * 100, 2) if current_price > 0 else 0.0
+            cmp_risk_pct = round(abs(current_price - stop_loss) / current_price * 100, 2) if current_price > 0 else 0.0
 
             optimal_risk_amount = abs(optimal_entry_price - stop_loss)
             optimal_gain_pct = abs((target - optimal_entry_price) / optimal_entry_price) * 100 if optimal_entry_price > 0 else gain_pct
@@ -524,25 +541,28 @@ class ScreenerService:
                 {
                     "level": "T1 (Conservative)",
                     "price": round(t1, 2),
-                    "gain_pct": round(abs(t1 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
-                    "reward_to_risk": round(abs(t1 - current_price) / risk_amount, 2) if risk_amount > 0 else 0.0
+                    "gain_pct": round(abs(t1 - optimal_entry_price) / optimal_entry_price * 100, 2) if optimal_entry_price > 0 else 0.0,
+                    "cmp_gain_pct": round(abs(t1 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
+                    "reward_to_risk": round(abs(t1 - optimal_entry_price) / risk_amount, 2) if risk_amount > 0 else 0.0
                 },
                 {
                     "level": "T2 (Primary / Optimal)",
                     "price": round(t2, 2),
-                    "gain_pct": round(abs(t2 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
-                    "reward_to_risk": round(abs(t2 - current_price) / risk_amount, 2) if risk_amount > 0 else 0.0
+                    "gain_pct": round(abs(t2 - optimal_entry_price) / optimal_entry_price * 100, 2) if optimal_entry_price > 0 else 0.0,
+                    "cmp_gain_pct": round(abs(t2 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
+                    "reward_to_risk": round(abs(t2 - optimal_entry_price) / risk_amount, 2) if risk_amount > 0 else 0.0
                 },
                 {
                     "level": "T3 (Extended Breakout)",
                     "price": round(t3, 2),
-                    "gain_pct": round(abs(t3 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
-                    "reward_to_risk": round(abs(t3 - current_price) / risk_amount, 2) if risk_amount > 0 else 0.0
+                    "gain_pct": round(abs(t3 - optimal_entry_price) / optimal_entry_price * 100, 2) if optimal_entry_price > 0 else 0.0,
+                    "cmp_gain_pct": round(abs(t3 - current_price) / current_price * 100, 2) if current_price > 0 else 0.0,
+                    "reward_to_risk": round(abs(t3 - optimal_entry_price) / risk_amount, 2) if risk_amount > 0 else 0.0
                 }
             ]
 
-            # Estimate holding days (Target / average daily range)
-            base_days = max(3, int(round(abs(target - current_price) / (atr if atr > 0 else 1))))
+            # Estimate holding days (Target / average daily range from optimal entry)
+            base_days = max(3, int(round(abs(target - optimal_entry_price) / (atr if atr > 0 else 1))))
             max_days = base_days + max(3, int(base_days * 0.5))
             hold_time = f"{base_days} to {max_days} Days"
 
@@ -578,6 +598,8 @@ class ScreenerService:
                     "expected_gain_pct": round(gain_pct, 2),
                     "risk_pct": round(risk_pct, 2),
                     "reward_to_risk": round(gain_pct / risk_pct, 2) if risk_pct > 0 else 2.5,
+                    "cmp_gain_pct": cmp_gain_pct,
+                    "cmp_risk_pct": cmp_risk_pct,
                     "optimal_expected_gain_pct": round(gain_pct, 2),
                     "optimal_reward_to_risk": round(gain_pct / risk_pct, 2) if risk_pct > 0 else 2.5,
                     "estimated_hold_time": hold_time,

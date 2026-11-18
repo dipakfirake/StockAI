@@ -198,11 +198,15 @@ class TestOptimalEntryEngine:
         assert res is not None
         assert res["action"] == "BUY"
         plan = res["trade_plan"]
-        assert plan["entry_price"] == current_price
-        assert plan["entry_type"] == "PULLBACK_DIP"
+        assert plan["current_price"] == current_price
+        assert plan["cmp"] == current_price
+        assert plan["best_buy_price"] < current_price
+        assert plan["best_buy_price"] >= ema_21
+        assert "PULLBACK_DIP" in plan["entry_type"]
         assert plan["optimal_entry_price"] < current_price
         assert plan["optimal_entry_price"] >= ema_21
         assert "Dip to 21-EMA" in plan["entry_zone"]
-        assert plan["optimal_expected_gain_pct"] >= plan["expected_gain_pct"]
-        assert plan["optimal_reward_to_risk"] >= plan["reward_to_risk"]
+        assert plan["target_price"] > plan["best_buy_price"]
+        assert plan["expected_gain_pct"] > 0
+        assert plan["reward_to_risk"] >= 2.0
 

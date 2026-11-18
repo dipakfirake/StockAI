@@ -331,24 +331,34 @@ export default function ChartPage() {
     const isNeutral = latestPattern.pattern.includes('Doji');
     
     let action = 'WAIT';
-    const entry = latestCandle.close;
-    let sl = 0;
-    let target = 0;
+    // Prioritize calculated trade plan from screener analysis (Best Buy Price & optimal targets)
+    const calculatedPlan = swingTrade?.trade_plan;
+    const calculatedEntry = calculatedPlan?.best_buy_price || calculatedPlan?.optimal_entry_price || calculatedPlan?.entry_price;
+    const calculatedTarget = calculatedPlan?.target_price;
+    const calculatedSl = calculatedPlan?.stop_loss;
+
+    const entry = calculatedEntry || latestCandle.close;
+    let sl = calculatedSl || 0;
+    let target = calculatedTarget || 0;
     
-    if (isBullish && indicators.rsi_14 < 60) { // Relaxed RSI slightly to allow more setups
-      action = 'BUY';
-      sl = latestCandle.low - (indicators.atr_14 || entry * 0.01);
-      target = entry + (entry - sl) * 2; // 1:2 RR
-    } else if (isBearish && indicators.rsi_14 > 40) { // Relaxed RSI slightly
-      action = 'SELL';
-      sl = latestCandle.high + (indicators.atr_14 || entry * 0.01);
-      target = entry - (sl - entry) * 2; // 1:2 RR
-    } else if (isNeutral) {
-      action = 'WATCH';
-      sl = entry * 0.98;
-      target = entry * 1.04;
+    if (!calculatedSl || !calculatedTarget) {
+      if (isBullish && indicators.rsi_14 < 60) { // Relaxed RSI slightly to allow more setups
+        action = 'BUY';
+        sl = latestCandle.low - (indicators.atr_14 || entry * 0.01);
+        target = entry + (entry - sl) * 2.5; // 1:2.5 RR
+      } else if (isBearish && indicators.rsi_14 > 40) { // Relaxed RSI slightly
+        action = 'SELL';
+        sl = latestCandle.high + (indicators.atr_14 || entry * 0.01);
+        target = entry - (sl - entry) * 2.5; // 1:2.5 RR
+      } else if (isNeutral) {
+        action = 'WATCH';
+        sl = entry * 0.98;
+        target = entry * 1.04;
+      } else {
+        return null;
+      }
     } else {
-      return null;
+      action = (swingTrade?.action === 'BUY' || swingTrade?.action === 'SELL') ? swingTrade.action : (isBullish ? 'BUY' : isBearish ? 'SELL' : 'WATCH');
     }
     
     return {
@@ -2742,13 +2752,13 @@ export default function ChartPage() {
               <Info size={18} style={{ flexShrink: 0 }} />
               <div>
                 {swingTrade.action === 'BUY' && (
-                  <span><strong>Bullish Signal:</strong> High conviction score ({(swingTrade.total_score ?? 60).toFixed(1)}/100). Favorable reward-to-risk setup. Target is ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (+{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}%) with Stop Loss at ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)}.</span>
+                  <span><strong>Bullish Signal:</strong> High conviction score ({(swingTrade.total_score ?? 60).toFixed(1)}/100). Favorable reward-to-risk setup. Target is ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (+{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}% from Best Buy ₹{(swingTrade.trade_plan?.best_buy_price || swingTrade.trade_plan?.entry_price || 0).toFixed(2)}) with Stop Loss at ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)}.</span>
                 )}
                 {swingTrade.action === 'SELL' && (
-                  <span><strong>Bearish Signal:</strong> Low conviction score ({(swingTrade.total_score ?? 40).toFixed(1)}/100). Downward momentum detected. Expected drop to ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (-{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}%). Capital preservation recommended.</span>
+                  <span><strong>Bearish Signal:</strong> Low conviction score ({(swingTrade.total_score ?? 40).toFixed(1)}/100). Downward momentum detected. Expected drop to ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (-{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}% from Best Entry ₹{(swingTrade.trade_plan?.best_buy_price || swingTrade.trade_plan?.entry_price || 0).toFixed(2)}). Capital preservation recommended.</span>
                 )}
                 {swingTrade.action === 'HOLD' && (
-                  <span><strong>Neutral / Consolidation (Neither Buy Nor Sell):</strong> The stock is range-bound between Lower Support ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)} (-{(swingTrade.trade_plan?.risk_pct ?? 0).toFixed(2)}%) and Upper Resistance ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (+{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}%). Both percentages are symmetric because price is oscillating in the middle of its channel. <em>Action: Do not buy blindly in mid-channel; wait for a breakout above ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} or look for reversal buying near ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)}.</em></span>
+                  <span><strong>Neutral / Consolidation (Neither Buy Nor Sell):</strong> The stock is range-bound between Calculated Support ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)} (-{(swingTrade.trade_plan?.risk_pct ?? 0).toFixed(2)}%) and Calculated Resistance ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} (+{(swingTrade.trade_plan?.expected_gain_pct ?? 0).toFixed(2)}% from Base). <em>Action: Do not buy blindly in mid-channel; wait for a confirmed breakout above ₹{(swingTrade.trade_plan?.target_price ?? 0).toFixed(2)} or look for reversal accumulation near Support ₹{(swingTrade.trade_plan?.stop_loss ?? 0).toFixed(2)}.</em></span>
                 )}
               </div>
             </div>
@@ -2760,25 +2770,30 @@ export default function ChartPage() {
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
-                  {swingTrade.action === 'SELL' ? 'Expected Drop' : (swingTrade.action === 'HOLD' ? 'Upper Resistance (Ceiling)' : 'Potential Gain (Target)')}
+                  {swingTrade.action === 'SELL' ? 'Expected Drop' : (swingTrade.action === 'HOLD' ? 'Upper Resistance' : 'Potential Gain (Target)')}
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: swingTrade.action === 'SELL' ? 'var(--color-bearish)' : (swingTrade.action === 'HOLD' ? 'var(--color-text-primary)' : 'var(--color-bullish)') }}>
                   {swingTrade.action === 'SELL' ? '-' : '+'}{(swingTrade.trade_plan?.expected_gain_pct ?? 15).toFixed(2)}%
                 </div>
+                <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>from Best Buy</div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
-                  {swingTrade.action === 'HOLD' ? 'Lower Support (Floor)' : 'Max Risk (Stop Loss)'}
+                  {swingTrade.action === 'HOLD' ? 'Lower Support' : 'Max Risk (Stop Loss)'}
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: swingTrade.action === 'HOLD' ? 'var(--color-text-primary)' : 'var(--color-bearish)' }}>
                   -{(swingTrade.trade_plan?.risk_pct ?? 7).toFixed(2)}%
                 </div>
+                <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>from Best Buy</div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
-                  {swingTrade.action === 'HOLD' ? 'Current Level' : 'Entry Price'}
+                  {swingTrade.action === 'HOLD' ? 'Accumulation Base' : 'Best Buy / Entry Price'}
                 </div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{(swingTrade.trade_plan?.entry_price ?? 0).toFixed(2)}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#38bdf8' }}>₹{(swingTrade.trade_plan?.best_buy_price || swingTrade.trade_plan?.entry_price || 0).toFixed(2)}</div>
+                <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                  CMP: ₹{(quote?.price || swingTrade.trade_plan?.current_price || swingTrade.trade_plan?.cmp || 0).toFixed(2)}
+                </div>
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
@@ -2788,9 +2803,12 @@ export default function ChartPage() {
               </div>
               <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
-                  {swingTrade.action === 'HOLD' ? 'Resistance Price' : 'Target Price'}
+                  {swingTrade.action === 'HOLD' ? 'Resistance Price' : 'Target Price (T2)'}
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>₹{(swingTrade.trade_plan?.target_price ?? 1700).toFixed(2)}</div>
+                <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                  {swingTrade.trade_plan?.cmp_gain_pct !== undefined ? `(${swingTrade.trade_plan.cmp_gain_pct >= 0 ? '+' : ''}${swingTrade.trade_plan.cmp_gain_pct.toFixed(1)}% from CMP)` : ''}
+                </div>
               </div>
             </div>
 
@@ -2799,10 +2817,10 @@ export default function ChartPage() {
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                    Multi-Tier Price Targets (Dynamic Milestones)
+                    Multi-Tier Price Targets (Dynamic Milestones Anchored to Best Buy)
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                    Scales dynamically with CMP & ATR
+                    Derived from calculated optimal entry & ATR
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
@@ -2828,6 +2846,14 @@ export default function ChartPage() {
                           <span style={{ fontSize: 12, fontWeight: 600, color: swingTrade.action === 'SELL' ? 'var(--color-bearish)' : 'var(--color-bullish)' }}>
                             {swingTrade.action === 'SELL' ? '-' : '+'}{Number(tgt.gain_pct || 0).toFixed(1)}%
                           </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 3 }}>
+                          <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>from Best Buy</span>
+                          {tgt.cmp_gain_pct !== undefined && (
+                            <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                              ({tgt.cmp_gain_pct >= 0 ? '+' : ''}{Number(tgt.cmp_gain_pct || 0).toFixed(1)}% CMP)
+                            </span>
+                          )}
                         </div>
                         {tgt.reward_to_risk > 0 && (
                           <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>

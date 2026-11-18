@@ -4266,6 +4266,39 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 92: Target Price & Staged Gains Strict Anchoring to Calculated Best Buy Price
+- **Timestamp:** 2026-11-19 01:05:00 IST (19:35:00 UTC)
+- **User Prompt:**
+  `"still target price is showing to current price not at after calculation price means below or above or equal to current price because it is set by using analysis and all calculations so i want that./goal /browser /plan /teamwork /learn /boost /agy-customizations /automation /generative_ui /migrate-agent-settings /migrate-workflows /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - In `backend/services/screener.py` lines 523–542, the `gain_pct` on `targets_breakdown` ($T_1, T_2, T_3$) was computed as `round(abs(t - current_price) / current_price * 100, 2)` instead of `(t - optimal_entry_price) / optimal_entry_price`.
+     - In `HOLD` (consolidation) setups, `optimal_entry_price` defaulted flatly to `current_price` and targets defaulted to `current_price + 1.2 * atr`, bypassing structural technical support and resistance levels.
+     - In `frontend/src/pages/ChartPage.tsx`, `getLiveSetup` used `latestCandle.close` (CMP) directly as its entry instead of referencing `swingTrade.trade_plan.best_buy_price`.
+     - UI lacked explicit visual separation between gain from the calculated entry and gain relative to current price.
+  2. **Architectural Upgrades Implemented**:
+     - **Backend Target Anchoring Engine (`backend/services/screener.py`)**:
+       - Re-anchored all targets ($T_1, T_2, T_3$) and expected gain percentages strictly to `optimal_entry_price` (`best_buy_price`).
+       - Added `cmp_gain_pct` and `cmp_risk_pct` across all target levels and top-level trade plan for complete mathematical transparency.
+       - Upgraded `HOLD` mode: calculates structural support (`supp`) and resistance (`res`) from `swing_low`, `swing_high`, `bb_mid`, setting optimal accumulation entry at support floor (`supp + 0.15 * atr`), stop loss below floor, and primary target at structural ceiling (`res - 0.15 * atr`).
+     - **Frontend Swing Screener Display (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+       - Card target display: `Target Price: ₹{target_price} (+{expected_gain_pct}% from Best Buy)` with secondary `({cmp_gain_pct}% from CMP)`.
+       - Staged targets row: `T1/T2/T3: ₹{tgt.price} (+{tgt.gain_pct}% from Best Buy)`.
+       - Screener table: explicit dual readout showing gain from calculated entry alongside comparison to CMP.
+     - **Interactive Chart Setup Upgrades (`frontend/src/pages/ChartPage.tsx`)**:
+       - `getLiveSetup` prioritizes `swingTrade.trade_plan.best_buy_price`, `target_price`, and `stop_loss`.
+       - Trade plan card states entry, targets, and percentage gains relative to Best Buy Price.
+       - Multi-tier target milestones show both gain from Best Buy and comparison to CMP.
+  3. **Automated Verification Suite Expansion**:
+     - Added `test_target_price_anchored_to_calculated_best_buy_price` and `test_consolidation_hold_target_calculated_from_structure` to `backend/tests/test_best_buy_price_and_indicators.py`.
+     - Synchronized `test_pullback_dip_optimal_entry_calculation` in `backend/tests/test_swing_screener_categorization.py`.
+- **Verification Evidence**:
+  - Backend test suite: **27 of 27 passed (100% green)** in 90.46s (`test_best_buy_price_and_indicators.py`, `test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_swing_screener_categorization.py`).
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 41.42s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with copy-pasteable commands.
+
+---
+
 ### Session Entry 90: Indicator Object Type Safety Hardening (`indicators.macd.toFixed` Elimination)
 - **Timestamp:** 2026-11-19 00:35:00 IST (19:05:00 UTC)
 - **User Prompt:**
@@ -4299,6 +4332,39 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 - **Verification Evidence**:
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 51.37s (exit code 0)**.
 - **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
+---
+
+### Session Entry 92: Target Price & Staged Gains Strict Anchoring to Calculated Best Buy Price
+- **Timestamp:** 2026-11-19 01:05:00 IST (19:35:00 UTC)
+- **User Prompt:**
+  `"still target price is showing to current price not at after calculation price means below or above or equal to current price because it is set by using analysis and all calculations so i want that./goal /browser /plan /teamwork /learn /boost /agy-customizations /automation /generative_ui /migrate-agent-settings /migrate-workflows /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - In `backend/services/screener.py` lines 523–542, the `gain_pct` on `targets_breakdown` ($T_1, T_2, T_3$) was computed as `round(abs(t - current_price) / current_price * 100, 2)` instead of `(t - optimal_entry_price) / optimal_entry_price`.
+     - In `HOLD` (consolidation) setups, `optimal_entry_price` defaulted flatly to `current_price` and targets defaulted to `current_price + 1.2 * atr`, bypassing structural technical support and resistance levels.
+     - In `frontend/src/pages/ChartPage.tsx`, `getLiveSetup` used `latestCandle.close` (CMP) directly as its entry instead of referencing `swingTrade.trade_plan.best_buy_price`.
+     - UI lacked explicit visual separation between gain from the calculated entry and gain relative to current price.
+  2. **Architectural Upgrades Implemented**:
+     - **Backend Target Anchoring Engine (`backend/services/screener.py`)**:
+       - Re-anchored all targets ($T_1, T_2, T_3$) and expected gain percentages strictly to `optimal_entry_price` (`best_buy_price`).
+       - Added `cmp_gain_pct` and `cmp_risk_pct` across all target levels and top-level trade plan for complete mathematical transparency.
+       - Upgraded `HOLD` mode: calculates structural support (`supp`) and resistance (`res`) from `swing_low`, `swing_high`, `bb_mid`, setting optimal accumulation entry at support floor (`supp + 0.15 * atr`), stop loss below floor, and primary target at structural ceiling (`res - 0.15 * atr`).
+     - **Frontend Swing Screener Display (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+       - Card target display: `Target Price: ₹{target_price} (+{expected_gain_pct}% from Best Buy)` with secondary `({cmp_gain_pct}% from CMP)`.
+       - Staged targets row: `T1/T2/T3: ₹{tgt.price} (+{tgt.gain_pct}% from Best Buy)`.
+       - Screener table: explicit dual readout showing gain from calculated entry alongside comparison to CMP.
+     - **Interactive Chart Setup Upgrades (`frontend/src/pages/ChartPage.tsx`)**:
+       - `getLiveSetup` prioritizes `swingTrade.trade_plan.best_buy_price`, `target_price`, and `stop_loss`.
+       - Trade plan card states entry, targets, and percentage gains relative to Best Buy Price.
+       - Multi-tier target milestones show both gain from Best Buy and comparison to CMP.
+  3. **Automated Verification Suite Expansion**:
+     - Added `test_target_price_anchored_to_calculated_best_buy_price` and `test_consolidation_hold_target_calculated_from_structure` to `backend/tests/test_best_buy_price_and_indicators.py`.
+     - Synchronized `test_pullback_dip_optimal_entry_calculation` in `backend/tests/test_swing_screener_categorization.py`.
+- **Verification Evidence**:
+  - Backend test suite: **27 of 27 passed (100% green)** in 90.46s (`test_best_buy_price_and_indicators.py`, `test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_swing_screener_categorization.py`).
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 41.42s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with copy-pasteable commands.
 
 ---
 
@@ -4344,6 +4410,39 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 92: Target Price & Staged Gains Strict Anchoring to Calculated Best Buy Price
+- **Timestamp:** 2026-11-19 01:05:00 IST (19:35:00 UTC)
+- **User Prompt:**
+  `"still target price is showing to current price not at after calculation price means below or above or equal to current price because it is set by using analysis and all calculations so i want that./goal /browser /plan /teamwork /learn /boost /agy-customizations /automation /generative_ui /migrate-agent-settings /migrate-workflows /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - In `backend/services/screener.py` lines 523–542, the `gain_pct` on `targets_breakdown` ($T_1, T_2, T_3$) was computed as `round(abs(t - current_price) / current_price * 100, 2)` instead of `(t - optimal_entry_price) / optimal_entry_price`.
+     - In `HOLD` (consolidation) setups, `optimal_entry_price` defaulted flatly to `current_price` and targets defaulted to `current_price + 1.2 * atr`, bypassing structural technical support and resistance levels.
+     - In `frontend/src/pages/ChartPage.tsx`, `getLiveSetup` used `latestCandle.close` (CMP) directly as its entry instead of referencing `swingTrade.trade_plan.best_buy_price`.
+     - UI lacked explicit visual separation between gain from the calculated entry and gain relative to current price.
+  2. **Architectural Upgrades Implemented**:
+     - **Backend Target Anchoring Engine (`backend/services/screener.py`)**:
+       - Re-anchored all targets ($T_1, T_2, T_3$) and expected gain percentages strictly to `optimal_entry_price` (`best_buy_price`).
+       - Added `cmp_gain_pct` and `cmp_risk_pct` across all target levels and top-level trade plan for complete mathematical transparency.
+       - Upgraded `HOLD` mode: calculates structural support (`supp`) and resistance (`res`) from `swing_low`, `swing_high`, `bb_mid`, setting optimal accumulation entry at support floor (`supp + 0.15 * atr`), stop loss below floor, and primary target at structural ceiling (`res - 0.15 * atr`).
+     - **Frontend Swing Screener Display (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+       - Card target display: `Target Price: ₹{target_price} (+{expected_gain_pct}% from Best Buy)` with secondary `({cmp_gain_pct}% from CMP)`.
+       - Staged targets row: `T1/T2/T3: ₹{tgt.price} (+{tgt.gain_pct}% from Best Buy)`.
+       - Screener table: explicit dual readout showing gain from calculated entry alongside comparison to CMP.
+     - **Interactive Chart Setup Upgrades (`frontend/src/pages/ChartPage.tsx`)**:
+       - `getLiveSetup` prioritizes `swingTrade.trade_plan.best_buy_price`, `target_price`, and `stop_loss`.
+       - Trade plan card states entry, targets, and percentage gains relative to Best Buy Price.
+       - Multi-tier target milestones show both gain from Best Buy and comparison to CMP.
+  3. **Automated Verification Suite Expansion**:
+     - Added `test_target_price_anchored_to_calculated_best_buy_price` and `test_consolidation_hold_target_calculated_from_structure` to `backend/tests/test_best_buy_price_and_indicators.py`.
+     - Synchronized `test_pullback_dip_optimal_entry_calculation` in `backend/tests/test_swing_screener_categorization.py`.
+- **Verification Evidence**:
+  - Backend test suite: **27 of 27 passed (100% green)** in 90.46s (`test_best_buy_price_and_indicators.py`, `test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_swing_screener_categorization.py`).
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 41.42s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with copy-pasteable commands.
+
+---
+
 ### Session Entry 90: Indicator Object Type Safety Hardening (`indicators.macd.toFixed` Elimination)
 - **Timestamp:** 2026-11-19 00:35:00 IST (19:05:00 UTC)
 - **User Prompt:**
@@ -4377,4 +4476,37 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 - **Verification Evidence**:
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 51.37s (exit code 0)**.
 - **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
+---
+
+### Session Entry 92: Target Price & Staged Gains Strict Anchoring to Calculated Best Buy Price
+- **Timestamp:** 2026-11-19 01:05:00 IST (19:35:00 UTC)
+- **User Prompt:**
+  `"still target price is showing to current price not at after calculation price means below or above or equal to current price because it is set by using analysis and all calculations so i want that./goal /browser /plan /teamwork /learn /boost /agy-customizations /automation /generative_ui /migrate-agent-settings /migrate-workflows /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - In `backend/services/screener.py` lines 523–542, the `gain_pct` on `targets_breakdown` ($T_1, T_2, T_3$) was computed as `round(abs(t - current_price) / current_price * 100, 2)` instead of `(t - optimal_entry_price) / optimal_entry_price`.
+     - In `HOLD` (consolidation) setups, `optimal_entry_price` defaulted flatly to `current_price` and targets defaulted to `current_price + 1.2 * atr`, bypassing structural technical support and resistance levels.
+     - In `frontend/src/pages/ChartPage.tsx`, `getLiveSetup` used `latestCandle.close` (CMP) directly as its entry instead of referencing `swingTrade.trade_plan.best_buy_price`.
+     - UI lacked explicit visual separation between gain from the calculated entry and gain relative to current price.
+  2. **Architectural Upgrades Implemented**:
+     - **Backend Target Anchoring Engine (`backend/services/screener.py`)**:
+       - Re-anchored all targets ($T_1, T_2, T_3$) and expected gain percentages strictly to `optimal_entry_price` (`best_buy_price`).
+       - Added `cmp_gain_pct` and `cmp_risk_pct` across all target levels and top-level trade plan for complete mathematical transparency.
+       - Upgraded `HOLD` mode: calculates structural support (`supp`) and resistance (`res`) from `swing_low`, `swing_high`, `bb_mid`, setting optimal accumulation entry at support floor (`supp + 0.15 * atr`), stop loss below floor, and primary target at structural ceiling (`res - 0.15 * atr`).
+     - **Frontend Swing Screener Display (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+       - Card target display: `Target Price: ₹{target_price} (+{expected_gain_pct}% from Best Buy)` with secondary `({cmp_gain_pct}% from CMP)`.
+       - Staged targets row: `T1/T2/T3: ₹{tgt.price} (+{tgt.gain_pct}% from Best Buy)`.
+       - Screener table: explicit dual readout showing gain from calculated entry alongside comparison to CMP.
+     - **Interactive Chart Setup Upgrades (`frontend/src/pages/ChartPage.tsx`)**:
+       - `getLiveSetup` prioritizes `swingTrade.trade_plan.best_buy_price`, `target_price`, and `stop_loss`.
+       - Trade plan card states entry, targets, and percentage gains relative to Best Buy Price.
+       - Multi-tier target milestones show both gain from Best Buy and comparison to CMP.
+  3. **Automated Verification Suite Expansion**:
+     - Added `test_target_price_anchored_to_calculated_best_buy_price` and `test_consolidation_hold_target_calculated_from_structure` to `backend/tests/test_best_buy_price_and_indicators.py`.
+     - Synchronized `test_pullback_dip_optimal_entry_calculation` in `backend/tests/test_swing_screener_categorization.py`.
+- **Verification Evidence**:
+  - Backend test suite: **27 of 27 passed (100% green)** in 90.46s (`test_best_buy_price_and_indicators.py`, `test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_swing_screener_categorization.py`).
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 41.42s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with copy-pasteable commands.
 

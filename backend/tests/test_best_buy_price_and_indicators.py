@@ -129,6 +129,60 @@ async def test_best_buy_price_and_structural_stop_loss():
         # Asymmetric Risk-to-Reward (minimum 1:2.0)
         assert plan["reward_to_risk"] >= 2.0
 
+        # Assert targets are anchored to best_buy_price, NOT flat cmp
+        assert "targets" in plan
+        assert len(plan["targets"]) == 3
+        t1 = plan["targets"][0]
+        t2 = plan["targets"][1]
+        t3 = plan["targets"][2]
+
+        # T2 must equal target_price
+        assert t2["price"] == plan["target_price"]
+        
+        # gain_pct in targets must match gain calculated from best_buy_price
+        expected_t2_gain = round(abs(t2["price"] - plan["best_buy_price"]) / plan["best_buy_price"] * 100, 2)
+        assert t2["gain_pct"] == expected_t2_gain
+        assert "cmp_gain_pct" in t2
+        assert "cmp_gain_pct" in plan
+
+
+@pytest.mark.asyncio
+async def test_consolidation_hold_target_calculated_from_structure():
+    """Verify that even for consolidating stocks (HOLD), targets and entries are calculated from structural support/resistance."""
+    flat_candles = []
+    base_time = datetime(2026, 1, 1, 9, 15)
+    for i in range(60):
+        t = (base_time + timedelta(days=i)).isoformat()
+        flat_candles.append({
+            "timestamp": t,
+            "open": 100.0,
+            "high": 105.0,
+            "low": 95.0,
+            "close": 100.0,
+            "volume": 200000
+        })
+
+    mock_quote = {"symbol": "TATASTEEL.NS", "price": 100.0, "change": 0.0, "change_percent": 0.0}
+    mock_info = {"name": "Tata Steel", "market_cap": 120000000000.0, "pe_ratio": 15.0}
+
+    with patch("backend.services.market_data.market_data_service.fetch_candles", new=AsyncMock(return_value=flat_candles)), \
+         patch("backend.services.market_data.market_data_service.fetch_quote", new=AsyncMock(return_value=mock_quote)), \
+         patch("backend.services.market_data.market_data_service.get_stock_info", new=AsyncMock(return_value=mock_info)), \
+         patch("backend.services.market_data.market_data_service.fetch_corporate_events", new=AsyncMock(return_value={})), \
+         patch("backend.data.ingestion.news_scraper.fetch_stock_news", new=AsyncMock(return_value=[])):
+
+        res = await ScreenerService._analyze_symbol("TATASTEEL.NS", force_refresh=True)
+        plan = res.get("trade_plan")
+        assert plan is not None
+        assert "best_buy_price" in plan
+        assert "target_price" in plan
+        assert plan["stop_loss"] < plan["best_buy_price"]
+        assert plan["target_price"] > plan["best_buy_price"]
+        for tgt in plan["targets"]:
+            expected_gain = round(abs(tgt["price"] - plan["best_buy_price"]) / plan["best_buy_price"] * 100, 2)
+            assert tgt["gain_pct"] == expected_gain
+            assert "cmp_gain_pct" in tgt
+
 
 def test_specialized_ai_engine_profiles():
     """Verify that AIEngineService routes specialized profiles: SWING, INTRADAY, FNO, FAST_GROWTH."""
