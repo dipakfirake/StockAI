@@ -41,7 +41,7 @@ export function usePresence(user: any) {
 
   const sendHeartbeat = useCallback(async () => {
     const sessionId = sessionIdRef.current
-    if (!sessionId || document.visibilityState === 'hidden') return
+    if (!sessionId || document.visibilityState === 'hidden' || (typeof navigator !== 'undefined' && !navigator.onLine)) return
 
     const isAdmin = Boolean(user?.is_admin)
     const role: 'ADMIN' | 'PRO' | 'FREE' | 'GUEST' = isAdmin

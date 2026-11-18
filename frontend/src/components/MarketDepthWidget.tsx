@@ -63,18 +63,33 @@ export default function MarketDepthWidget({
 
   const fetchDepth = async (isManual = false) => {
     if (!symbol) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (isManual) setRefreshing(false);
+      return;
+    }
     if (isManual) setRefreshing(true);
     try {
       const res = await stocksApi.getDepth(symbol);
       setDepth(res.data);
       setError(null);
     } catch (err: any) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       setError(err?.response?.data?.detail || 'Failed to load market depth');
     } finally {
       setLoading(false);
       if (isManual) setTimeout(() => setRefreshing(false), 300);
     }
   };
+
+  useEffect(() => {
+    const handleOnline = () => {
+      fetchDepth(true);
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [symbol]);
 
   useEffect(() => {
     setLoading(true);

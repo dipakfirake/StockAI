@@ -12,6 +12,23 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
+## Latest verified checks (2026-11-18)
+
+- **BROWSER OFFLINE / DISCONNECTION RESILIENT POLLING & RECONNECTING BANNER (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    - User reported browser console network errors: `net::ERR_INTERNET_DISCONNECTED`, `net::ERR_NAME_NOT_RESOLVED`, and `net::ERR_NETWORK_CHANGED` when querying PCJEWELLER quotes and depth.
+  - **Forensic Diagnosis & Solutions Delivered**:
+    1. **Verification**: Live server `https://stockai-live.duckdns.org/api/health` probed and verified 100% HEALTHY (`{"status":"healthy"}`).
+    2. **Root Cause**: Error codes are thrown by Chromium when the client machine's internet/WiFi connection drops.
+    3. **Client Hardening**:
+       - `frontend/src/services/api.ts`: Fast-rejects requests when `!navigator.onLine` to prevent 3-attempt retry console log spam.
+       - `frontend/src/components/ReconnectingBanner.tsx`: Shows amber offline banner with `WifiOff` icon and automatic recovery on `online` event.
+       - `MarketDepthWidget.tsx`, `ChartPage.tsx`, `usePresence.ts`: Background polling intervals gracefully pause when offline and auto-resume on reconnect.
+  - **Verification Evidence**:
+    - Live health probe: `{"status":"healthy"}`.
+    - Frontend build: `1,994 modules transformed, 0 TypeScript errors, built in 21.42s`.
+    - Unit tests: `10 of 10 passed in 17.56s`.
+
 ## Latest verified checks (2026-11-15)
 
 - **MARKET DEPTH OFF-MARKET FREEZING & ZERODHA KITE 0.00 BOOK ALIGNMENT (COMPLETE & VERIFIED - 2026-11-15):**

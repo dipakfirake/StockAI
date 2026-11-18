@@ -36,6 +36,11 @@ api.interceptors.response.use(
     const isNetworkError = !err.response || err.code === 'ERR_NETWORK' || err.code === 'ECONNABORTED' || err.message?.includes('Network Error')
     const isServerRestart = err.response && (err.response.status === 502 || err.response.status === 503 || err.response.status === 504)
 
+    // If client browser is completely offline, do not execute retries that flood the console
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return Promise.reject(err)
+    }
+
     // Silently retry GET requests up to 3 times with exponential backoff during server restarts or transient network dropouts
     const isRetryableMethod = !config?.method || ['get', 'head', 'options'].includes(config.method.toLowerCase())
     const canRetry = config && isRetryableMethod && (isNetworkError || isServerRestart) && (config.__retryCount || 0) < 3

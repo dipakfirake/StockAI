@@ -3799,3 +3799,41 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Regression Test Suites (`test_swing_audit_coupled_ratchet.py` & `test_fyers_stream.py`)**: **18 of 18 passed in 10.07s (100% green, exit code 0)**. Total **28 of 28 tests passed**.
   - **Frontend Production Build (`npm run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 23.45s (exit code 0)**.
 - **Exact Next Safe Step**: Commit and push changes to `origin/main`, provide copy-pasteable live server deployment commands (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).
+
+---
+
+### Session Entry 77: Browser Offline Disconnection Diagnosis & Client-Side Resilient Polling Guard
+- **Timestamp:** 2026-11-18 13:58:00 IST (08:28:00 UTC)
+- **User Prompt:**
+  User provided client-side browser console log errors:
+  `api/stocks/PCJEWELLER.NS/quote:1 Failed to load resource: net::ERR_INTERNET_DISCONNECTED`
+  `api/presence/heartbeat:1 Failed to load resource: net::ERR_NAME_NOT_RESOLVED`
+  `api/stocks/PCJEWELLER.NS/depth?simulate=false:1 Failed to load resource: net::ERR_NAME_NOT_RESOLVED`
+  `api/stocks/PCJEWELLER.NS/depth?simulate=false:1 Failed to load resource: net::ERR_NETWORK_CHANGED`
+- **Forensic Diagnosis & Root Cause**:
+  1. **Network Error Analysis:**
+     - `net::ERR_INTERNET_DISCONNECTED`: Thrown directly by the client browser (Chrome/Edge) when the user's computer loses internet connection (e.g. WiFi dropped, mobile data turned off, airplane mode, or router reconnection).
+     - `net::ERR_NAME_NOT_RESOLVED`: Because the local machine had no internet, DNS resolution for `stockai-live.duckdns.org` failed locally.
+     - `net::ERR_NETWORK_CHANGED`: Operating system detected a network adapter change on the user's PC.
+  2. **Server Health Audit Evidence:**
+     - Directly probed live production server at `https://stockai-live.duckdns.org/api/health` via `curl.exe`.
+     - Output: `{"status":"healthy"}` with HTTP 200 OK.
+     - DNS resolution `stockai-live.duckdns.org` resolves correctly to IP `92.4.71.210`.
+     - Confirmed the remote server is 100% UP and healthy.
+  3. **Identified Client Improvement Opportunity:**
+     - When offline, active polling intervals in `ChartPage.tsx` (`getQuote`), `MarketDepthWidget.tsx` (`getDepth`), `usePresence.ts` (`heartbeat`), and axios retry loops continued trying to send HTTP requests, generating repeated `ERR_INTERNET_DISCONNECTED` console logs.
+- **Engineering Changes Delivered**:
+  1. **Client Offline Interceptor Guard (`frontend/src/services/api.ts`)**:
+     - Fast-rejects requests when `!navigator.onLine`, preventing unnecessary 3-attempt retry spam during complete internet disconnection.
+  2. **Intelligent Banner Alert (`frontend/src/components/ReconnectingBanner.tsx`)**:
+     - Added offline state detection with `WifiOff` icon.
+     - When offline, informs the user: `⚠️ Internet disconnected. Reconnecting automatically when online...` in amber badge.
+     - Automatically recovers when `online` event fires.
+  3. **Polite Polling Pause (`MarketDepthWidget.tsx`, `ChartPage.tsx`, `usePresence.ts`)**:
+     - All background timers pause fetch operations when `!navigator.onLine`.
+     - Added `window.addEventListener('online', ...)` to `MarketDepthWidget.tsx` to instantly fetch fresh depth the moment internet is restored.
+- **Verification Evidence**:
+  - **Live Server Probe**: `https://stockai-live.duckdns.org/api/health` returns `{"status":"healthy"}`.
+  - **Unit Tests (`backend/tests/test_market_depth.py`)**: **10 of 10 passed in 17.56s (100% green, exit code 0)**.
+  - **Frontend Production Build (`npm run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 21.42s (exit code 0)**.
+- **Exact Next Safe Step**: User checks device network/WiFi connection and refreshes browser tab.

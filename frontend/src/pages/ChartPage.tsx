@@ -1045,7 +1045,8 @@ export default function ChartPage() {
     if (!symbol) return
 
     const pollTimer = setInterval(async () => {
-      // Skip REST polling if WebSocket has actively received real-time ticks for this symbol within 8 seconds
+      // Skip REST polling if client is offline or WebSocket has actively received real-time ticks
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
       if (isWsConnectedRef.current && Date.now() - lastWsTickTimeRef.current < 8000) return
 
       try {
