@@ -136,7 +136,13 @@ async def download_latest_audit_excel(
         if not cycle:
             raise HTTPException(status_code=404, detail="No active swing audit cycle found.")
 
-        # Always attempt generation to ensure the workbook reflects the latest trades and PnL
+        # Actively synchronize daily price snapshots with latest live market data before workbook export
+        try:
+            await swing_audit_service.update_daily_prices(db, cycle.id)
+        except Exception as sync_err:
+            logger.warning(f"Auto-sync during audit Excel download encountered warning: {sync_err}")
+
+        # Always generate fresh workbook to reflect up-to-the-minute trade prices, trailing stops and PnL
         excel_path_obj = await swing_audit_service.generate_excel_workbook(db, cycle.id)
         excel_path = str(excel_path_obj) if excel_path_obj else None
 

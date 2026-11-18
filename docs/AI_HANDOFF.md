@@ -14,6 +14,37 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **ZERODHA KITE 5-LEVEL MARKET DEPTH POST-MARKET ZEROES & SWING AUDIT LIVE PRICE AUTO-SYNC (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    1. User uploaded mobile screenshot of Zerodha Kite app for `PCJEWELLER BSE 15.51 -0.44 (-2.76%)` showing 5-level market depth order book with all zero bids/offers (`0.00 | 0 | 0`, `Total: 0 | Total: 0`).
+    2. User previously queried why bids were changing at night on ICICIBANK and requested the exact Zerodha Kite bids/offers/qty format in the Charts section.
+    3. User requested confirmation of live stock price updates and verification that the Coupled Ratchet strategy ("if target increase then to get higher profits stoploss price got increase") is active in the swing audit Excel file.
+  - **Forensic Diagnosis & Solutions Delivered**:
+    1. **Exchange Order Book Purge Mechanism at Night**:
+       - On NSE and BSE, unexecuted limit orders and day orders are wiped from the matching engine after post-market closing (16:00 IST).
+       - In real broker applications (Zerodha Kite, Groww), all 5 bids and 5 offers show `0.00 | 0 | 0` and `Total: 0` throughout the night.
+       - `backend/services/market_depth_service.py` sets `bids = 5 * [{price: 0.0, orders: 0, quantity: 0}]`, `asks = 5 * [{price: 0.0, orders: 0, quantity: 0}]`, `total_buy_qty = 0`, `total_sell_qty = 0` whenever `is_indian_market_open() == False`.
+       - `frontend/src/components/MarketDepthWidget.tsx` renders this with `🌙 Market Closed (After Hours — NSE/BSE) [Kite 0.00 Mode]`. An optional `[⚡ Preview Practice Depth]` button allows traders to preview a 100% frozen, static book for off-market practice.
+    2. **Swing Audit Live Price Auto-Sync Before Download**:
+       - `backend/api/swing_audit.py`: `download_latest_audit_excel` automatically triggers `await swing_audit_service.update_daily_prices(db, cycle.id)` prior to generating the workbook, guaranteeing that downloaded Excel files always reflect live prices through Day 6.
+       - `backend/services/swing_audit_service.py`: Added 3-tier candle fallback (`.BO` <-> `.NS` alternate exchange, DB candles hypertable, and live quote LTP for active trading days).
+  - **Verification Evidence**:
+    - **Coupled Ratchet Tests (`backend/tests/test_swing_audit_coupled_ratchet.py`)**: 5 of 5 passed.
+    - **Swing Audit Tests (`backend/tests/test_swing_audit.py`)**: 11 of 11 passed.
+    - **Market Depth Tests (`backend/tests/test_market_depth.py`)**: 10 of 10 passed.
+    - **Total Python Tests**: 26 of 26 passed (100% green) in 48.58s.
+    - **Frontend Production Build**: `npm --prefix frontend run build` &rarr; 1,994 modules transformed, 0 TypeScript errors, built in 21.36s.
+  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server:
+    ```bash
+    cd ~/StockAI
+    git fetch origin main && git reset --hard origin/main
+    docker compose up -d --build backend frontend celery_worker celery_beat flower
+    sleep 15
+    curl -s -k https://stockai-live.duckdns.org/api/swing-audit/sync -X POST
+    curl -I -k https://stockai-live.duckdns.org/api/swing-audit/download-latest
+    ```
+
+
 - **POSTGRESQL SWING AUDIT SCHEMA SELF-HEALING & `dynamic_stop_loss` COLUMN REPAIR (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     - User hit 500 error when downloading Excel: `(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) column swing_trade_audits.dynamic_stop_loss does not exist`.

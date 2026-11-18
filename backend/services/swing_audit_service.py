@@ -437,18 +437,89 @@ class SwingAuditService:
 
                     candles = await market_data_service.fetch_candles(audit.symbol, "1d", limit=30)
                     if not candles or not isinstance(candles, list):
-                        continue
+                        # Multi-tier fallback 1: Alternate exchange (.BO <-> .NS)
+                        clean_sym = audit.symbol.replace(".NS", "").replace(".BO", "").strip().upper()
+                        alt_sym = f"{clean_sym}.BO" if audit.symbol.endswith(".NS") else f"{clean_sym}.NS"
+                        candles = await market_data_service.fetch_candles(alt_sym, "1d", limit=30)
+
+                    # Multi-tier fallback 2: Check local database candles hypertable
+                    if not candles or not isinstance(candles, list):
+                        try:
+                            from backend.models.candle import Candle
+                            clean_sym = audit.symbol.replace(".NS", "").replace(".BO", "").strip().upper()
+                            db_c_stmt = (
+                                select(Candle)
+                                .where(Candle.symbol.ilike(f"%{clean_sym}%"))
+                                .where(Candle.timeframe == "1d")
+                                .order_by(Candle.timestamp.asc())
+                            )
+                            db_c_rows = (await db.execute(db_c_stmt)).scalars().all()
+                            if db_c_rows:
+                                candles = [
+                                    {
+                                        "timestamp": c.timestamp.isoformat(),
+                                        "open": float(c.open),
+                                        "high": float(c.high),
+                                        "low": float(c.low),
+                                        "close": float(c.close),
+                                        "volume": int(c.volume or 0)
+                                    }
+                                    for c in db_c_rows
+                                ]
+                        except Exception as db_c_err:
+                            logger.debug(f"DB candles hypertable fallback error: {db_c_err}")
 
                     # Parse candle timestamps to dates and filter on/after recommendation_date
                     valid_candles = []
-                    for c in candles:
-                        ts_str = c.get("timestamp", "")
+                    if candles and isinstance(candles, list):
+                        for c in candles:
+                            ts_str = c.get("timestamp", "")
+                            try:
+                                c_date = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).date()
+                            except Exception:
+                                continue
+                            if c_date >= rec_date:
+                                valid_candles.append((c_date, c))
+
+                    # Multi-tier fallback 3: Append today's active live price if market traded today but candle not yet closed
+                    today_dt = date.today()
+                    if valid_candles:
+                        last_c_date = valid_candles[-1][0]
+                        if last_c_date < today_dt and len(valid_candles) < 11:
+                            try:
+                                quote = await market_data_service.fetch_quote(audit.symbol)
+                                if quote and float(quote.get("ltp", 0) or 0) > 0:
+                                    ltp = float(quote["ltp"])
+                                    today_candle = {
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        "open": float(quote.get("open") or ltp),
+                                        "high": float(quote.get("high") or ltp),
+                                        "low": float(quote.get("low") or ltp),
+                                        "close": ltp,
+                                        "volume": int(quote.get("volume") or 0)
+                                    }
+                                    valid_candles.append((today_dt, today_candle))
+                            except Exception as q_err:
+                                logger.debug(f"Live quote fallback for today's price failed: {q_err}")
+                    elif not valid_candles:
+                        # If zero candles could be fetched, try live quote for Day 1
                         try:
-                            c_date = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).date()
+                            quote = await market_data_service.fetch_quote(audit.symbol)
+                            if quote and float(quote.get("ltp", 0) or 0) > 0:
+                                ltp = float(quote["ltp"])
+                                valid_candles.append((rec_date, {
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "open": float(quote.get("open") or ltp),
+                                    "high": float(quote.get("high") or ltp),
+                                    "low": float(quote.get("low") or ltp),
+                                    "close": ltp,
+                                    "volume": int(quote.get("volume") or 0)
+                                }))
                         except Exception:
-                            continue
-                        if c_date >= rec_date:
-                            valid_candles.append((c_date, c))
+                            pass
+
+                    if not valid_candles:
+                        continue
 
                     # Sort chronologically
                     valid_candles.sort(key=lambda x: x[0])

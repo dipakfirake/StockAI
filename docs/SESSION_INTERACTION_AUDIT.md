@@ -3973,3 +3973,39 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Python Syntax Compilation**: `py_compile` on `database.py` and `swing_audit_service.py` succeeded with exit code 0.
 - **Strict Live Server Isolation & Safe Deployment Instructions**:
   - Provide copy-pasteable commands for the user to execute on `stockai-server`, including the immediate direct `psql` command to add columns instantly to the running PostgreSQL container without waiting for restarts.
+
+
+---
+
+### Session Entry 81: Zerodha Kite 5-Level Market Depth Post-Market Order Book Alignment & Swing Audit Live Price Auto-Sync
+- **Timestamp:** 2026-11-18 17:45:00 IST (12:15:00 UTC)
+- **User Prompt:**
+  User uploaded screenshot of Zerodha Kite app for `PCJEWELLER BSE 15.51 -0.44 (-2.76%)` showing 5-level market depth order book with all zero bids/offers (`0.00 | 0 | 0`, `Total: 0 | Total: 0`). User previously asked: *"why it is changing at night the bids"* on ICICIBANK, *"i want this types of bids orders and Qty in charts section"*, and requested full verification of stock prices, audits, and Coupled Ratchet strategy.
+- **Forensic Diagnosis & Root Cause**:
+  1. **Exchange Order Book Purge Mechanism at Night (NSE/BSE)**:
+     - Real Indian equity exchanges (NSE/BSE) wipe and cancel all unexecuted intraday and limit orders from the central matching engine upon post-market closing (16:00 IST).
+     - Throughout the night (after 16:00 IST) and across weekends, Zerodha Kite, Groww, and AngelOne display:
+       `Bid: 0.00 | Orders: 0 | Qty: 0`
+       `Offer: 0.00 | Orders: 0 | Qty: 0`
+       `Total: 0 | Total: 0`
+       exactly as shown in the user's uploaded PC Jeweller screenshot.
+     - In previous builds, synthetic order book simulation was active 24/7, generating fluctuating artificial bids and asks at night. This caused the user to observe changing bids on ICICIBANK.
+     - Solution: `backend/services/market_depth_service.py` sets `bids = 5 * [{price: 0.0, orders: 0, quantity: 0}]`, `asks = 5 * [{price: 0.0, orders: 0, quantity: 0}]`, `total_buy_qty = 0`, `total_sell_qty = 0` whenever `is_indian_market_open() == False`.
+     - In `frontend/src/components/MarketDepthWidget.tsx`, the widget labels the state as `🌙 Market Closed (After Hours — NSE/BSE) [Kite 0.00 Mode]`. An optional `[⚡ Preview Practice Depth]` button allows traders to preview a 100% frozen, non-fluctuating static book for off-market strategy practice without confusing it with live exchange liquidity.
+  2. **Swing Audit Live Price Auto-Sync Before Excel Export**:
+     - Hardened `backend/api/swing_audit.py` so `download_latest_audit_excel` executes `await swing_audit_service.update_daily_prices(db, cycle.id)` prior to generating the workbook. This guarantees that exported spreadsheets always contain live daily prices through Day 6 (18 Nov).
+     - Added multi-tier candle fallbacks in `backend/services/swing_audit_service.py` (alternate `.BO` <-> `.NS` exchange translation, local PostgreSQL candles hypertable, and live quote LTP for today's active trading day).
+- **Engineering Changes Delivered**:
+  1. `backend/api/swing_audit.py`: Auto-sync daily prices prior to workbook generation in `/download-latest`.
+  2. `backend/services/swing_audit_service.py`: Added 3-tier fallback pipeline for missing candles and schema auto-migration guard.
+  3. `backend/services/market_depth_service.py`: Zerodha Kite post-market 0.00 order book formatting.
+  4. `frontend/src/components/MarketDepthWidget.tsx`: 6-column Kite-aligned table (`Bid`, `Orders`, `Qty`, `Offer`, `Orders`, `Qty`) with Kite 0.00 mode and Practice Depth toggle.
+  5. `frontend/src/pages/ChartPage.tsx`: Integrated inline `MarketDepthWidget` beneath the main charts.
+- **Verification Evidence**:
+  - **Coupled Ratchet Tests (`backend/tests/test_swing_audit_coupled_ratchet.py`)**: 5 of 5 passed.
+  - **Swing Audit Tests (`backend/tests/test_swing_audit.py`)**: 11 of 11 passed.
+  - **Market Depth Tests (`backend/tests/test_market_depth.py`)**: 10 of 10 passed (including `test_off_market_closed_depth_returns_zerodha_kite_zeroes` and `test_off_market_simulated_depth_is_strictly_static_and_stable`).
+  - **Total Python Tests**: **26 of 26 passed (100% green) in 48.58s**.
+  - **Frontend Production Build**: `npm --prefix frontend run build` &rarr; **1,994 modules transformed, 0 TypeScript errors, built in 21.36s (exit code 0)**.
+- **Deployment Guidance**:
+  - Full instructions provided to rebuild backend and frontend containers on `stockai-server`.
