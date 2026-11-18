@@ -1723,6 +1723,31 @@ export default function ChartPage() {
         </div>
 
         <div className="mobile-w-100" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Native Indicators Quick-Toggle Dropdown (Never empty) */}
+          <select 
+             value=""
+             onChange={(e) => {
+               const val = e.target.value;
+               if (val) {
+                 setShowIndicators(true);
+                 setIndicatorToggles(prev => ({ ...prev, [val]: !prev[val] }));
+               }
+             }}
+             className="input"
+             style={{ padding: '6px 10px', fontSize: 12, height: '34px', cursor: 'pointer', borderRadius: '6px', maxWidth: 185, flex: '1 1 auto' }}
+             title="Quick toggle indicator ON/OFF"
+          >
+             <option value="" disabled>📊 Indicators ({activeIndicators.length} ON)...</option>
+             {ALL_INDICATORS.map(ind => {
+               const isOn = showIndicators && (indicatorToggles[ind.key] ?? false);
+               return (
+                 <option key={ind.key} value={ind.key}>
+                   {isOn ? '🟢 [ON]' : '⚪ [OFF]'} {ind.label} {ind.val ? `(${ind.val})` : ''}
+                 </option>
+               );
+             })}
+          </select>
+
           <select 
              value={selectedPattern || ""}
              onChange={(e) => {
@@ -1733,7 +1758,7 @@ export default function ChartPage() {
              className="input"
              style={{ padding: '6px 12px', fontSize: 13, height: '34px', cursor: 'pointer', borderRadius: '6px', maxWidth: 160, flex: '1 1 auto' }}
           >
-             <option value="" disabled>👁️ Patterns Overlay</option>
+             <option value="" disabled>👁️ Patterns ({visiblePatterns.length})</option>
              <option value="clear">None (Hide Patterns)</option>
              <option disabled>──────────</option>
              {visiblePatterns.length === 0 && (
@@ -1890,8 +1915,8 @@ export default function ChartPage() {
                     />
                   </div>
 
-                  {/* Indicator Checklist */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {/* Indicator Checklist with Interactive ON/OFF Pills */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {ALL_INDICATORS
                       .filter(ind => !indicatorSearch || ind.label.toLowerCase().includes(indicatorSearch.toLowerCase()) || ind.desc.toLowerCase().includes(indicatorSearch.toLowerCase()))
                       .map(ind => {
@@ -1907,25 +1932,40 @@ export default function ChartPage() {
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'space-between',
-                              padding: '5px 8px',
+                              padding: '6px 10px',
                               borderRadius: 6,
-                              background: isChecked ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
-                              border: isChecked ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid transparent',
+                              background: isChecked ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.02)',
+                              border: isChecked ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(255, 255, 255, 0.05)',
                               cursor: 'pointer',
-                              transition: 'background 0.15s'
+                              transition: 'all 0.15s'
                             }}
                           >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={(e) => {
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
                                   e.stopPropagation();
                                   setShowIndicators(true);
-                                  setIndicatorToggles(prev => ({ ...prev, [ind.key]: e.target.checked }));
+                                  setIndicatorToggles(prev => ({ ...prev, [ind.key]: !prev[ind.key] }));
                                 }}
-                                style={{ cursor: 'pointer' }}
-                              />
+                                style={{
+                                  padding: '2px 8px',
+                                  borderRadius: 12,
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  background: isChecked ? '#10b981' : '#334155',
+                                  color: '#ffffff',
+                                  minWidth: 42,
+                                  textAlign: 'center',
+                                  boxShadow: isChecked ? '0 0 8px rgba(16, 185, 129, 0.4)' : 'none',
+                                  transition: 'all 0.15s'
+                                }}
+                                title={`Click to turn ${ind.label} ${isChecked ? 'OFF' : 'ON'}`}
+                              >
+                                {isChecked ? 'ON' : 'OFF'}
+                              </button>
                               <div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                                   <span style={{ color: ind.color, fontWeight: 700, fontSize: 10 }}>●</span>
@@ -2075,71 +2115,70 @@ export default function ChartPage() {
           />
         )}
 
-        {/* Active Indicators Chips Bar (TradingView Style) */}
+        {/* Permanent Indicators Quick-Toggle Bar with Interactive ON/OFF Pills */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: '6px 10px', background: 'var(--color-bg-secondary)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
           <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Activity size={12} /> Active On Chart:
+            <Activity size={12} /> Indicators ({activeIndicators.length} ON):
           </span>
-          {activeIndicators.length === 0 ? (
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
-              Clean Candlesticks (No messy overlays)
-            </span>
-          ) : (
-            activeIndicators.map(ind => (
-              <span
+          {ALL_INDICATORS.map(ind => {
+            const isChecked = showIndicators && (indicatorToggles[ind.key] ?? false);
+            return (
+              <button
                 key={ind.key}
+                type="button"
+                onClick={() => {
+                  setShowIndicators(true);
+                  setIndicatorToggles(prev => ({ ...prev, [ind.key]: !prev[ind.key] }));
+                }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 5,
                   fontSize: 11,
                   padding: '2px 8px',
-                  borderRadius: 12,
-                  background: 'rgba(255,255,255,0.06)',
-                  border: `1px solid ${ind.color}88`,
-                  color: 'var(--color-text-primary)'
+                  borderRadius: 14,
+                  background: isChecked ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.04)',
+                  border: isChecked ? '1px solid #10b981' : '1px solid var(--color-border)',
+                  color: isChecked ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
                 }}
+                title={`Click to toggle ${ind.label} ${isChecked ? 'OFF' : 'ON'}`}
               >
                 <span style={{ color: ind.color, fontSize: 10 }}>●</span>
                 <span style={{ fontWeight: 600 }}>{ind.label}</span>
-                {ind.val && <span style={{ color: 'var(--color-text-muted)', fontFamily: 'monospace' }}>({ind.val})</span>}
-                <button
-                  onClick={() => setIndicatorToggles(prev => ({ ...prev, [ind.key]: false }))}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--color-text-muted)',
-                    cursor: 'pointer',
-                    padding: '0 2px',
-                    fontSize: 13,
-                    lineHeight: 1
-                  }}
-                  title={`Remove ${ind.label} from chart`}
-                >
-                  ×
-                </button>
-              </span>
-            ))
-          )}
+                {ind.val && <span style={{ fontSize: 10, opacity: 0.8, fontFamily: 'monospace' }}>({ind.val})</span>}
+                <span style={{
+                  padding: '1px 5px',
+                  borderRadius: 8,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  background: isChecked ? '#10b981' : '#475569',
+                  color: '#ffffff',
+                  marginLeft: 3
+                }}>
+                  {isChecked ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            );
+          })}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
             <button
-              onClick={() => setShowIndicatorMenu(true)}
+              onClick={() => applyPreset('clean')}
               className="btn btn-ghost"
-              style={{ fontSize: 11, padding: '3px 8px', height: '24px', color: 'var(--color-accent-blue)', gap: 4 }}
-              title="Add or remove indicators of your choice"
+              style={{ fontSize: 11, padding: '3px 8px', height: '24px', color: 'var(--color-bearish, #ef4444)' }}
+              title="Turn all indicators OFF"
             >
-              + Add / Choose Indicators
+              Turn All OFF
             </button>
-            {activeIndicators.length > 0 && (
-              <button
-                onClick={() => applyPreset('clean')}
-                className="btn btn-ghost"
-                style={{ fontSize: 11, padding: '3px 8px', height: '24px', color: 'var(--color-bearish, #ef4444)' }}
-                title="Clear all overlays for an uncluttered clean chart"
-              >
-                Clear All (Clean Chart)
-              </button>
-            )}
+            <button
+              onClick={() => applyPreset('all')}
+              className="btn btn-ghost"
+              style={{ fontSize: 11, padding: '3px 8px', height: '24px', color: 'var(--color-bullish, #10b981)' }}
+              title="Turn all indicators ON"
+            >
+              Turn All ON
+            </button>
           </div>
         </div>
 

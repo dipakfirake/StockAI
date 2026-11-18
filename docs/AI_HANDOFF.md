@@ -14,6 +14,20 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **INDICATOR INTERACTIVE ON/OFF PILLS & PERMANENT NON-VANISHING TOGGLE BAR (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Resolved**:
+    1. User reported: "i want indicators to be on and off in indicators dropdown it shows empty and make on and off pill in front of it so i can turn it on and off at any time , now what happening that when i clicked at time the indicator got vanished and there is no option to turn on also".
+    2. Root causes:
+       - In the previous active chips bar, clicking the `×` button filtered the indicator out of `activeIndicators`, causing the pill to completely disappear from the screen with no visible way to toggle it back ON without finding the menu.
+       - The adjacent `<select>` dropdown was labeled "Patterns Overlay" and showed "No active patterns detected" (looking empty when looking for indicators).
+    3. Remediations Implemented in `frontend/src/pages/ChartPage.tsx`:
+       - **Interactive ON / OFF Pills in Dropdown**: Every indicator in the dropdown list now features a vibrant, dedicated `[ ON ]` (emerald green) / `[ OFF ]` (slate gray) pill button directly in front of its name. Clicking the row or the pill flips its status immediately.
+       - **Permanent Non-Vanishing Quick-Toggle Bar Above Chart**: Replaced vanishing active chips with a permanent toolbar where EVERY indicator (EMA 21, EMA 9, EMA 50, EMA 200, Supertrend, Bollinger Bands, VWAP, RSI 14, MACD, Volume) is always visible with its own `[ ON ]` / `[ OFF ]` pill button. Clicking any pill toggles the indicator ON/OFF instantly—indicators never vanish!
+       - **Dedicated Indicators `<select>` Dropdown**: Added a native `📊 Indicators (X ON)...` dropdown to the toolbar listing all indicators with `🟢 [ON]` or `⚪ [OFF]` and live values, ensuring dropdown users always see a populated, interactive selector.
+  - **Verification Evidence**:
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 51.37s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls latest commit on cloud server and rebuilds `frontend`.
+
 - **INDICATOR VALUE TYPE SAFETY HARDENING (MACD OBJECT .toFixed RUNTIME FIX) (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Resolved**:
     1. User reported runtime crash: `ChartPage.tsx:1580 Uncaught TypeError: indicators.macd.toFixed is not a function`.

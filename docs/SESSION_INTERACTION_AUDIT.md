@@ -4248,6 +4248,24 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 91: Permanent Non-Vanishing Indicator Quick-Toggle Bar & Interactive ON/OFF Pills
+- **Timestamp:** 2026-11-19 00:45:00 IST (19:15:00 UTC)
+- **User Prompt:**
+  `"i want indicators to be on and off in indicators dropdown it shows empty and make on and off pill in front of it so i can turn it on and off at any time , now what happening that when i clicked at time the indicator got vanished and there is no option to turn on also"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - Clicking the `×` button on active indicator chips filtered that indicator out of the DOM, causing it to vanish from view without leaving an intuitive toggle to turn it back ON.
+     - The adjacent `<select>` dropdown was labeled "Patterns Overlay" and showed only "None (Hide Patterns)" when 0 patterns were detected, causing users to mistake it for an empty indicator dropdown.
+  2. **Architectural Upgrades Implemented in `frontend/src/pages/ChartPage.tsx`**:
+     - **Interactive ON / OFF Pills in Dropdown**: Rendered a dedicated `[ ON ]` (emerald green) / `[ OFF ]` (slate gray) pill button directly in front of each indicator name. Clicking either the row or the pill flips its status immediately.
+     - **Permanent Non-Vanishing Indicator Bar Above Chart**: All 10 indicators (EMA 21, EMA 9, EMA 50, EMA 200, Supertrend, Bollinger Bands, VWAP, RSI 14, MACD, Volume) are permanently displayed directly above the chart with an interactive `[ ON ]` / `[ OFF ]` pill button. Clicking any pill toggles the indicator ON/OFF instantly—indicators never vanish!
+     - **Dedicated Indicators `<select>` Dropdown**: Added native `📊 Indicators (X ON)...` dropdown to the toolbar listing all indicators with `🟢 [ON]` or `⚪ [OFF]` and live values.
+- **Verification Evidence**:
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 51.37s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
+---
+
 ### Session Entry 90: Indicator Object Type Safety Hardening (`indicators.macd.toFixed` Elimination)
 - **Timestamp:** 2026-11-19 00:35:00 IST (19:05:00 UTC)
 - **User Prompt:**
@@ -4262,6 +4280,24 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
      - Extracted Bollinger Bands with `getSafeIndicatorVal(indicators?.bb?.upper ?? indicators?.bb_upper, undefined, 1)` and lower band.
 - **Verification Evidence**:
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 1m 9s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
+---
+
+### Session Entry 91: Permanent Non-Vanishing Indicator Quick-Toggle Bar & Interactive ON/OFF Pills
+- **Timestamp:** 2026-11-19 00:45:00 IST (19:15:00 UTC)
+- **User Prompt:**
+  `"i want indicators to be on and off in indicators dropdown it shows empty and make on and off pill in front of it so i can turn it on and off at any time , now what happening that when i clicked at time the indicator got vanished and there is no option to turn on also"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - Clicking the `×` button on active indicator chips filtered that indicator out of the DOM, causing it to vanish from view without leaving an intuitive toggle to turn it back ON.
+     - The adjacent `<select>` dropdown was labeled "Patterns Overlay" and showed only "None (Hide Patterns)" when 0 patterns were detected, causing users to mistake it for an empty indicator dropdown.
+  2. **Architectural Upgrades Implemented in `frontend/src/pages/ChartPage.tsx`**:
+     - **Interactive ON / OFF Pills in Dropdown**: Rendered a dedicated `[ ON ]` (emerald green) / `[ OFF ]` (slate gray) pill button directly in front of each indicator name. Clicking either the row or the pill flips its status immediately.
+     - **Permanent Non-Vanishing Indicator Bar Above Chart**: All 10 indicators (EMA 21, EMA 9, EMA 50, EMA 200, Supertrend, Bollinger Bands, VWAP, RSI 14, MACD, Volume) are permanently displayed directly above the chart with an interactive `[ ON ]` / `[ OFF ]` pill button. Clicking any pill toggles the indicator ON/OFF instantly—indicators never vanish!
+     - **Dedicated Indicators `<select>` Dropdown**: Added native `📊 Indicators (X ON)...` dropdown to the toolbar listing all indicators with `🟢 [ON]` or `⚪ [OFF]` and live values.
+- **Verification Evidence**:
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 51.37s (exit code 0)**.
 - **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
 
 ---
@@ -4290,6 +4326,24 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 91: Permanent Non-Vanishing Indicator Quick-Toggle Bar & Interactive ON/OFF Pills
+- **Timestamp:** 2026-11-19 00:45:00 IST (19:15:00 UTC)
+- **User Prompt:**
+  `"i want indicators to be on and off in indicators dropdown it shows empty and make on and off pill in front of it so i can turn it on and off at any time , now what happening that when i clicked at time the indicator got vanished and there is no option to turn on also"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - Clicking the `×` button on active indicator chips filtered that indicator out of the DOM, causing it to vanish from view without leaving an intuitive toggle to turn it back ON.
+     - The adjacent `<select>` dropdown was labeled "Patterns Overlay" and showed only "None (Hide Patterns)" when 0 patterns were detected, causing users to mistake it for an empty indicator dropdown.
+  2. **Architectural Upgrades Implemented in `frontend/src/pages/ChartPage.tsx`**:
+     - **Interactive ON / OFF Pills in Dropdown**: Rendered a dedicated `[ ON ]` (emerald green) / `[ OFF ]` (slate gray) pill button directly in front of each indicator name. Clicking either the row or the pill flips its status immediately.
+     - **Permanent Non-Vanishing Indicator Bar Above Chart**: All 10 indicators (EMA 21, EMA 9, EMA 50, EMA 200, Supertrend, Bollinger Bands, VWAP, RSI 14, MACD, Volume) are permanently displayed directly above the chart with an interactive `[ ON ]` / `[ OFF ]` pill button. Clicking any pill toggles the indicator ON/OFF instantly—indicators never vanish!
+     - **Dedicated Indicators `<select>` Dropdown**: Added native `📊 Indicators (X ON)...` dropdown to the toolbar listing all indicators with `🟢 [ON]` or `⚪ [OFF]` and live values.
+- **Verification Evidence**:
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 51.37s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
+---
+
 ### Session Entry 90: Indicator Object Type Safety Hardening (`indicators.macd.toFixed` Elimination)
 - **Timestamp:** 2026-11-19 00:35:00 IST (19:05:00 UTC)
 - **User Prompt:**
@@ -4304,5 +4358,23 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
      - Extracted Bollinger Bands with `getSafeIndicatorVal(indicators?.bb?.upper ?? indicators?.bb_upper, undefined, 1)` and lower band.
 - **Verification Evidence**:
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 1m 9s (exit code 0)**.
+- **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
+
+---
+
+### Session Entry 91: Permanent Non-Vanishing Indicator Quick-Toggle Bar & Interactive ON/OFF Pills
+- **Timestamp:** 2026-11-19 00:45:00 IST (19:15:00 UTC)
+- **User Prompt:**
+  `"i want indicators to be on and off in indicators dropdown it shows empty and make on and off pill in front of it so i can turn it on and off at any time , now what happening that when i clicked at time the indicator got vanished and there is no option to turn on also"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis**:
+     - Clicking the `×` button on active indicator chips filtered that indicator out of the DOM, causing it to vanish from view without leaving an intuitive toggle to turn it back ON.
+     - The adjacent `<select>` dropdown was labeled "Patterns Overlay" and showed only "None (Hide Patterns)" when 0 patterns were detected, causing users to mistake it for an empty indicator dropdown.
+  2. **Architectural Upgrades Implemented in `frontend/src/pages/ChartPage.tsx`**:
+     - **Interactive ON / OFF Pills in Dropdown**: Rendered a dedicated `[ ON ]` (emerald green) / `[ OFF ]` (slate gray) pill button directly in front of each indicator name. Clicking either the row or the pill flips its status immediately.
+     - **Permanent Non-Vanishing Indicator Bar Above Chart**: All 10 indicators (EMA 21, EMA 9, EMA 50, EMA 200, Supertrend, Bollinger Bands, VWAP, RSI 14, MACD, Volume) are permanently displayed directly above the chart with an interactive `[ ON ]` / `[ OFF ]` pill button. Clicking any pill toggles the indicator ON/OFF instantly—indicators never vanish!
+     - **Dedicated Indicators `<select>` Dropdown**: Added native `📊 Indicators (X ON)...` dropdown to the toolbar listing all indicators with `🟢 [ON]` or `⚪ [OFF]` and live values.
+- **Verification Evidence**:
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 51.37s (exit code 0)**.
 - **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with `docker compose up -d --build frontend`.
 
