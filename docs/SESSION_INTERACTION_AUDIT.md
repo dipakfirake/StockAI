@@ -3868,3 +3868,43 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Python Celery Import Verification**: `backend.celery_app` imported cleanly with `broker_heartbeat: 30`.
   - **Unit Tests (`backend/tests/test_market_depth.py`)**: **10 of 10 passed in 10.34s (100% green, exit code 0)**.
 - **Exact Next Safe Step**: User runs copy-pasteable commands on live server to pull latest code, rebuild Celery stack, and inspect live worker status.
+
+
+---
+
+### Session Entry 79: Celery & Redis-py 6.1+ Kombu Compatibility and Swing Audit Excel (.xlsx) Download Error Resolution
+- **Timestamp:** 2026-11-18 16:05:00 IST (10:35:00 UTC)
+- **User Prompt:**
+  `"dependency failed to start: container stockcelery is unhealthy ... kombu.exceptions.VersionMismatch: Redis transport requires redis-py versions 6.1.0 or later. You have 5.3.1 ... download-latest.json Failed - Unknown server error. Please try again, or contact the server administrator. From https://stockai-live.duckdns.org ... while clicking on download current excel from any component this is happening. /swarm /teamwork"`
+- **Forensic Diagnosis & Root Cause**:
+  1. **Celery Worker Kombu VersionMismatch Root Cause:**
+     - Celery 5.3.6 uses Kombu 5.3.4+ which mandates `redis>=6.1.0` for its Redis transport implementation.
+     - `requirements.txt` previously contained `redis>=5.0.4` and `celery[redis]==5.3.6` (which had legacy pin constraints). During image build, pip resolved `redis==5.3.1`, causing Kombu to raise `kombu.exceptions.VersionMismatch: Redis transport requires redis-py versions 6.1.0 or later. You have 5.3.1` during worker initialization.
+     - Because `stockcelery` failed to start, the Compose healthcheck failed, blocking dependent services.
+  2. **Excel Download Error (`download-latest.json`) Root Cause:**
+     - In `backend/services/swing_audit_service.py`, `get_audit_dir()` was a standalone helper function outside `SwingAuditService`, but `backend/api/swing_audit.py` called `swing_audit_service.get_audit_dir()`, causing an unhandled `AttributeError: 'SwingAuditService' object has no attribute 'get_audit_dir'` on `/api/swing-audit/files` and `/api/swing-audit/download-latest`.
+     - In `generate_excel_workbook`, sorting audits with `lambda a: a.recommendation_date` crashed with `TypeError: '<' not supported between instances of 'datetime.date' and 'NoneType'` when any trade lacked a date.
+     - In the frontend, the "Download Current Excel" buttons were raw anchor tags `<a href="/api/swing-audit/download-latest" download>`. When the backend crashed with a 500 JSON error payload (`{"detail": "..."}`), modern Chromium browsers saved the segment as `download-latest.json` instead of a spreadsheet.
+- **Engineering Changes Delivered**:
+  1. **Celery & Kombu Dependency Compatibility (`backend/requirements.txt` & root `requirements.txt`)**:
+     - Upgraded `redis>=5.0.4` to `redis>=6.1.0`.
+     - Removed `celery[redis]==5.3.6` tag while retaining core `celery==5.3.6`. Kombu's redis transport now cleanly initializes without `VersionMismatch`.
+  2. **Backend Service & Routing Hardening (`backend/services/swing_audit_service.py`, `backend/api/swing_audit.py`, `backend/main.py`)**:
+     - Added `@staticmethod def get_audit_dir() -> Path:` to `SwingAuditService`, exposing it on both class and instance.
+     - Added `safe_date_sort_key` to sort audit trades robustly without `TypeError` when dates are None or strings.
+     - Expanded closed trade tracking (`is_closed_audit`) in Sheet 3 ("Booked Trades") to include dynamic coupled ratchet exit outcomes `TARGET_2_ACHIEVED` and `STOPPED_IN_PROFIT`.
+     - Wrapped `download_latest_audit_excel` and `download_specific_audit_excel` in defensive `try...except` blocks that auto-generate an up-to-date workbook, format RFC-compliant double-quoted `Content-Disposition: attachment; filename="..."`, and return structured HTTP 404/500 JSON exceptions rather than unhandled 500 crashes.
+     - Added `"Content-Disposition"` to CORS `expose_headers` in `backend/main.py` so frontend JavaScript can read the server-suggested filename.
+  3. **Frontend Blob Download Client & UI Enhancements**:
+     - Authored `downloadBlobFile(requestFn, fallbackFilename)` helper in `frontend/src/services/api.ts` with Axios `{ responseType: 'blob' }`, `Content-Disposition` header filename extraction, object URL trigger/cleanup, and `await err.response.data.text()` error payload decoding.
+     - Added `downloadLatestExcel()` and `downloadArchiveExcel(filename)` to `swingAuditApi`.
+     - Upgraded Excel download buttons across `SwingScreenerPage.tsx`, `AdminPage.tsx`, `SettingsPage.tsx`, and `ChartPage.tsx` from raw anchor tags to interactive buttons with download state, loading spinners, and error toasts.
+     - Preserved inline `MarketDepthWidget` 6-column order book in `ChartPage.tsx`.
+  4. **Automated Unit & Endpoint Tests (`backend/tests/test_swing_audit.py`)**:
+     - Added tests verifying `get_audit_dir()`, `generate_excel_workbook` with empty cycles and None dates, `/download-latest` endpoint streaming `.xlsx` with correct MIME types, and archive downloads.
+- **Verification Evidence**:
+  - **Swing Audit Test Suite (`backend/tests/test_swing_audit.py`)**: **11 of 11 passed (100% green)**.
+  - **Market Depth Test Suite (`backend/tests/test_market_depth.py`)**: **10 of 10 passed (100% green)**.
+  - **Total Python Tests**: **21 of 21 passed in 27.42s (100% green, exit code 0)**.
+  - **Frontend TypeScript Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 19.15s (exit code 0)**.
+- **Exact Next Safe Step**: User runs copy-pasteable commands on live server to pull latest code, rebuild containers, and verify Celery worker and Excel download endpoints.

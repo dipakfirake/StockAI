@@ -105,6 +105,30 @@ export default function SwingScreenerPage() {
   const [showArchiveModal, setShowArchiveModal] = useState(false)
   const [archiveFiles, setArchiveFiles] = useState<any[]>([])
   const [loadingArchives, setLoadingArchives] = useState(false)
+  const [downloadingExcel, setDownloadingExcel] = useState(false)
+
+  const handleDownloadLatestExcel = async () => {
+    setDownloadingExcel(true)
+    try {
+      const filename = await swingAuditApi.downloadLatestExcel()
+      toast.success('Audit Excel Downloaded', filename)
+    } catch (err: any) {
+      console.error('Audit Excel download failed:', err)
+      toast.error('Download Failed', err.message || 'Could not download audit Excel spreadsheet')
+    } finally {
+      setDownloadingExcel(false)
+    }
+  }
+
+  const handleDownloadArchiveExcel = async (filename: string) => {
+    try {
+      await swingAuditApi.downloadArchiveExcel(filename)
+      toast.success('Archive Downloaded', filename)
+    } catch (err: any) {
+      console.error('Archive download failed:', err)
+      toast.error('Download Failed', err.message || 'Could not download archive file')
+    }
+  }
 
   const fetchArchiveFiles = async () => {
     setLoadingArchives(true)
@@ -284,9 +308,9 @@ export default function SwingScreenerPage() {
             <span>{syncingAudit ? 'Syncing...' : 'Sync 11-Day Prices'}</span>
           </button>
 
-          <a 
-            href="/api/swing-audit/download-latest" 
-            download
+          <button 
+            onClick={handleDownloadLatestExcel}
+            disabled={downloadingExcel}
             className="btn btn-secondary no-shrink"
             style={{ 
               display: 'flex', 
@@ -299,13 +323,14 @@ export default function SwingScreenerPage() {
               textDecoration: 'none',
               color: '#38bdf8',
               borderColor: 'rgba(56, 189, 248, 0.3)',
-              background: 'rgba(56, 189, 248, 0.08)'
+              background: 'rgba(56, 189, 248, 0.08)',
+              cursor: downloadingExcel ? 'not-allowed' : 'pointer'
             }}
             title="Download the institutional 11-Day Swing Audit Excel spreadsheet (.xlsx) with PnL and Price Tracking"
           >
-            <Download size={15} />
-            <span>Audit Excel (.xlsx)</span>
-          </a>
+            <Download size={15} className={downloadingExcel ? 'spin' : ''} />
+            <span>{downloadingExcel ? 'Downloading...' : 'Audit Excel (.xlsx)'}</span>
+          </button>
 
           <button
             onClick={handleOpenArchives}
@@ -929,15 +954,15 @@ export default function SwingScreenerPage() {
               flexWrap: 'wrap',
               gap: 10
             }}>
-              <a 
-                href="/api/swing-audit/download-latest" 
-                download
+              <button 
+                onClick={handleDownloadLatestExcel} 
+                disabled={downloadingExcel}
                 className="btn btn-primary"
                 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, height: 34 }}
               >
-                <Download size={14} />
-                <span>Download Current Active Cycle (.xlsx)</span>
-              </a>
+                <Download size={14} className={downloadingExcel ? 'spin' : ''} />
+                <span>{downloadingExcel ? 'Downloading...' : 'Download Current Active Cycle (.xlsx)'}</span>
+              </button>
               <button 
                 onClick={fetchArchiveFiles} 
                 disabled={loadingArchives}
@@ -1024,9 +1049,8 @@ export default function SwingScreenerPage() {
                         <span style={{ fontSize: 11, color: '#64748b' }}>
                           {file.size_bytes ? `${(file.size_bytes / 1024).toFixed(1)} KB` : ''}
                         </span>
-                        <a 
-                          href={swingAuditApi.downloadFileUrl(file.filename)} 
-                          download
+                        <button 
+                          onClick={() => handleDownloadArchiveExcel(file.filename)} 
                           className="btn btn-secondary"
                           style={{
                             display: 'flex',
@@ -1036,12 +1060,13 @@ export default function SwingScreenerPage() {
                             fontSize: 12,
                             color: '#38bdf8',
                             borderColor: 'rgba(56, 189, 248, 0.3)',
-                            background: 'rgba(56, 189, 248, 0.08)'
+                            background: 'rgba(56, 189, 248, 0.08)',
+                            cursor: 'pointer'
                           }}
                         >
                           <Download size={13} />
                           <span>Download .xlsx</span>
-                        </a>
+                        </button>
                       </div>
                     </div>
                   ))}

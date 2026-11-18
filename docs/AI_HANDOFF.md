@@ -14,6 +14,31 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **CELERY & REDIS DEPENDENCY COMPATIBILITY & SWING AUDIT EXCEL EXPORT REPAIR (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    1. Celery worker startup crashed with `kombu.exceptions.VersionMismatch: Redis transport requires redis-py versions 6.1.0 or later. You have 5.3.1`.
+    2. Swing Audit Excel export endpoint (`GET /api/swing-audit/download-latest`) failed with HTTP 500 and frontend download buttons triggered browser download of error JSON as `download-latest.json`.
+  - **Forensic Diagnosis & Solutions Delivered**:
+    1. **Celery & Kombu Dependency Resolution**:
+       - Upgraded `redis>=6.1.0` in `backend/requirements.txt` and `requirements.txt`.
+       - Stripped `celery[redis]==5.3.6` tag (which hardcodes `<6.0.0` upper bound) while retaining `celery==5.3.6`. Kombu's redis transport now loads cleanly and worker ping succeeds.
+    2. **Backend Service & Routing Fixes (`SwingAuditService`, `api/swing_audit.py` & `main.py`)**:
+       - Exposed `@staticmethod def get_audit_dir() -> Path:` on `SwingAuditService` class and instance.
+       - Fixed `generate_excel_workbook` date sorting with `safe_date_sort_key` to prevent `TypeError: '<' not supported between instances of 'datetime.date' and 'NoneType'` when `recommendation_date=None`.
+       - Expanded closed trade tracking (`is_closed_audit`) to include all valid statuses (`TARGET_ACHIEVED`, `TARGET_1_ACHIEVED`, `TARGET_2_ACHIEVED`, `TARGET_3_ACHIEVED`, `STOPPED_IN_PROFIT`, `STOPLOSS_HIT`, `DAY_11_EXIT`, etc.) in the "Booked Trades" sheet.
+       - Wrapped `download_latest_audit_excel` and `download_specific_audit_excel` in defensive `try...except` blocks that auto-generate fresh workbooks, stream with RFC-compliant double-quoted `Content-Disposition: attachment; filename="..."`, and return structured HTTP 404/500 JSON errors instead of unhandled crashes.
+       - Added `"Content-Disposition"` to CORS `expose_headers` in `backend/main.py` so frontend clients can read filename headers across origins.
+    3. **Frontend Download Client & UI Enhancements**:
+       - Implemented generic `downloadBlobFile(target, fallbackFilename, contentDisposition)` helper in `frontend/src/services/api.ts` supporting both Request Functions and raw Blobs, with Axios `{ responseType: 'blob' }`, `Content-Disposition` header parsing, object URL cleanup, and `await err.response.data.text()` error payload decoding.
+       - Added `downloadLatestExcel()` and `downloadArchiveExcel(filename)` to `swingAuditApi`.
+       - Converted plain `<a download>` links across `SwingScreenerPage.tsx`, `AdminPage.tsx`, `SettingsPage.tsx`, and `ChartPage.tsx` into responsive interactive buttons with loading spinner feedback and explicit error toasts.
+  - **Verification Evidence**:
+    - **Swing Audit Unit & Endpoint Tests (`backend/tests/test_swing_audit.py`)**: **11 of 11 passed in 26.12s (100% green)**.
+    - **Coupled Ratchet Regression Tests (`backend/tests/test_swing_audit_coupled_ratchet.py`)**: **5 of 5 passed in 7.24s (100% green)**.
+    - **Total Audit Tests Combined**: **16 of 16 passed in 25.62s (100% green)**.
+    - **Python Syntax Compilation**: `py_compile` succeeded with exit code 0 across all modified backend files.
+    - **Frontend Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 19.15s (exit code 0)**.
+
 - **CELERY FLOWER 0-WORKERS RESOLUTION & STACK SYNCHRONIZATION (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     - User navigated to Flower dashboard (`https://stockai-live.duckdns.org/flower/workers`) and saw **0 workers** (`No data available in table | Total 0 0 0 0 0`).
@@ -31,13 +56,6 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
   - **Verification Evidence**:
     - Python Celery Import: `backend.celery_app` imported with `broker_heartbeat: 30`.
     - Unit tests: `10 of 10 passed in 10.34s`.
-  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server:
-    ```bash
-    cd ~/StockAI
-    git fetch origin main && git reset --hard origin/main
-    docker compose up -d --build celery_worker celery_beat flower
-    docker compose exec celery_worker celery -A backend.celery_app inspect ping -d celery@stockcelery
-    ```
 
 - **BROWSER OFFLINE / DISCONNECTION RESILIENT POLLING & RECONNECTING BANNER (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
@@ -57,28 +75,6 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 ## Latest verified checks (2026-11-15)
 
 - **MARKET DEPTH OFF-MARKET FREEZING & ZERODHA KITE 0.00 BOOK ALIGNMENT (COMPLETE & VERIFIED - 2026-11-15):**
-  - **Issues Investigated & Resolved**:
-    - User asked: *"i am checking icici stock why it is changing at night the bids"* and shared a dark-mode Zerodha Kite screenshot of `PCJEWELLER BSE 15.51` showing all 5 bid/offer levels cleared to `0.00 0 0` with `Total 0 | Total 0`.
-  - **Forensic Diagnosis & Solutions Delivered**:
-    1. **Root Cause**: `generate_synthetic_depth()` previously ran a pseudo-random seed based on `int(time.time() // 3)`, which advanced every 3 seconds even outside market hours. Simultaneously, the frontend was polling every 2.0s, causing bids to fluctuate at night.
-    2. **Exchange Standard Behavior**: Indian equities (NSE & BSE) trade 09:15-15:30 IST. Post-market session closes at 16:00 IST. Outside market hours, exchanges cancel remaining day orders and clear the order book, displaying `0.00 0 0` on Zerodha Kite.
-    3. **Backend Upgrades (`backend/services/market_depth_service.py` & `backend/api/stocks.py`)**:
-       - Default off-market behavior (`is_indian_market_open() == False`) now returns official Zerodha Kite post-market state: 5 rows of `0.00 0 0` for Bids and Offers, `Total 0 | Total 0`, and `is_market_open: False`.
-       - Off-market cache TTL extended to 300s (5 minutes) to eliminate compute on static books.
-       - Practice mode simulated depth is now seeded with a **100% frozen date-bound hash** (`hashlib.md5(f"{symbol}:{prev_close}:{today_str}".encode())`), guaranteeing zero fluctuation at night.
-       - Added `simulate: bool = Query(False)` parameter to `GET /api/stocks/{symbol}/depth`.
-    4. **Frontend Upgrades (`frontend/src/components/MarketDepthWidget.tsx`)**:
-       - Smart Polling: halts 2s fast polling when `is_market_open === false`, slowing to 60s to prevent unnecessary browser re-renders.
-       - Visual Zerodha Kite 0.00 Book: displays `0.00 0 0` on both sides and `Total 0 | Total 0`, matching the user's screenshot.
-       - Added top banner with `⚡ Preview Practice Depth` toggle for traders who want to practice paper trading against a frozen simulated book.
-  - **Verification Evidence**:
-    - **Unit Tests (`backend/tests/test_market_depth.py`)**: **10 of 10 passed in 9.67s (100% green)**.
-    - **Regression Tests (`test_swing_audit_coupled_ratchet.py` & `test_fyers_stream.py`)**: **18 of 18 passed in 10.07s (100% green)**.
-    - **Total Test Suite**: **28 of 28 tests passed**.
-    - **Frontend Production Build**: **1,994 modules transformed, 0 TypeScript errors, built in 23.45s (exit code 0)**.
-  - **Exact Next Safe Step**: User runs copy-pasteable commands on live server (`git fetch origin main && git reset --hard origin/main && docker compose up -d --build backend frontend`).
-
-- **ZERODHA KITE-STYLE 5-LEVEL MARKET DEPTH & ZERO-RATE-LIMIT FYERS LIQUIDITY ENGINE (COMPLETE & VERIFIED - 2026-11-15):**
   - **Issues Investigated & Resolved**:
     - User asked whether the system contains "shared price means like in Zerodha Kite when we see stocks we see the bidded prices, orders and Qty of 5 to 10 bidded prices of buying and selling and only when someone buys then only we can sell like this happens na so we have to add this also in our system without exhausting limits of Fyers API".
   - **Forensic Diagnosis & Solutions Delivered**:

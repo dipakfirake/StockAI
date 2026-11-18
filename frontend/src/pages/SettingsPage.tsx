@@ -63,6 +63,28 @@ export default function SettingsPage() {
     }
   }
 
+  const [downloadingExcel, setDownloadingExcel] = useState(false)
+
+  const handleDownloadLatestExcel = async () => {
+    setDownloadingExcel(true)
+    try {
+      const filename = await swingAuditApi.downloadLatestExcel()
+      alert(`Audit Excel downloaded: ${filename}`)
+    } catch (err: any) {
+      alert(`Failed to download audit Excel: ${err.message || err}`)
+    } finally {
+      setDownloadingExcel(false)
+    }
+  }
+
+  const handleDownloadArchiveExcel = async (filename: string) => {
+    try {
+      await swingAuditApi.downloadArchiveExcel(filename)
+    } catch (err: any) {
+      alert(`Failed to download archive file: ${err.message || err}`)
+    }
+  }
+
   useEffect(() => {
     fetchSettings()
     fetchAuditData()
@@ -473,16 +495,16 @@ export default function SettingsPage() {
           </div>
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <a
-              href="/api/swing-audit/download-latest"
-              download
+            <button
+              onClick={handleDownloadLatestExcel}
+              disabled={downloadingExcel}
               className="btn btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: 8, height: 36, textDecoration: 'none' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, height: 36, textDecoration: 'none', cursor: downloadingExcel ? 'not-allowed' : 'pointer' }}
               title="Download current active 11-day cycle Excel spreadsheet"
             >
-              <Download size={14} />
-              <span>Download Current Excel (.xlsx)</span>
-            </a>
+              <Download size={14} className={downloadingExcel ? 'spin' : ''} />
+              <span>{downloadingExcel ? 'Downloading...' : 'Download Current Excel (.xlsx)'}</span>
+            </button>
 
             <button
               onClick={handleSyncAudit}
@@ -576,9 +598,8 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
-                    <a
-                      href={swingAuditApi.downloadFileUrl(file.filename)}
-                      download
+                    <button
+                      onClick={() => handleDownloadArchiveExcel(file.filename)}
                       className="btn btn-secondary"
                       style={{
                         display: 'inline-flex',
@@ -590,11 +611,12 @@ export default function SettingsPage() {
                         borderColor: 'rgba(56, 189, 248, 0.3)',
                         background: 'rgba(56, 189, 248, 0.08)',
                         textDecoration: 'none',
+                        cursor: 'pointer'
                       }}
                     >
                       <Download size={12} />
                       <span>Download .xlsx</span>
-                    </a>
+                    </button>
                   </div>
                 ))
               )}

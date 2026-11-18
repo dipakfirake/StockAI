@@ -14,7 +14,7 @@ from backend.core.logging_config import get_logger
 from backend.core.database import get_db
 from backend.core.auth import get_current_user, get_current_user_optional
 from backend.models.swing_audit import SwingTradeAuditCycle
-from backend.services.swing_audit_service import swing_audit_service
+from backend.services.swing_audit_service import swing_audit_service, get_audit_dir
 
 logger = get_logger(__name__)
 
@@ -129,32 +129,50 @@ async def download_latest_audit_excel(
 ):
     """
     Download the latest 11-day audit Excel workbook (.xlsx) with formatting and formulas.
+    Always generates or validates an up-to-date workbook before streaming.
     """
-    cycle = await swing_audit_service.get_or_create_active_cycle(db)
-    
-    # Ensure Excel workbook is generated and up to date
-    excel_path = cycle.excel_file_path
-    if not excel_path or not os.path.exists(excel_path):
+    try:
+        cycle = await swing_audit_service.get_or_create_active_cycle(db)
+        if not cycle:
+            raise HTTPException(status_code=404, detail="No active swing audit cycle found.")
+
+        # Always attempt generation to ensure the workbook reflects the latest trades and PnL
         excel_path_obj = await swing_audit_service.generate_excel_workbook(db, cycle.id)
         excel_path = str(excel_path_obj) if excel_path_obj else None
 
-    # Defensive fallback: check target filename directly in audit directory
-    if not excel_path or not os.path.exists(excel_path):
-        filename = f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
-        fallback_file = swing_audit_service.get_audit_dir() / filename
-        if fallback_file.exists():
-            excel_path = str(fallback_file)
+        # Check existing cycle.excel_file_path if generator returned None
+        if not excel_path or not os.path.exists(excel_path):
+            if cycle.excel_file_path and os.path.exists(cycle.excel_file_path):
+                excel_path = cycle.excel_file_path
 
-    if not excel_path or not os.path.exists(excel_path):
-        raise HTTPException(status_code=404, detail="Audit Excel file has not been generated yet.")
+        # Defensive fallback: check target filename directly in audit directory
+        if not excel_path or not os.path.exists(excel_path):
+            filename = f"Swing_Trade_Audit_{cycle.from_date}_to_{cycle.to_date}.xlsx"
+            fallback_file = get_audit_dir() / filename
+            if fallback_file.exists():
+                excel_path = str(fallback_file)
 
-    filename = os.path.basename(excel_path)
-    return FileResponse(
-        path=excel_path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=filename,
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+        if not excel_path or not os.path.exists(excel_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Audit Excel file for cycle {cycle.cycle_number} ({cycle.from_date} to {cycle.to_date}) could not be generated or found."
+            )
+
+        filename = os.path.basename(excel_path)
+        return FileResponse(
+            path=excel_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=filename,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving latest audit Excel workbook: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate or retrieve swing audit Excel workbook: {str(e)}"
+        )
 
 
 @router.get("/files")
@@ -169,7 +187,7 @@ async def list_audit_files(
         cycles_stmt = select(SwingTradeAuditCycle).order_by(SwingTradeAuditCycle.cycle_number.desc())
         cycles = (await db.execute(cycles_stmt)).scalars().all()
 
-        audit_dir = swing_audit_service.get_audit_dir()
+        audit_dir = get_audit_dir()
         existing_disk_files = {}
         if audit_dir.exists():
             for f in audit_dir.glob("*.xlsx"):
@@ -254,38 +272,51 @@ async def download_specific_audit_excel(
     Download a specific 11-day audit Excel workbook by its file name.
     Strictly verifies filename to prevent path traversal.
     """
-    safe_name = os.path.basename(filename)
-    if not safe_name.endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Invalid file type. Only .xlsx files allowed.")
-
-    audit_dir = swing_audit_service.get_audit_dir()
-    file_path = (audit_dir / safe_name).resolve()
-
-    # Prevent path traversal outside audit_dir
     try:
-        if not str(file_path).startswith(str(audit_dir.resolve())):
-            raise HTTPException(status_code=403, detail="Access denied.")
-    except Exception:
-        raise HTTPException(status_code=403, detail="Invalid path.")
+        safe_name = os.path.basename(filename)
+        if not safe_name.endswith(".xlsx"):
+            raise HTTPException(status_code=400, detail="Invalid file type. Only .xlsx files allowed.")
 
-    # If file doesn't exist on disk, attempt generation if matching cycle exists in DB
-    if not file_path.exists():
-        cycle_stmt = select(SwingTradeAuditCycle).where(
-            SwingTradeAuditCycle.excel_file_path.ilike(f"%{safe_name}%")
+        audit_dir = get_audit_dir()
+        file_path = (audit_dir / safe_name).resolve()
+
+        # Prevent path traversal outside audit_dir
+        try:
+            if not str(file_path).startswith(str(audit_dir.resolve())):
+                raise HTTPException(status_code=403, detail="Access denied.")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=403, detail="Invalid path.")
+
+        # If file doesn't exist on disk, attempt generation if matching cycle exists in DB
+        if not file_path.exists():
+            cycle_stmt = select(SwingTradeAuditCycle).where(
+                SwingTradeAuditCycle.excel_file_path.ilike(f"%{safe_name}%")
+            )
+            cycle = (await db.execute(cycle_stmt)).scalars().first()
+            if cycle:
+                cycle_fname = Path(cycle.excel_file_path).name if cycle.excel_file_path else ""
+                if cycle_fname.lower() == safe_name.lower():
+                    gen_path = await swing_audit_service.generate_excel_workbook(db, cycle.id)
+                    if gen_path and gen_path.exists() and gen_path.name.lower() == safe_name.lower():
+                        file_path = gen_path
+
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Audit file '{safe_name}' not found.")
+
+        return FileResponse(
+            path=str(file_path),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=safe_name,
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}"'}
         )
-        cycle = (await db.execute(cycle_stmt)).scalars().first()
-        if cycle:
-            gen_path = await swing_audit_service.generate_excel_workbook(db, cycle.id)
-            if gen_path and gen_path.exists():
-                file_path = gen_path
-
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"Audit file '{safe_name}' not found.")
-
-    return FileResponse(
-        path=str(file_path),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=safe_name,
-        headers={"Content-Disposition": f"attachment; filename={safe_name}"}
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving audit Excel workbook '{filename}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to download audit file: {str(e)}"
+        )
 

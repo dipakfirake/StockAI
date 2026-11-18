@@ -111,6 +111,7 @@ app.add_middleware(
         "X-Idempotent-Replay",
         "Retry-After",
         "X-Request-ID",
+        "Content-Disposition",
     ],
 )
 

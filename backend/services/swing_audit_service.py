@@ -33,6 +33,47 @@ def get_audit_dir() -> Path:
     return target_dir
 
 
+CLOSED_AUDIT_STATUSES = {
+    "TARGET_ACHIEVED",
+    "TARGET_1_ACHIEVED",
+    "TARGET_2_ACHIEVED",
+    "TARGET_3_ACHIEVED",
+    "STOPPED_IN_PROFIT",
+    "STOPLOSS_HIT",
+    "DAY_11_EXIT",
+    "CLOSED",
+    "EXITED",
+    "COMPLETED",
+    "MANUAL_EXIT",
+    "SQUARED_OFF",
+}
+
+
+def safe_date_sort_key(d: Any) -> Tuple[int, str]:
+    """
+    Returns a sortable tuple (priority, iso_string) so that NoneType, date, datetime,
+    and strings never raise TypeError: '<' not supported between instances of 'NoneType' and 'str' / 'datetime'.
+    """
+    if d is None:
+        return (0, "")
+    if isinstance(d, (datetime, date)):
+        return (1, d.isoformat())
+    return (1, str(d))
+
+
+def is_closed_audit(a: Any) -> bool:
+    """Checks whether an audit setup has concluded or exited."""
+    status = getattr(a, "status", None)
+    if not status:
+        return bool(getattr(a, "exit_date", None) is not None or getattr(a, "exit_price", None) is not None)
+    st = str(status).strip().upper()
+    if st in CLOSED_AUDIT_STATUSES:
+        return True
+    if st != "IN_PROGRESS" and (getattr(a, "exit_date", None) is not None or getattr(a, "exit_price", None) is not None):
+        return True
+    return False
+
+
 def add_trading_days(start_date: date, num_days: int) -> date:
     """Adds approximately N trading days (skipping Saturdays and Sundays)."""
     current = start_date
@@ -46,6 +87,11 @@ def add_trading_days(start_date: date, num_days: int) -> date:
 
 class SwingAuditService:
     """Institutional audit service tracking swing trade accuracy and PnL."""
+
+    @staticmethod
+    def get_audit_dir() -> Path:
+        """Expose get_audit_dir on the service class and instance."""
+        return get_audit_dir()
 
     @staticmethod
     async def get_or_create_active_cycle(db: AsyncSession, target_date: Optional[date] = None) -> SwingTradeAuditCycle:
@@ -666,7 +712,13 @@ class SwingAuditService:
             if not cycle:
                 return None
 
-            audits = sorted(cycle.audits, key=lambda a: a.recommendation_date)
+            audits = sorted(
+                cycle.audits or [],
+                key=lambda a: (
+                    safe_date_sort_key(getattr(a, "recommendation_date", None)),
+                    str(getattr(a, "symbol", "") or "")
+                )
+            )
 
             wb = openpyxl.Workbook()
         
@@ -807,11 +859,18 @@ class SwingAuditService:
 
             status_colors = {
                 "TARGET_ACHIEVED": Font(name="Calibri", size=10, bold=True, color="166534"),
+                "TARGET_1_ACHIEVED": Font(name="Calibri", size=10, bold=True, color="166534"),
                 "TARGET_2_ACHIEVED": Font(name="Calibri", size=10, bold=True, color="047857"),
+                "TARGET_3_ACHIEVED": Font(name="Calibri", size=10, bold=True, color="047857"),
                 "STOPPED_IN_PROFIT": Font(name="Calibri", size=10, bold=True, color="0D9488"),
                 "STOPLOSS_HIT": Font(name="Calibri", size=10, bold=True, color="991B1B"),
                 "DAY_11_EXIT": Font(name="Calibri", size=10, bold=True, color="1E40AF"),
                 "IN_PROGRESS": Font(name="Calibri", size=10, bold=True, color="854D0E"),
+                "CLOSED": Font(name="Calibri", size=10, bold=True, color="1E40AF"),
+                "EXITED": Font(name="Calibri", size=10, bold=True, color="1E40AF"),
+                "COMPLETED": Font(name="Calibri", size=10, bold=True, color="1E40AF"),
+                "MANUAL_EXIT": Font(name="Calibri", size=10, bold=True, color="1E40AF"),
+                "SQUARED_OFF": Font(name="Calibri", size=10, bold=True, color="1E40AF"),
             }
 
             for r_idx, audit in enumerate(audits, 2):
@@ -821,9 +880,9 @@ class SwingAuditService:
                 dp_map = {dp.day_number: dp for dp in audit.daily_prices}
 
                 # Choose row fill based on status
-                if audit.status in ("TARGET_ACHIEVED", "TARGET_2_ACHIEVED", "STOPPED_IN_PROFIT"):
+                if audit.status in ("TARGET_ACHIEVED", "TARGET_1_ACHIEVED", "TARGET_2_ACHIEVED", "TARGET_3_ACHIEVED", "STOPPED_IN_PROFIT") or (float(audit.profit_loss_pct or 0.0) > 0 and audit.status != "IN_PROGRESS"):
                     r_fill = green_row_fill
-                elif audit.status == "STOPLOSS_HIT":
+                elif audit.status == "STOPLOSS_HIT" or (float(audit.profit_loss_pct or 0.0) < 0 and audit.status != "IN_PROGRESS"):
                     r_fill = red_row_fill
                 else:
                     r_fill = blue_row_fill
@@ -958,7 +1017,15 @@ class SwingAuditService:
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = thin_border
 
-            closed_audits = [a for a in audits if a.status in ("TARGET_ACHIEVED", "STOPLOSS_HIT", "DAY_11_EXIT")]
+            closed_audits = [a for a in audits if is_closed_audit(a)]
+            closed_audits = sorted(
+                closed_audits,
+                key=lambda a: (
+                    safe_date_sort_key(getattr(a, "exit_date", None)),
+                    safe_date_sort_key(getattr(a, "recommendation_date", None)),
+                    str(getattr(a, "symbol", "") or "")
+                )
+            )
             for r_i, c_trade in enumerate(closed_audits, 2):
                 c_pnl_pct = float(c_trade.profit_loss_pct or 0.0)
                 c_pnl_rs = float(c_trade.realized_pnl_rupees or 0.0)

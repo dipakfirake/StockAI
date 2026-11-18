@@ -9,7 +9,7 @@ from pathlib import Path
 import openpyxl
 
 from backend.models.swing_audit import SwingTradeAuditCycle, SwingTradeAudit, SwingTradeAuditPrice
-from backend.services.swing_audit_service import SwingAuditService, add_trading_days, get_audit_dir
+from backend.services.swing_audit_service import SwingAuditService, add_trading_days, get_audit_dir, swing_audit_service
 
 
 @pytest.fixture
@@ -381,5 +381,221 @@ async def test_swing_audit_api_routes():
             resp = await client.post("/api/swing-audit/sync")
             assert resp.status_code == 200
             assert resp.json()["status"] == "success"
+
+    app.dependency_overrides.clear()
+
+
+def test_swing_audit_service_get_audit_dir():
+    """Verify get_audit_dir is exposed on both class and instance and returns a valid directory."""
+    assert hasattr(swing_audit_service, "get_audit_dir") is True
+    assert hasattr(SwingAuditService, "get_audit_dir") is True
+
+    dir_from_instance = swing_audit_service.get_audit_dir()
+    dir_from_class = SwingAuditService.get_audit_dir()
+
+    assert isinstance(dir_from_instance, Path)
+    assert isinstance(dir_from_class, Path)
+    assert dir_from_instance == dir_from_class
+    assert dir_from_instance.exists()
+
+
+@pytest.mark.asyncio
+async def test_generate_excel_workbook_empty_cycle_and_none_dates(mock_db, tmp_path):
+    """
+    Test generate_excel_workbook handles empty cycles and audits with recommendation_date=None
+    without raising TypeError, and includes TARGET_2_ACHIEVED and STOPPED_IN_PROFIT in Booked Trades.
+    """
+    # 1. Empty cycle test
+    empty_cycle = SwingTradeAuditCycle(
+        id="c1111111-1111-1111-1111-111111111111",
+        cycle_number=99,
+        from_date=date(2026, 11, 1),
+        to_date=date(2026, 11, 16),
+        status="ACTIVE",
+        audits=[]
+    )
+
+    mock_result_empty = MagicMock()
+    mock_result_empty.scalars.return_value.first.return_value = empty_cycle
+    mock_db.execute.return_value = mock_result_empty
+
+    with patch("backend.services.swing_audit_service.get_audit_dir", return_value=tmp_path):
+        wb_path = await SwingAuditService.generate_excel_workbook(mock_db, empty_cycle.id)
+        assert wb_path is not None
+        assert wb_path.exists()
+
+        # Verify empty cycle workbook has sheets
+        wb = openpyxl.load_workbook(wb_path)
+        assert "Audit Scorecard" in wb.sheetnames
+        assert "11-Day Price Tracking" in wb.sheetnames
+        assert "Booked Trades" in wb.sheetnames
+
+    # 2. Cycle with recommendation_date=None and coupled ratchet closed statuses
+    audit_none_date = SwingTradeAudit(
+        id="a1111111-1111-1111-1111-111111111111",
+        cycle_id="c2222222-2222-2222-2222-222222222222",
+        symbol="HDFCBANK.NS",
+        company_name="HDFC Bank Ltd",
+        recommendation_date=None,  # Tests the sort key=lambda a: a.recommendation_date or date.min
+        buy_price=Decimal("1500.00"),
+        status="TARGET_2_ACHIEVED",  # Expanded closed status
+        exit_date=date(2026, 11, 10),
+        exit_price=Decimal("1650.00"),
+        profit_loss_pct=Decimal("10.0"),
+        realized_pnl_rupees=Decimal("10000.0"),
+        exit_day_number=5,
+        daily_prices=[]
+    )
+    audit_valid_date = SwingTradeAudit(
+        id="a2222222-2222-2222-2222-222222222222",
+        cycle_id="c2222222-2222-2222-2222-222222222222",
+        symbol="INFY.NS",
+        company_name="Infosys Ltd",
+        recommendation_date=date(2026, 11, 5),
+        buy_price=Decimal("1800.00"),
+        status="STOPPED_IN_PROFIT",  # Expanded closed status
+        exit_date=date(2026, 11, 8),
+        exit_price=Decimal("1850.00"),
+        profit_loss_pct=Decimal("2.78"),
+        realized_pnl_rupees=Decimal("2780.0"),
+        exit_day_number=3,
+        daily_prices=[]
+    )
+
+    cycle_with_data = SwingTradeAuditCycle(
+        id="c2222222-2222-2222-2222-222222222222",
+        cycle_number=100,
+        from_date=date(2026, 11, 1),
+        to_date=date(2026, 11, 16),
+        status="ACTIVE",
+        audits=[audit_none_date, audit_valid_date]
+    )
+
+    mock_result_data = MagicMock()
+    mock_result_data.scalars.return_value.first.return_value = cycle_with_data
+    mock_db.execute.return_value = mock_result_data
+
+    with patch("backend.services.swing_audit_service.get_audit_dir", return_value=tmp_path):
+        wb_path_data = await SwingAuditService.generate_excel_workbook(mock_db, cycle_with_data.id)
+        assert wb_path_data is not None
+        assert wb_path_data.exists()
+
+        wb_data = openpyxl.load_workbook(wb_path_data)
+        ws_closed = wb_data["Booked Trades"]
+
+        # Verify both TARGET_2_ACHIEVED and STOPPED_IN_PROFIT are rendered in Booked Trades
+        booked_symbols = [ws_closed.cell(row=r, column=2).value for r in range(2, ws_closed.max_row + 1)]
+        assert "HDFCBANK" in booked_symbols
+        assert "INFY" in booked_symbols
+
+
+@pytest.mark.asyncio
+async def test_swing_audit_api_download_latest_route(tmp_path):
+    """
+    Test GET /api/swing-audit/download-latest returns HTTP 200, valid openxml MIME type,
+    and Content-Disposition attachment header.
+    """
+    from httpx import AsyncClient, ASGITransport
+    from backend.main import app
+    from backend.core.database import get_db
+
+    mock_cycle = SwingTradeAuditCycle(
+        id="c3333333-3333-3333-3333-333333333333",
+        cycle_number=5,
+        from_date=date(2026, 11, 2),
+        to_date=date(2026, 11, 17),
+        status="ACTIVE",
+        excel_file_path=None
+    )
+
+    test_excel_file = tmp_path / "Swing_Trade_Audit_2026-11-02_to_2026-11-17.xlsx"
+    # Create valid openpyxl file
+    wb = openpyxl.Workbook()
+    wb.active.title = "Test"
+    wb.save(test_excel_file)
+
+    mock_db = AsyncMock()
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch.object(swing_audit_service, "get_or_create_active_cycle", new=AsyncMock(return_value=mock_cycle)), \
+             patch.object(swing_audit_service, "generate_excel_workbook", new=AsyncMock(return_value=test_excel_file)), \
+             patch("backend.api.swing_audit.get_audit_dir", return_value=tmp_path):
+
+            resp = await client.get("/api/swing-audit/download-latest")
+            assert resp.status_code == 200
+            assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            assert "attachment" in resp.headers["content-disposition"]
+            assert "Swing_Trade_Audit_" in resp.headers["content-disposition"]
+            assert len(resp.content) > 0
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_swing_audit_api_files_and_specific_download(tmp_path):
+    """
+    Test GET /api/swing-audit/files and GET /api/swing-audit/download/{filename}
+    confirming HTTP 200 without AttributeError and proper file streaming.
+    """
+    from httpx import AsyncClient, ASGITransport
+    from backend.main import app
+    from backend.core.database import get_db
+
+    # Create dummy workbook in tmp_path
+    test_filename = "Swing_Trade_Audit_Archive_Test.xlsx"
+    test_file_path = tmp_path / test_filename
+    wb = openpyxl.Workbook()
+    wb.active.title = "Archive"
+    wb.save(test_file_path)
+
+    mock_cycle = SwingTradeAuditCycle(
+        id="c4444444-4444-4444-4444-444444444444",
+        cycle_number=1,
+        from_date=date(2026, 10, 1),
+        to_date=date(2026, 10, 15),
+        status="COMPLETED",
+        excel_file_path=str(test_file_path),
+        total_trades=5,
+        win_trades=4,
+        loss_trades=1,
+        win_rate=Decimal("80.0")
+    )
+
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [mock_cycle]
+    mock_result.scalars.return_value.first.return_value = mock_cycle
+    mock_db.execute.return_value = mock_result
+
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch("backend.api.swing_audit.get_audit_dir", return_value=tmp_path):
+            # 1. GET /api/swing-audit/files
+            files_resp = await client.get("/api/swing-audit/files")
+            assert files_resp.status_code == 200
+            files_data = files_resp.json()
+            assert "files" in files_data
+            assert "count" in files_data
+            assert files_data["count"] >= 1
+
+            # 2. GET /api/swing-audit/download/{filename}
+            dl_resp = await client.get(f"/api/swing-audit/download/{test_filename}")
+            assert dl_resp.status_code == 200
+            assert dl_resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            assert f'attachment; filename="{test_filename}"' in dl_resp.headers["content-disposition"]
+            assert len(dl_resp.content) > 0
+
+            # 3. Invalid extension test
+            invalid_resp = await client.get("/api/swing-audit/download/bad_file.txt")
+            assert invalid_resp.status_code == 400
+
+            # 4. Non-existent file test
+            mock_result.scalars.return_value.first.return_value = None
+            not_found_resp = await client.get("/api/swing-audit/download/non_existent.xlsx")
+            assert not_found_resp.status_code == 404
 
     app.dependency_overrides.clear()

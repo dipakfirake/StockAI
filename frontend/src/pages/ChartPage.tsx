@@ -1040,6 +1040,21 @@ export default function ChartPage() {
     }
   }
 
+  const [downloadingExcel, setDownloadingExcel] = useState(false)
+
+  const handleDownloadLatestExcel = async () => {
+    setDownloadingExcel(true)
+    try {
+      const filename = await swingAuditApi.downloadLatestExcel()
+      toast.success(`Audit Excel downloaded: ${filename}`)
+    } catch (err: any) {
+      console.error('Audit Excel download failed:', err)
+      toast.error(err.message || 'Failed to download audit Excel')
+    } finally {
+      setDownloadingExcel(false)
+    }
+  }
+
   // Continuous polling fallback to update live quote and active candle when WebSocket is not connected
   useEffect(() => {
     if (!symbol) return
@@ -2135,9 +2150,9 @@ export default function ChartPage() {
                 </button>
 
                 {/* Download Audit Excel */}
-                <a
-                  href="/api/swing-audit/download-latest"
-                  download
+                <button
+                  onClick={handleDownloadLatestExcel}
+                  disabled={downloadingExcel}
                   style={{
                     fontSize: 12,
                     fontWeight: 600,
@@ -2150,14 +2165,14 @@ export default function ChartPage() {
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 6,
-                    cursor: 'pointer',
+                    cursor: downloadingExcel ? 'not-allowed' : 'pointer',
                     transition: 'all 0.2s ease',
                   }}
                   title="Download institutional multi-sheet Excel spreadsheet tracking Day 1..11 performance, PnL & booked trades"
                 >
-                  <Download size={14} />
-                  Audit Excel (.xlsx)
-                </a>
+                  <Download size={14} className={downloadingExcel ? 'spin' : ''} />
+                  {downloadingExcel ? 'Downloading...' : 'Audit Excel (.xlsx)'}
+                </button>
 
                 <span className={`badge ${swingTrade.action === 'BUY' ? 'badge-buy' : swingTrade.action === 'SELL' ? 'badge-sell' : 'badge-hold'}`} style={{ fontSize: 14, padding: '4px 12px' }}>
                   {swingTrade.action || 'HOLD'} (Score: {(swingTrade.total_score ?? 50).toFixed(1)})

@@ -340,6 +340,87 @@ export const swingAuditApi = {
   listFiles: () => api.get<{ files: any[]; count: number }>('/swing-audit/files'),
   downloadLatestUrl: () => '/api/swing-audit/download-latest',
   downloadFileUrl: (filename: string) => `/api/swing-audit/download/${encodeURIComponent(filename)}`,
+  downloadLatestExcel: () =>
+    downloadBlobFile(
+      () => api.get('/swing-audit/download-latest', { responseType: 'blob' }),
+      'Swing_Trade_Audit_Latest.xlsx'
+    ),
+  downloadArchiveExcel: (filename: string) =>
+    downloadBlobFile(
+      () => api.get(`/swing-audit/download/${encodeURIComponent(filename)}`, { responseType: 'blob' }),
+      filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`
+    ),
+}
+
+/**
+ * Triggers a file download using either an Axios request returning a Blob or a Blob directly.
+ * Handles filename extraction from Content-Disposition header, object URL creation/revocation,
+ * and decodes error payloads if the server returned a JSON error (e.g. 404/500).
+ */
+export async function downloadBlobFile(
+  target: (() => Promise<any>) | Blob,
+  fallbackFilename: string = 'download.xlsx',
+  contentDisposition?: string
+): Promise<string> {
+  try {
+    let blob: Blob
+    let disposition = contentDisposition
+
+    if (typeof target === 'function') {
+      const response = await target()
+      blob = response.data instanceof Blob ? response.data : new Blob([response.data])
+      disposition = disposition || response.headers?.['content-disposition'] || response.headers?.['Content-Disposition']
+    } else if (target instanceof Blob) {
+      blob = target
+    } else {
+      blob = new Blob([target])
+    }
+
+    // Check if the response is actually an error JSON masquerading as a blob
+    if (blob.type === 'application/json') {
+      const text = await blob.text()
+      try {
+        const errorJson = JSON.parse(text)
+        throw new Error(errorJson.detail || 'Failed to download file from server.')
+      } catch (parseErr: any) {
+        if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr
+        throw new Error(text || 'Failed to download file from server.')
+      }
+    }
+
+    // Extract filename from Content-Disposition header if present
+    let filename = fallbackFilename
+    if (disposition) {
+      const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+      if (match && match[1]) {
+        filename = match[1].replace(/['"]/g, '').trim()
+      }
+    }
+
+    // Trigger browser download via temporary anchor element
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', filename)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+
+    return filename
+  } catch (err: any) {
+    if (err.response && err.response.data && err.response.data instanceof Blob) {
+      try {
+        const text = await err.response.data.text()
+        const errorJson = JSON.parse(text)
+        throw new Error(errorJson.detail || `Server error (${err.response.status}): ${text}`)
+      } catch (e: any) {
+        if (e.message && !e.message.includes('JSON')) throw e
+      }
+    }
+    const message = err.response?.data?.detail || err.message || 'Failed to download file.'
+    throw new Error(message)
+  }
 }
 
 export default api
