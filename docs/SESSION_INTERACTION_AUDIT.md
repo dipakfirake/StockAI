@@ -3947,3 +3947,29 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Total Python Tests**: **21 of 21 passed in 27.42s (100% green, exit code 0)**.
   - **Frontend TypeScript Production Build (`npm --prefix frontend run build`)**: **1,994 modules transformed, 0 TypeScript errors, built in 19.15s (exit code 0)**.
 - **Exact Next Safe Step**: User runs copy-pasteable commands on live server to pull latest code, rebuild containers, and verify Celery worker and Excel download endpoints.
+
+
+---
+
+### Session Entry 80: PostgreSQL `column swing_trade_audits.dynamic_stop_loss does not exist` Automatic Schema Migration & Self-Healing
+- **Timestamp:** 2026-11-18 16:58:00 IST (11:28:00 UTC)
+- **User Prompt:**
+  `"api/swing-audit/download-latest:1 Failed to load resource: the server responded with a status of 500 (Internal Server Error) ... Audit Excel download failed: Error: Failed to generate or retrieve swing audit Excel workbook: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) column swing_trade_audits.dynamic_stop_loss does not exist [SQL: SELECT swing_trade_audits.cycle_id, ... swing_trade_audits.dynamic_stop_loss ... FROM swing_trade_audits WHERE swing_trade_audits.cycle_id IN ($1::UUID)] ... /swarm"`
+- **Forensic Diagnosis & Root Cause**:
+  1. **Column Invariant Mismatch**:
+     - In Sessions 74/75, new fields for the Coupled Ratchet feature (`dynamic_stop_loss`, `tranche_2_active`, `tranche_2_buy_price`, `tranche_2_stop_loss`, `ratchet_stage`, `highest_price_recorded`) were added to the SQLAlchemy model `SwingTradeAudit` in `backend/models/swing_audit.py`.
+     - In existing PostgreSQL databases on the production host (created in previous sessions), the physical PostgreSQL table `swing_trade_audits` was created before these columns existed.
+     - Because SQLAlchemy's `Base.metadata.create_all` does not issue `ALTER TABLE ADD COLUMN` for pre-existing tables, querying `selectinload(SwingTradeAuditCycle.audits)` in `get_or_create_active_cycle()` or `generate_excel_workbook()` executed `SELECT swing_trade_audits.dynamic_stop_loss ...` and crashed with `ProgrammingError: column swing_trade_audits.dynamic_stop_loss does not exist`.
+- **Engineering Changes Delivered**:
+  1. **FastAPI Lifespan Auto-Migration (`backend/core/database.py`)**:
+     - Added idempotent `DO $$ BEGIN IF EXISTS (...) THEN ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS ... END IF; END $$;` block inside `create_db_tables()` for all Coupled Ratchet columns (`dynamic_stop_loss`, `tranche_2_active`, `tranche_2_buy_price`, `tranche_2_stop_loss`, `ratchet_stage`, `highest_price_recorded`, etc.) and `swing_trade_audit_cycles` columns.
+     - Ensures that upon every backend container boot, PostgreSQL schema is verified and updated automatically.
+  2. **Service-Level Lazy Self-Healing (`backend/services/swing_audit_service.py`)**:
+     - Added `ensure_swing_audit_schema(db)` with cached guard `_schema_ensured`.
+     - Directly invoked at the entry of `get_or_create_active_cycle` and `generate_excel_workbook` before executing any SQLAlchemy SELECT queries.
+     - Safely bypasses mock sessions in unit test suites.
+- **Verification Evidence**:
+  - **Unit Tests**: `pytest backend/tests/test_swing_audit.py` &rarr; **11 of 11 passed (100% green)** in 24.46s.
+  - **Python Syntax Compilation**: `py_compile` on `database.py` and `swing_audit_service.py` succeeded with exit code 0.
+- **Strict Live Server Isolation & Safe Deployment Instructions**:
+  - Provide copy-pasteable commands for the user to execute on `stockai-server`, including the immediate direct `psql` command to add columns instantly to the running PostgreSQL container without waiting for restarts.

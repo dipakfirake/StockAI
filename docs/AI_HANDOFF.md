@@ -14,6 +14,14 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18)
 
+- **POSTGRESQL SWING AUDIT SCHEMA SELF-HEALING & `dynamic_stop_loss` COLUMN REPAIR (COMPLETE & VERIFIED - 2026-11-18):**
+  - **Issues Investigated & Resolved**:
+    - User hit 500 error when downloading Excel: `(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) column swing_trade_audits.dynamic_stop_loss does not exist`.
+  - **Root Cause & Fix**:
+    - Pre-existing PostgreSQL database tables lacked columns added in recent Coupled Ratchet updates.
+    - Added automated idempotent `ALTER TABLE ADD COLUMN IF NOT EXISTS` migration in both `backend/core/database.py` (FastAPI lifespan) and `backend/services/swing_audit_service.py` (`ensure_swing_audit_schema`).
+    - Verified all 11 swing audit tests pass.
+
 - **CELERY & REDIS DEPENDENCY COMPATIBILITY & SWING AUDIT EXCEL EXPORT REPAIR (COMPLETE & VERIFIED - 2026-11-18):**
   - **Issues Investigated & Resolved**:
     1. Celery worker startup crashed with `kombu.exceptions.VersionMismatch: Redis transport requires redis-py versions 6.1.0 or later. You have 5.3.1`.

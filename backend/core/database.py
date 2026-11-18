@@ -94,6 +94,30 @@ async def create_db_tables():
                         ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_reference VARCHAR(255);
                         ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50);
                     END IF;
+
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audits') THEN
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS target_1 NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS target_2 NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS target_3 NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS reward_to_risk NUMERIC(8, 2);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS total_score NUMERIC(6, 2);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS allocated_capital NUMERIC(14, 2) DEFAULT 100000.00;
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS dynamic_stop_loss NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_active BOOLEAN DEFAULT FALSE;
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_buy_price NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_stop_loss NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS ratchet_stage VARCHAR(40) DEFAULT 'INITIAL';
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS highest_price_recorded NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_bought BOOLEAN DEFAULT FALSE;
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_price NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_time TIMESTAMPTZ;
+                    END IF;
+
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audit_cycles') THEN
+                        ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS excel_file_path VARCHAR(500);
+                        ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_gain_loss_pct NUMERIC(8, 2) DEFAULT 0.00;
+                        ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_pnl_rupees NUMERIC(14, 2) DEFAULT 0.00;
+                    END IF;
                 END $$;
             """))
 

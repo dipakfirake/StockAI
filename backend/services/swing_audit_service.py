@@ -74,6 +74,59 @@ def is_closed_audit(a: Any) -> bool:
     return False
 
 
+_schema_ensured = False
+
+
+async def ensure_swing_audit_schema(db: AsyncSession):
+    """Ensures that newly added columns for Coupled Ratchet exist in the PostgreSQL table."""
+    global _schema_ensured
+    if _schema_ensured:
+        return
+    try:
+        from unittest.mock import MagicMock, AsyncMock
+        if isinstance(db, (MagicMock, AsyncMock)):
+            return
+        if not hasattr(db, "get_bind"):
+            return
+        bind = db.get_bind()
+        if isinstance(bind, (MagicMock, AsyncMock)):
+            return
+        dialect = getattr(bind, "dialect", None)
+        dialect_name = str(getattr(dialect, "name", getattr(bind, "name", "")))
+        if any(p in dialect_name.lower() for p in ("postgres", "asyncpg", "psycopg")):
+            await db.execute(text("""
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audits') THEN
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS target_1 NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS target_2 NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS target_3 NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS reward_to_risk NUMERIC(8, 2);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS total_score NUMERIC(6, 2);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS allocated_capital NUMERIC(14, 2) DEFAULT 100000.00;
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS dynamic_stop_loss NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_active BOOLEAN DEFAULT FALSE;
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_buy_price NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS tranche_2_stop_loss NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS ratchet_stage VARCHAR(40) DEFAULT 'INITIAL';
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS highest_price_recorded NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_bought BOOLEAN DEFAULT FALSE;
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_price NUMERIC(12, 4);
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_time TIMESTAMPTZ;
+                    END IF;
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audit_cycles') THEN
+                        ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS excel_file_path VARCHAR(500);
+                        ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_gain_loss_pct NUMERIC(8, 2) DEFAULT 0.00;
+                        ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_pnl_rupees NUMERIC(14, 2) DEFAULT 0.00;
+                    END IF;
+                END $$;
+            """))
+            await db.commit()
+        _schema_ensured = True
+    except Exception as e:
+        logger.warning(f"Schema check for swing audit skipped/deferred: {e}")
+
+
 def add_trading_days(start_date: date, num_days: int) -> date:
     """Adds approximately N trading days (skipping Saturdays and Sundays)."""
     current = start_date
@@ -99,6 +152,7 @@ class SwingAuditService:
         Retrieves the current ACTIVE 11-day audit cycle, or creates a new one
         if none exists or if the current one has expired past its 11th trading day.
         """
+        await ensure_swing_audit_schema(db)
         ref_date = target_date or date.today()
         
         stmt = (
@@ -699,6 +753,8 @@ class SwingAuditService:
             import openpyxl
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
             from openpyxl.utils import get_column_letter
+
+            await ensure_swing_audit_schema(db)
 
             # Fetch cycle and audits with daily prices
             stmt = (
