@@ -119,6 +119,7 @@ export default function SwingScreenerPage() {
   const [cycleData, setCycleData] = useState<any>(null)
   const [orderModalStock, setOrderModalStock] = useState<SwingStock | null>(null)
   const [orderModalOpen, setOrderModalOpen] = useState(false)
+  const [isGttMode, setIsGttMode] = useState(false)
 
   const fetchCurrentCycle = async () => {
     try {
@@ -227,6 +228,14 @@ export default function SwingScreenerPage() {
   // Interactive Zerodha-style order modal launcher
   const handleOpenOrderModal = (stock: SwingStock) => {
     setOrderModalStock(stock)
+    setIsGttMode(false)
+    setOrderModalOpen(true)
+  }
+
+  // Interactive Zerodha GTT (Good-Till-Triggered) modal launcher
+  const handleOpenGttModal = (stock: SwingStock) => {
+    setOrderModalStock(stock)
+    setIsGttMode(true)
     setOrderModalOpen(true)
   }
 
@@ -855,14 +864,24 @@ export default function SwingScreenerPage() {
                   </button>
 
                   {plan && !isHold && (
-                    <button 
-                      onClick={() => handleOpenOrderModal(stock)}
-                      className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
-                      style={{ flex: '1.4 1 100px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px', whiteSpace: 'nowrap' }}
-                      title="Open Zerodha Kite-style order execution window"
-                    >
-                      <Briefcase size={13} /> {stock.action}
-                    </button>
+                    <>
+                      <button 
+                        onClick={() => handleOpenGttModal(stock)}
+                        className="btn btn-secondary"
+                        style={{ flex: '1 1 70px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px', whiteSpace: 'nowrap', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                        title="Set automated Zerodha GTT (Good-Till-Triggered) Trigger Order"
+                      >
+                        <Target size={13} /> GTT
+                      </button>
+                      <button 
+                        onClick={() => handleOpenOrderModal(stock)}
+                        className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ flex: '1.4 1 90px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px', whiteSpace: 'nowrap' }}
+                        title="Open Zerodha Kite-style order execution window"
+                      >
+                        <Briefcase size={13} /> {stock.action}
+                      </button>
+                    </>
                   )}
 
                   {plan && (
@@ -987,14 +1006,24 @@ export default function SwingScreenerPage() {
                           <ExternalLink size={13} />
                         </button>
                         {plan && stock.action !== 'HOLD' && (
-                          <button 
-                            onClick={() => handleOpenOrderModal(stock)}
-                            className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
-                            style={{ padding: '4px 10px', height: 28, fontSize: 11 }}
-                            title="Open Zerodha Kite-style order execution window"
-                          >
-                            Trade
-                          </button>
+                          <>
+                            <button 
+                              onClick={() => handleOpenGttModal(stock)}
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', height: 28, fontSize: 11, borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                              title="Set automated Zerodha GTT (Good-Till-Triggered) Trigger Order"
+                            >
+                              GTT
+                            </button>
+                            <button 
+                              onClick={() => handleOpenOrderModal(stock)}
+                              className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
+                              style={{ padding: '4px 10px', height: 28, fontSize: 11 }}
+                              title="Open Zerodha Kite-style order execution window"
+                            >
+                              Trade
+                            </button>
+                          </>
                         )}
                         {plan && (
                           <button 
@@ -1220,6 +1249,7 @@ export default function SwingScreenerPage() {
           targetPrice={orderModalStock.trade_plan?.target_price}
           stopLoss={orderModalStock.trade_plan?.stop_loss}
           defaultDirection={orderModalStock.action === 'SELL' ? 'SELL' : 'BUY'}
+          isGttMode={isGttMode}
         />
       )}
     </div>

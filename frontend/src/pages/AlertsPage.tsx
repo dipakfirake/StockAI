@@ -1,10 +1,10 @@
 import { useEffect, useState, useMemo } from 'react'
-import { alertsApi } from '../services/api'
+import { alertsApi, stocksApi } from '../services/api'
 import { 
   Bell, PlusCircle, Trash2, BellOff, ShieldAlert, ShieldCheck, 
   Target, TrendingUp, TrendingDown, RefreshCw, AlertTriangle, 
   ExternalLink, ArrowUpRight, ArrowDownRight, CheckCircle2, DollarSign,
-  Briefcase
+  Briefcase, Sparkles, X
 } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
 import ZerodhaOrderModal from '../components/ZerodhaOrderModal'
@@ -58,6 +58,37 @@ export default function AlertsPage() {
   // Zerodha Order Modal for Sell / Exit
   const [sellModalData, setSellModalData] = useState<any | null>(null)
   const [sellModalOpen, setSellModalOpen] = useState(false)
+
+  // Zerodha Kite GTT Creation Modal State
+  const [showGttSearchPrompt, setShowGttSearchPrompt] = useState(false)
+  const [gttSymbol, setGttSymbol] = useState('')
+  const [gttOrderData, setGttOrderData] = useState<any | null>(null)
+  const [gttOrderModalOpen, setGttOrderModalOpen] = useState(false)
+  const [fetchingGttQuote, setFetchingGttQuote] = useState(false)
+
+  async function handleLaunchGttForSymbol(sym: string) {
+    if (!sym) return
+    setFetchingGttQuote(true)
+    try {
+      const res = await stocksApi.getQuote(sym.toUpperCase())
+      const quote = res.data
+      const price = quote?.price || 100.0
+      setGttOrderData({
+        symbol: sym.toUpperCase(),
+        name: quote?.name || sym.toUpperCase(),
+        currentPrice: price,
+        bestBuyPrice: price,
+        targetPrice: Number((price * 1.08).toFixed(2)),
+        stopLoss: Number((price * 0.95).toFixed(2)),
+      })
+      setShowGttSearchPrompt(false)
+      setGttOrderModalOpen(true)
+    } catch (e: any) {
+      toast.error('Failed to load quote', e?.message || 'Symbol not found')
+    } finally {
+      setFetchingGttQuote(false)
+    }
+  }
 
   useEffect(() => {
     loadAlerts()
@@ -184,7 +215,16 @@ export default function AlertsPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => setShowGttSearchPrompt(true)} 
+            style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+            title="Create a new Zerodha Kite GTT (Good-Till-Triggered) Trigger Order"
+          >
+            <Target size={15} /> + Create GTT Trigger
+          </button>
+
           <button 
             className="btn btn-secondary" 
             onClick={handleSyncHoldings} 
@@ -258,8 +298,8 @@ export default function AlertsPage() {
             transition: 'all 0.15s ease',
           }}
         >
-          <Target size={16} style={{ color: activeTab === 'RADAR' ? '#387ed1' : 'inherit' }} />
-          <span>Screener Proximity Radar ({radarAlerts.length})</span>
+          <Target size={16} style={{ color: activeTab === 'RADAR' ? '#38bdf8' : 'inherit' }} />
+          <span>⚡ GTT Triggers & Proximity Radar ({radarAlerts.length})</span>
         </button>
 
         <button
@@ -548,21 +588,52 @@ export default function AlertsPage() {
         </div>
       )}
 
-      {/* TAB 2: SCREENER PROXIMITY RADAR */}
+      {/* TAB 2: ZERODHA GTT TRIGGERS & PROXIMITY RADAR */}
       {activeTab === 'RADAR' && (
         <div className="card">
-          <div className="card-title" style={{ marginBottom: 14 }}>
-            Screener Pre-Alerts & Proximity Watchlist
+          {/* Zerodha GTT Information & Action Banner */}
+          <div style={{
+            background: 'linear-gradient(90deg, rgba(56, 126, 209, 0.12), rgba(16, 185, 129, 0.12))',
+            border: '1px solid rgba(56, 189, 248, 0.25)',
+            borderRadius: 8,
+            padding: '12px 18px',
+            marginBottom: 16,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Target size={16} />
+                <span>Zerodha Kite GTT (Good-Till-Triggered) & Proximity Radar</span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                Automated OCO trigger orders valid until triggered. Monitors market prices and executes your buy/sell plans without keeping the terminal open.
+              </div>
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowGttSearchPrompt(true)}
+              style={{ fontSize: 12, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Target size={14} /> + Create GTT Trigger
+            </button>
           </div>
 
-          {loadingAlerts && <div className="loading">Loading radar alerts…</div>}
+          <div className="card-title" style={{ marginBottom: 14 }}>
+            Active GTT Trigger Orders ({radarAlerts.length})
+          </div>
+
+          {loadingAlerts && <div className="loading">Loading GTT radar alerts…</div>}
           
           {!loadingAlerts && radarAlerts.length === 0 && (
             <div className="empty-state" style={{ padding: '30px 20px', textAlign: 'center' }}>
               <Target size={32} style={{ marginBottom: 8, opacity: 0.3 }} />
-              <div>No Screener proximity alerts set yet.</div>
+              <div>No GTT proximity alerts set yet.</div>
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                Navigate to the <strong>Swing Screener</strong> and click the 🔔 icon on any stock card to configure coupled pre-alerts!
+                Click <strong>+ Create GTT Trigger</strong> above or navigate to the <strong>Swing Screener</strong> and click the <strong>⚡ GTT</strong> button on any stock!
               </div>
             </div>
           )}
@@ -573,23 +644,27 @@ export default function AlertsPage() {
                 <thead>
                   <tr>
                     <th>Symbol</th>
-                    <th>Alert Type</th>
+                    <th>GTT Trigger Type</th>
                     <th>Trigger Value</th>
                     <th>Status</th>
-                    <th>Message</th>
+                    <th>Trigger Rule / Message</th>
                     <th>Last Triggered</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {radarAlerts.map(a => {
-                    let badge = <span style={{ color: '#38bdf8' }}>{a.condition_type}</span>
-                    if (a.condition_type.includes('TARGET')) {
-                      badge = <span style={{ color: '#10b981', fontWeight: 600 }}>🎯 {a.condition_type}</span>
-                    } else if (a.condition_type.includes('STOP_LOSS')) {
-                      badge = <span style={{ color: '#ef4444', fontWeight: 600 }}>🛑 {a.condition_type}</span>
-                    } else if (a.condition_type.includes('BUY')) {
-                      badge = <span style={{ color: '#387ed1', fontWeight: 600 }}>⚡ {a.condition_type}</span>
+                    let badge = <span style={{ color: '#38bdf8', fontWeight: 600 }}>⚡ {a.condition_type}</span>
+                    if (a.condition_type === 'TARGET_PROXIMITY') {
+                      badge = <span style={{ color: '#10b981', fontWeight: 700 }}>🎯 GTT TARGET (Sell Pre-Alert)</span>
+                    } else if (a.condition_type === 'TARGET_HIT') {
+                      badge = <span style={{ color: '#10b981', fontWeight: 800 }}>🚀 GTT TARGET (Hit)</span>
+                    } else if (a.condition_type === 'STOP_LOSS_PROXIMITY') {
+                      badge = <span style={{ color: '#ef4444', fontWeight: 700 }}>⚠️ GTT STOP LOSS (Warning)</span>
+                    } else if (a.condition_type === 'STOP_LOSS_HIT') {
+                      badge = <span style={{ color: '#ef4444', fontWeight: 800 }}>🛑 GTT STOP LOSS (Hit)</span>
+                    } else if (a.condition_type === 'BUY_PROXIMITY') {
+                      badge = <span style={{ color: '#387ed1', fontWeight: 700 }}>⚡ GTT BUY (Pullback Entry)</span>
                     }
 
                     return (
@@ -710,6 +785,83 @@ export default function AlertsPage() {
           targetPrice={sellModalData.target_price}
           stopLoss={sellModalData.stop_loss}
           defaultDirection="SELL"
+          onOrderSuccess={() => {
+            loadHoldingsMonitor()
+            loadAlerts()
+          }}
+        />
+      )}
+
+      {/* Quick GTT Stock Selector Modal */}
+      {showGttSearchPrompt && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          padding: 16,
+        }}>
+          <div style={{
+            background: 'var(--color-bg-card, #1a1e29)',
+            border: '1px solid var(--color-border, #2d3343)',
+            borderRadius: 12,
+            width: '100%',
+            maxWidth: 440,
+            padding: 20,
+            boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Target size={18} />
+                <span>Create Zerodha Kite GTT Trigger</span>
+              </div>
+              <button onClick={() => setShowGttSearchPrompt(false)} style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+              Select any Indian stock to configure Good-Till-Triggered buy/sell price triggers:
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <StockSearchBox 
+                placeholder="Search stock (e.g. TCS, RELIANCE, PCJEWELLER)..."
+                width="100%" 
+                autoNavigate={false} 
+                clearOnSelect={false}
+                value={gttSymbol} 
+                onChange={(val) => {
+                  setGttSymbol(val)
+                  handleLaunchGttForSymbol(val)
+                }} 
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn btn-ghost" onClick={() => setShowGttSearchPrompt(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Zerodha GTT Configuration Order Modal */}
+      {gttOrderData && (
+        <ZerodhaOrderModal
+          isOpen={gttOrderModalOpen}
+          onClose={() => setGttOrderModalOpen(false)}
+          symbol={gttOrderData.symbol}
+          name={gttOrderData.name}
+          currentPrice={gttOrderData.currentPrice}
+          bestBuyPrice={gttOrderData.bestBuyPrice}
+          targetPrice={gttOrderData.targetPrice}
+          stopLoss={gttOrderData.stopLoss}
+          defaultDirection="BUY"
+          isGttMode={true}
           onOrderSuccess={() => {
             loadHoldingsMonitor()
             loadAlerts()

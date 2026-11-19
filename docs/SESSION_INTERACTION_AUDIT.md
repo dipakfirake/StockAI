@@ -4832,3 +4832,27 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   3. **Verification**:
      - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built successfully in 39.51s (exit code 0)**.
 - **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `frontend`.
+
+
+---
+
+### Session Entry 99: Prominent Screen-Wide GTT Trigger Views and One-Click GTT Buttons
+- **Timestamp:** 2026-11-20 00:20:00 IST (18:50:00 UTC)
+- **User Prompt:**
+  `"and from where to set GTT also? there is no viewing for it on screen"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **UI Accessibility & Visibility Gap**:
+     - GTT was previously only an internal checkbox option inside the order window, with no dedicated "GTT" buttons or table views visible on the main screens.
+  2. **Screen-Wide GTT Enhancements**:
+     - **Swing Screener (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+       - Added explicit **`⚡ GTT`** action buttons to every stock card and table row alongside `Trade` and `Chart`.
+       - Clicking **`⚡ GTT`** opens `ZerodhaOrderModal` with `isGttMode={true}` pre-filled with the Swing Screener's optimal entry trigger price, Target, and Stop Loss.
+     - **Alerts Page (`frontend/src/pages/AlertsPage.tsx`)**:
+       - Added dedicated **`+ Create GTT Trigger`** button in the top action bar allowing users to search any stock and launch GTT triggers.
+       - Renamed Tab 2 to **`⚡ GTT Triggers & Proximity Radar`** with an informative Zerodha Kite GTT banner, dedicated GTT trigger types (`⚡ GTT BUY Entry`, `🎯 GTT TARGET`, `🛑 GTT STOP LOSS`), trigger values, and LTP distance.
+     - **Zerodha Order Modal (`frontend/src/components/ZerodhaOrderModal.tsx`)**:
+       - Added prominent GTT ribbon banner: `⚡ Zerodha Kite GTT (Good-Till-Triggered) Order | OCO: Stoploss + Target Triggers`.
+       - Action button dynamically labeled `⚡ Place GTT Trigger ({symbol})`.
+  3. **Verification**:
+     - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 33.43s (exit code 0)**.
+- **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `frontend`.

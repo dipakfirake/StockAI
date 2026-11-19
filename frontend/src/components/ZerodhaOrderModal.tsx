@@ -13,6 +13,7 @@ export interface ZerodhaOrderModalProps {
   targetPrice?: number
   stopLoss?: number
   defaultDirection?: 'BUY' | 'SELL'
+  isGttMode?: boolean
   onOrderSuccess?: (tradeData: any) => void
 }
 
@@ -26,6 +27,7 @@ export default function ZerodhaOrderModal({
   targetPrice: initialTarget,
   stopLoss: initialStopLoss,
   defaultDirection = 'BUY',
+  isGttMode = false,
   onOrderSuccess,
 }: ZerodhaOrderModalProps) {
   const [direction, setDirection] = useState<'BUY' | 'SELL'>(defaultDirection)
@@ -334,6 +336,25 @@ export default function ZerodhaOrderModal({
             </button>
           </div>
         </div>
+
+        {/* Zerodha Kite GTT Mode Ribbon */}
+        {isGttMode && (
+          <div style={{
+            background: 'linear-gradient(90deg, rgba(56, 126, 209, 0.18), rgba(16, 185, 129, 0.18))',
+            borderBottom: '1px solid var(--color-border, #2d3343)',
+            padding: '8px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#38bdf8' }}>
+              <span>⚡ Zerodha Kite GTT (Good-Till-Triggered) Order</span>
+            </div>
+            <span style={{ fontSize: 10, background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+              OCO: Stoploss + Target Triggers
+            </span>
+          </div>
+        )}
 
         {/* Order Form Body */}
         <form onSubmit={handleSubmitOrder} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -856,7 +877,11 @@ export default function ZerodhaOrderModal({
                   transition: 'background 0.2s ease',
                 }}
               >
-                {submitting ? 'Placing...' : `${direction} ${quantity} ${symbol}`}
+                {submitting
+                  ? (isGttMode ? 'Placing GTT...' : 'Placing...')
+                  : isGttMode
+                  ? `⚡ Place GTT Trigger (${symbol})`
+                  : `${direction} ${quantity} ${symbol}`}
               </button>
             </div>
           </div>
