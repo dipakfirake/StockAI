@@ -87,14 +87,19 @@ async def _evaluate_alerts_async():
                 current_value = None
                 extra_msg = ""
 
-                # 1. Price based conditions
-                if alert.condition_type in ("PRICE_ABOVE", "PRICE_BELOW"):
+                # 1. Price and Proximity based conditions
+                if alert.condition_type in (
+                    "PRICE_ABOVE", "PRICE_BELOW",
+                    "BUY_PROXIMITY", "TARGET_PROXIMITY", "TARGET_HIT",
+                    "STOP_LOSS_PROXIMITY", "STOP_LOSS_HIT"
+                ):
                     quote = await market_data_service.fetch_quote(alert.symbol)
                     if quote:
                         current_value = quote["price"]
-                        if alert.condition_type == "PRICE_ABOVE" and current_value >= float(alert.condition_value):
+                        cond_val = float(alert.condition_value)
+                        if alert.condition_type in ("PRICE_ABOVE", "TARGET_PROXIMITY", "TARGET_HIT") and current_value >= cond_val:
                             triggered = True
-                        elif alert.condition_type == "PRICE_BELOW" and current_value <= float(alert.condition_value):
+                        elif alert.condition_type in ("PRICE_BELOW", "BUY_PROXIMITY", "STOP_LOSS_PROXIMITY", "STOP_LOSS_HIT") and current_value <= cond_val:
                             triggered = True
 
                 # 2. Indicator based conditions requiring candles
@@ -214,8 +219,25 @@ async def _evaluate_alerts_async():
                         )
                         db.add(notif)
                     
-                    # 2. WebSockets
+                    # 2. WebSockets & Instant Global Toast
                     await broadcast_alert(payload, user_id=str(alert.user_id))
+
+                    toast_type = "info"
+                    if alert.condition_type in ("TARGET_HIT", "TARGET_PROXIMITY"):
+                        toast_type = "success"
+                    elif alert.condition_type in ("STOP_LOSS_HIT", "STOP_LOSS_PROXIMITY"):
+                        toast_type = "error"
+                    elif alert.priority == "HIGH":
+                        toast_type = "warning"
+
+                    await broadcast_alert({
+                        "type": "alert_toast",
+                        "data": {
+                            "title": f"🚨 {alert.symbol} Alert Triggered",
+                            "message": user_msg,
+                            "type": toast_type
+                        }
+                    }, user_id=str(alert.user_id))
                     
                     # 3. Email (SMTP) - Only send for HIGH priority "main" alerts
                     if getattr(alert, 'delivery_method', 'IN_APP') in ('EMAIL', 'BOTH') and alert.priority == 'HIGH':

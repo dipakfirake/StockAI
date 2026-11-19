@@ -30,7 +30,7 @@ import { useEffect } from 'react'
 
 export default function App() {
   useEffect(() => {
-    // Listen for server-side manual alerts from Auto-Trader
+    // Listen for server-side alerts, real-time trigger toasts, and creation events
     alertWebSocket.onAlert((payload: any) => {
       if (payload.type === 'alert_toast' && payload.data) {
         const { title, message, type } = payload.data
@@ -38,6 +38,14 @@ export default function App() {
         else if (type === 'warning') toast.warning(title, message)
         else if (type === 'error') toast.error(title, message)
         else toast.info(title, message)
+      } else if (payload.type === 'ALERT_TRIGGERED') {
+        const isTarget = payload.condition_type?.includes('TARGET')
+        const isSL = payload.condition_type?.includes('STOP_LOSS')
+        if (isTarget) toast.success(`🎯 ${payload.symbol} Target Alert`, payload.message)
+        else if (isSL) toast.error(`🛑 ${payload.symbol} Stop Loss Alert`, payload.message)
+        else toast.info(`🔔 ${payload.symbol} Alert Triggered`, payload.message)
+      } else if (payload.type === 'ALERT_CREATED') {
+        toast.info(`🔔 Alert Active: ${payload.symbol}`, payload.message)
       }
     })
   }, [])

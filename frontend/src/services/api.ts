@@ -114,6 +114,16 @@ export const alertsApi = {
   list: () => api.get('/alerts'),
   create: (data: { symbol: string; condition_type: string; condition_value: number; message?: string; priority?: 'HIGH' | 'MEDIUM' | 'LOW'; delivery_method?: 'IN_APP' | 'EMAIL' | 'BOTH' }) =>
     api.post('/alerts', data),
+  screenerSetup: (data: {
+    symbol: string;
+    current_price: number;
+    best_buy_price?: number;
+    target_price?: number;
+    stop_loss?: number;
+    proximity_pct?: number;
+  }) => api.post('/alerts/screener-setup', data),
+  getHoldingsMonitor: () => api.get('/alerts/holdings-monitor'),
+  syncHoldings: () => api.post('/alerts/holdings-sync'),
   delete: (alertId: string) => api.delete(`/alerts/${alertId}`),
   deactivate: (alertId: string) => api.put(`/alerts/${alertId}/deactivate`),
 }

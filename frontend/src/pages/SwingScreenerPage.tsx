@@ -8,6 +8,7 @@ import {
   FileSpreadsheet, History, Calendar, X
 } from 'lucide-react'
 import { toast } from '../components/Toast'
+import ZerodhaOrderModal from '../components/ZerodhaOrderModal'
 
 interface TargetLevel {
   level: string
@@ -116,6 +117,8 @@ export default function SwingScreenerPage() {
   const [loadingArchives, setLoadingArchives] = useState(false)
   const [downloadingExcel, setDownloadingExcel] = useState(false)
   const [cycleData, setCycleData] = useState<any>(null)
+  const [orderModalStock, setOrderModalStock] = useState<SwingStock | null>(null)
+  const [orderModalOpen, setOrderModalOpen] = useState(false)
 
   const fetchCurrentCycle = async () => {
     try {
@@ -221,49 +224,31 @@ export default function SwingScreenerPage() {
     fetchCurrentCycle()
   }, [sector])
 
-  // Quick Paper Trade action directly from screener
-  const handleQuickTrade = async (stock: SwingStock) => {
-    if (!stock.trade_plan) return
-    setTradingSymbol(stock.symbol)
-    try {
-      const direction = stock.action === 'SELL' ? 'SELL' : 'BUY'
-      const productType = direction === 'SELL' ? 'INTRADAY' : 'DELIVERY'
-      await paperTradingApi.place({
-        symbol: stock.symbol,
-        direction: direction,
-        quantity: 10,
-        order_type: 'MARKET',
-        product_type: productType,
-        target_price: stock.trade_plan.target_price,
-        stop_loss: stock.trade_plan.stop_loss
-      })
-      toast.success(
-        `Order Placed: ${direction} 10x ${stock.symbol}`,
-        `Target: ₹${stock.trade_plan.target_price} | SL: ₹${stock.trade_plan.stop_loss}`
-      )
-    } catch (err: any) {
-      console.error('Quick trade failed:', err)
-      toast.error('Paper trade failed', err?.response?.data?.detail || err.message)
-    } finally {
-      setTradingSymbol(null)
-    }
+  // Interactive Zerodha-style order modal launcher
+  const handleOpenOrderModal = (stock: SwingStock) => {
+    setOrderModalStock(stock)
+    setOrderModalOpen(true)
   }
 
-  // Quick Alert action
+  // Quick Coupled Alerts action (Buy Pre-Alert, Target Pre-Alert, and Stop Loss)
   const handleQuickAlert = async (stock: SwingStock) => {
     if (!stock.trade_plan) return
     try {
-      await alertsApi.create({
+      const cmp = stock.trade_plan.current_price || stock.trade_plan.cmp || stock.trade_plan.entry_price || 100.0
+      await alertsApi.screenerSetup({
         symbol: stock.symbol,
-        condition_type: stock.action === 'SELL' ? 'PRICE_BELOW' : 'PRICE_ABOVE',
-        condition_value: stock.trade_plan.target_price,
-        priority: 'MEDIUM',
-        delivery_method: 'IN_APP',
-        message: `Swing Trade Target Alert for ${stock.symbol} at ₹${stock.trade_plan.target_price}`
+        current_price: cmp,
+        best_buy_price: stock.trade_plan.best_buy_price || stock.trade_plan.optimal_entry_price,
+        target_price: stock.trade_plan.target_price,
+        stop_loss: stock.trade_plan.stop_loss,
+        proximity_pct: 1.0,
       })
-      toast.success(`Alert Set for ${stock.symbol}`, `Trigger at ₹${stock.trade_plan.target_price}`)
+      toast.success(
+        `Coupled Alerts Set: ${stock.symbol}`,
+        `Pre-alerts active for Buy Zone, Target (Sell before loss), and Stop Loss!`
+      )
     } catch (err: any) {
-      toast.error('Failed to set alert', err?.response?.data?.detail || err.message)
+      toast.error('Failed to set coupled alerts', err?.response?.data?.detail || err.message)
     }
   }
 
@@ -871,12 +856,12 @@ export default function SwingScreenerPage() {
 
                   {plan && !isHold && (
                     <button 
-                      onClick={() => handleQuickTrade(stock)}
-                      disabled={tradingSymbol === stock.symbol}
+                      onClick={() => handleOpenOrderModal(stock)}
                       className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
                       style={{ flex: '1.4 1 100px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px', whiteSpace: 'nowrap' }}
+                      title="Open Zerodha Kite-style order execution window"
                     >
-                      <Briefcase size={13} /> {tradingSymbol === stock.symbol ? 'Placing...' : `Paper ${stock.action}`}
+                      <Briefcase size={13} /> {stock.action}
                     </button>
                   )}
 
@@ -1003,11 +988,10 @@ export default function SwingScreenerPage() {
                         </button>
                         {plan && stock.action !== 'HOLD' && (
                           <button 
-                            onClick={() => handleQuickTrade(stock)}
-                            disabled={tradingSymbol === stock.symbol}
+                            onClick={() => handleOpenOrderModal(stock)}
                             className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
                             style={{ padding: '4px 10px', height: 28, fontSize: 11 }}
-                            title="Place paper trade"
+                            title="Open Zerodha Kite-style order execution window"
                           >
                             Trade
                           </button>
@@ -1224,6 +1208,19 @@ export default function SwingScreenerPage() {
             </div>
           </div>
         </div>
+      )}
+      {orderModalStock && (
+        <ZerodhaOrderModal
+          isOpen={orderModalOpen}
+          onClose={() => setOrderModalOpen(false)}
+          symbol={orderModalStock.symbol}
+          name={orderModalStock.name}
+          currentPrice={orderModalStock.trade_plan?.current_price || orderModalStock.trade_plan?.cmp || orderModalStock.trade_plan?.entry_price || 100}
+          bestBuyPrice={orderModalStock.trade_plan?.best_buy_price || orderModalStock.trade_plan?.optimal_entry_price}
+          targetPrice={orderModalStock.trade_plan?.target_price}
+          stopLoss={orderModalStock.trade_plan?.stop_loss}
+          defaultDirection={orderModalStock.action === 'SELL' ? 'SELL' : 'BUY'}
+        />
       )}
     </div>
   )

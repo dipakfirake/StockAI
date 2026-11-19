@@ -4761,3 +4761,55 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **7 of 7 passed (100% green)** in 69.29s.
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 48.19s (exit code 0)**.
 - **Next Safe Step**: User runs `cd /home/opc/StockAI && git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend` on the live server.
+
+
+
+---
+
+### Session Entry 97: Swing Screener Proximity Pre-Alerts, Active Holdings Risk Guard & Zerodha Kite-Style Order Modal
+- **Timestamp:** 2026-11-19 23:45:00 IST (18:15:00 UTC)
+- **User Prompt:**
+  `"make a system that give me alerts in alert tab of stock shownn of swing screener for to buy and to sell before coming to price value it shows alerts to buy and also to sell for not making losses and get alerted  every time i checks which to  buy and if buyed in holdings and track it every time nd if it is closed to selling price then sell alert want to show in tht alert tab. and if alert is created then at taht time the small toast want to show in any window that alert created for buy or for sell and if buyed ahen in alert tab it want6 to be stord in hold position and after coming to price sell alert want to be triggered for sell and also tell alerts that comes to stop loss if it comes to stopploss and this only to only buyed stocks and i keep on alertd that only , and for buying enhance the popup user interactive for buy or sell like zerodha like for quantity sell price or limits and all like zerodha kite app. so make this also module ./goal /browser /plan /grill-me /teamwork /learn /boost /agy-customizations /automation /migrate-agent-settings /generative_ui /migrate-workflows /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Core Problem Analysis**:
+     - Users needed pre-alerts *before* stock prices reached exact trigger levels (both for Best Buy entry to avoid missing dips, and Target/Resistance exit to avoid turning winning swings into losses).
+     - Users needed bought/held positions to be tracked dynamically in the Alerts tab with dedicated proximity warnings for Target Sell and Stop Loss, specifically isolated to their held stocks.
+     - Global toast notifications were required across all open windows when alerts are created or triggered.
+     - An interactive, polished trading order modal reminiscent of Zerodha Kite was needed to handle quantities, limits, triggers, margins, statutory charges, GTT targets, and auto-creating coupled alerts.
+  2. **Architectural Upgrades Implemented**:
+     - **Backend Proximity & Coupled Alerts Engine (`backend/api/alerts.py` & `backend/tasks/alert_tasks.py`)**:
+       - Added condition types: `BUY_PROXIMITY`, `TARGET_PROXIMITY`, `TARGET_HIT`, `STOP_LOSS_PROXIMITY`, `STOP_LOSS_HIT`.
+       - Created endpoint `POST /api/alerts/screener-setup` to atomically provision coupled pre-alerts (Buy Pre-Alert at Best Buy + 1%, Target Pre-Alert at Target - 1%, Target Hit, SL Pre-Alert at SL + 1%, SL Hit).
+       - Created endpoint `GET /api/alerts/holdings-monitor` to monitor all open BUY paper trades with live CMP, distance to Target %, distance to SL %, approaching warnings, and risk status badging (`SAFE_ZONE`, `TARGET_APPROACHING`, `TARGET_HIT`, `SL_APPROACHING`, `SL_HIT`).
+       - Created endpoint `POST /api/alerts/holdings-sync` ensuring every held stock has coupled alerts active.
+       - Updated `alert_tasks._evaluate_alerts_async()` to evaluate proximity conditions and emit `alert_toast` WebSocket payloads.
+     - **Zerodha Kite-Style Interactive Order Modal (`frontend/src/components/ZerodhaOrderModal.tsx`)**:
+       - Built order modal replicating Zerodha Kite with BUY (blue `#387ed1`) vs SELL (orange `#ff5722`) header toggle.
+       - Product types: CNC (Delivery) & MIS (Intraday with 5x leverage).
+       - Order types: Market, Limit, SL, SL-M.
+       - Quick quantity chips (`+10`, `+25`, `+50`, `+100`), price steppers, and trigger price.
+       - Built-in GTT Target and Stop Loss inputs pre-populated from Screener calculations.
+       - "Auto-create Proximity & Target/SL Alerts in Alerts Tab" toggle (checked by default).
+       - Dynamic margin required calculation and charges popover breakdown (Brokerage, STT, turnover, GST, SEBI fee).
+     - **Alerts Page Overhaul (`frontend/src/pages/AlertsPage.tsx`)**:
+       - Added 3-tab navigation:
+         1. `Active Holdings Guard (My Bought Stocks)`: Table of held stocks with real-time CMP, P&L, % to Target, % to SL, risk status badges, and 1-click Zerodha "Exit / Sell" modal trigger.
+         2. `Screener Proximity Radar`: Pre-alerts configured for stocks under watch.
+         3. `Custom Technical Alerts`: Manual indicator alerts.
+       - 10-second polling for live CMP risk tracking.
+     - **Swing Screener Integration (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+       - Replaced trade button with launching `ZerodhaOrderModal` pre-populated with optimal entry, target, and stop loss.
+       - Upgraded alert button to call `alertsApi.screenerSetup` for one-click coupled pre-alerts.
+     - **Global Toast Integration (`frontend/src/App.tsx`)**:
+       - Added global WebSocket handling for `ALERT_TRIGGERED` and `ALERT_CREATED` events across all windows.
+  3. **Automated Verification Suite Expansion**:
+     - Created `backend/tests/test_holdings_and_proximity_alerts.py` testing:
+       - `test_valid_proximity_conditions`
+       - `test_screener_setup_coupled_alerts`
+       - `test_holdings_risk_monitor_calculations`
+       - `test_proximity_alerts_evaluation_task`
+- **Verification Evidence**:
+  - Backend unit tests (`backend/tests/test_holdings_and_proximity_alerts.py`): **4 of 4 passed (100% green)** in 50.58s.
+  - Regression test suite (`test_alert_tasks.py`, `test_groq_and_rag_service.py`): **8 of 8 passed (100% green)** in 95.75s.
+  - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 56.81s (exit code 0)**.
+- **Next Safe Step**: User runs `cd /home/opc/StockAI && git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend` on the live server.

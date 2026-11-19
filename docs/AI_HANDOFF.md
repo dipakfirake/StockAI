@@ -14,6 +14,44 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **SWING SCREENER PROXIMITY PRE-ALERTS, ACTIVE HOLDINGS RISK GUARD & ZERODHA KITE-STYLE ORDER MODAL (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Delivered**:
+    1. User requested:
+       - *"make a system that give me alerts in alert tab of stock shown of swing screener for to buy and to sell before coming to price value it shows alerts to buy and also to sell for not making losses and get alerted every time i checks which to buy"*
+       - *"and if buyed in holdings and track it every time and if it is closed to selling price then sell alert want to show in that alert tab. and if alert is created then at that time the small toast want to show in any window that alert created for buy or for sell and if buyed then in alert tab it want to be stored in hold position and after coming to price sell alert want to be triggered for sell and also tell alerts that comes to stop loss if it comes to stoploss and this only to only buyed stocks and i keep on alerted that only"*
+       - *"and for buying enhance the popup user interactive for buy or sell like zerodha like for quantity sell price or limits and all like zerodha kite app. so make this also module"*
+    2. Architecture & Implementation:
+       - **Backend Proximity & Coupled Alerts Engine (`backend/api/alerts.py` & `backend/tasks/alert_tasks.py`)**:
+         - Registered new condition types: `BUY_PROXIMITY`, `TARGET_PROXIMITY`, `TARGET_HIT`, `STOP_LOSS_PROXIMITY`, `STOP_LOSS_HIT`.
+         - Added `POST /api/alerts/screener-setup`: One-click setup of coupled pre-alerts (Buy Proximity at Best Buy + 1%, Target Proximity at Target - 1%, Target Hit, SL Proximity at SL + 1%, SL Hit).
+         - Added `GET /api/alerts/holdings-monitor`: Live risk matrix monitoring all active bought holdings with real-time CMP, distance to Target %, distance to SL %, approaching warnings, and risk status badging (`SAFE_ZONE`, `TARGET_APPROACHING`, `TARGET_HIT`, `SL_APPROACHING`, `SL_HIT`).
+         - Added `POST /api/alerts/holdings-sync`: Ensures all open holdings have coupled alerts.
+         - Extended `alert_tasks._evaluate_alerts_async()` to evaluate proximity thresholds and emit instant `alert_toast` WebSocket envelopes.
+       - **Zerodha Kite-Style Interactive Order Modal (`frontend/src/components/ZerodhaOrderModal.tsx`)**:
+         - Replicates Zerodha Kite's order popup with BUY (blue `#387ed1`) vs SELL (orange `#ff5722`) mode switch.
+         - Product types: CNC (Delivery) & MIS (Intraday with 5x leverage).
+         - Order types: Market, Limit, SL, SL-M.
+         - Steppers and quick buttons for Quantity (`+10`, `+25`, `+50`, `+100`), Limit Price, and Trigger Price.
+         - GTT Protection with Target & Stop Loss inputs pre-populated from Screener calculations.
+         - "Auto-create Proximity & Target/SL Alerts in Alerts Tab" checkbox (checked by default).
+         - Live margin required calculation and charges breakdown popover (Brokerage, STT, turnover, GST, SEBI fee).
+       - **Alerts Tab Redesign (`frontend/src/pages/AlertsPage.tsx`)**:
+         - Added 3-tab layout:
+           1. `Active Holdings Guard`: Real-time table of bought stocks with CMP, P&L, % distance to Target, % distance to SL, status badges, and 1-click Zerodha "Exit / Sell" button.
+           2. `Screener Proximity Radar`: Pre-alerts configured from Swing Screener.
+           3. `Custom Technical Alerts`: Manual price/indicator alerts.
+         - Polls live CMP every 10s for continuous risk guard.
+       - **Swing Screener Integration (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+         - Replaced simple trade button with opening `ZerodhaOrderModal` pre-populated with Best Buy price, Target, and SL.
+         - Upgraded alert button to call `alertsApi.screenerSetup` for one-click coupled pre-alerts.
+       - **Global Toast Integration (`frontend/src/App.tsx`)**:
+         - Subscribes to `ALERT_TRIGGERED` and `ALERT_CREATED` WebSocket events, showing real-time toasts across all open windows.
+  - **Verification Evidence**:
+    - Backend unit tests (`backend/tests/test_holdings_and_proximity_alerts.py`): **4 of 4 passed (100% green)** in 50.58s.
+    - Full regression tests (`test_alert_tasks.py`, `test_groq_and_rag_service.py`): **8 of 8 passed (100% green)** in 95.75s.
+    - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 56.81s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs `cd /home/opc/StockAI && git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend` on the live server.
+
 - **CONVERSATIONAL GROQ LLM SYNTHESIS, MULTI-USER RESPONSE CACHING & INTERACTIVE `@` MENTION AUTOCOMPLETE (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Delivered**:
     1. User requested:
