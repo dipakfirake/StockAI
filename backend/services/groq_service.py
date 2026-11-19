@@ -65,38 +65,49 @@ class GroqService:
             "stream": False
         }
 
+        models_to_try = [settings.GROQ_MODEL]
+        for fallback in ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+            if fallback not in models_to_try:
+                models_to_try.append(fallback)
+
         start_time = time.perf_counter()
         timeout = httpx.Timeout(settings.GROQ_TIMEOUT_SECONDS, connect=3.0)
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(self._api_url, json=payload, headers=headers)
-                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                for target_model in models_to_try:
+                    payload["model"] = target_model
+                    response = await client.post(self._api_url, json=payload, headers=headers)
+                    latency_ms = int((time.perf_counter() - start_time) * 1000)
 
-                if response.status_code == 200:
-                    data = response.json()
-                    choices = data.get("choices", [])
-                    if choices and "message" in choices[0]:
-                        content = choices[0]["message"].get("content", "").strip()
-                        usage = data.get("usage", {})
-                        total_tokens = usage.get("total_tokens", 0)
-                        logger.info(f"⚡ [Groq AI] Generated response in {latency_ms}ms ({total_tokens} tokens) via {settings.GROQ_MODEL}")
-                        return {
-                            "content": content,
-                            "model": settings.GROQ_MODEL,
-                            "tokens_used": total_tokens,
-                            "latency_ms": latency_ms,
-                            "success": True
-                        }
-                elif response.status_code == 429:
-                    logger.warning(f"⚠️ [Groq AI] Rate limit reached (HTTP 429). Falling back to deterministic RAG engine.")
-                    return None
-                elif response.status_code == 401:
-                    logger.error(f"❌ [Groq AI] Authentication error (HTTP 401). Please check GROQ_API_KEY in .env.")
-                    return None
-                else:
-                    logger.warning(f"⚠️ [Groq AI] Unexpected status {response.status_code}: {response.text[:120]}")
-                    return None
+                    if response.status_code == 200:
+                        data = response.json()
+                        choices = data.get("choices", [])
+                        if choices and "message" in choices[0]:
+                            content = choices[0]["message"].get("content", "").strip()
+                            usage = data.get("usage", {})
+                            total_tokens = usage.get("total_tokens", 0)
+                            logger.info(f"⚡ [Groq AI] Generated response in {latency_ms}ms ({total_tokens} tokens) via {target_model}")
+                            return {
+                                "content": content,
+                                "model": target_model,
+                                "tokens_used": total_tokens,
+                                "latency_ms": latency_ms,
+                                "success": True
+                            }
+                    elif response.status_code == 404:
+                        logger.debug(f"[Groq AI] Model {target_model} not found (404). Trying next available model...")
+                        continue
+                    elif response.status_code == 429:
+                        logger.warning(f"⚠️ [Groq AI] Rate limit reached (HTTP 429). Falling back to deterministic RAG engine.")
+                        return None
+                    elif response.status_code == 401:
+                        logger.error(f"❌ [Groq AI] Authentication error (HTTP 401). Please check GROQ_API_KEY in .env.")
+                        return None
+                    else:
+                        logger.warning(f"⚠️ [Groq AI] Unexpected status {response.status_code} for {target_model}: {response.text[:120]}")
+                        continue
+                return None
 
         except httpx.TimeoutException:
             logger.warning(f"⚠️ [Groq AI] Request timed out after {settings.GROQ_TIMEOUT_SECONDS}s. Falling back to deterministic RAG.")

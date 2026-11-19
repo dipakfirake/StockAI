@@ -14,6 +14,27 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **FINANCIAL RAG ENTITY RESOLUTION HARDENING & GROQ MULTI-MODEL FAILOVER (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Resolved**:
+    1. User observed: Query `"should i buy PC Jewellers or hold or sell or need to drop this idea in current situation."` returned `"🎯 SHOULD Trade Plan & Quant Analysis [⚡ Mid Cap] | CMP: ₹0.00"`.
+    2. Forensic Root Causes:
+       - Frontend `AIAssistantWidget.tsx` had a naive regex `const symbolMatch = userMsg.match(/[A-Z0-9-]+(?:\.NS)?/i)` that matched the first English word of any sentence (e.g. `"should"`, `"what"`, `"can"`), passing it as `symbol_hint` to `/api/ai/chat`.
+       - Backend `rag_service.py` accepted `symbol_hint` without validating against common English stop words, converting `"should"` into `"SHOULD.NS"`.
+       - `COMMON_TICKER_MAP` contained `"idea": "IDEA.NS"`, so conversational phrasing like `"drop this idea"` hijacked entity extraction.
+       - `"PC Jeweller"` (`PCJEWELLER.NS`) was missing from the ticker alias dictionary.
+       - In `groq_service.py`, if the configured model ID was unavailable or 404, it fell back to deterministic synthesis without attempting active production models.
+    3. Remediations Implemented:
+       - **Frontend Clean Pass-Through (`frontend/src/components/AIAssistantWidget.tsx`)**: Removed naive regex symbol extraction; the frontend directly passes `userMsg` to `/api/ai/chat`, letting the backend RAG engine handle institutional entity resolution.
+       - **Stop Word Filtering & Hint Defense (`backend/services/rag_service.py`)**: Added `common_stop_words` set (SHOULD, WHAT, CAN, IDEA, BEST, DROP, etc.). Any `symbol_hint` or regex token matching a stop word is discarded.
+       - **Curated Multi-Cap Expansion**: Added `PCJEWELLER.NS` aliases (`pc jeweller`, `pc jewellers`, `pcjeweller`, `pcj`). Replaced `"idea"` with `"vodafone idea"` and `"vi"`.
+       - **Zero CMP Defense**: Added validation preventing any trade plan from rendering when `cmp <= 0.0`.
+       - **Groq Dynamic Model Discovery (`backend/services/groq_service.py`)**: Added multi-model fallback list (`[settings.GROQ_MODEL, "qwen/qwen3.8-27b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]`). Auto-switches to live active model on HTTP 404. Live test against Groq endpoint confirmed sub-50ms inference.
+  - **Verification Evidence**:
+    - Backend unit tests (`backend/tests/test_groq_and_rag_service.py`): **6 of 6 passed (100% green)** in 38.06s.
+    - End-to-end Python test on user query: Resolved `PCJEWELLER.NS`, computed CMP ₹14.50, Best Buy ₹14.41, SL ₹13.85, Target ₹16.26 (R:R 3.3:1), and generated live Groq response via `qwen/qwen3.8-27b`.
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 48.19s (exit code 0)**.
+  - **Exact Next Safe Step**: User runs `cd /home/opc/StockAI && git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend` on the live server.
+
 - **ALL-MARKET-CAP ADVANCED FINANCIAL RAG & DYNAMIC ENTITY SEARCH RESOLUTION (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Resolved**:
     1. User asked: *"so you are only analysing Nifty 50 for RAG or what ?i want it for all types of stocks in market small, big, medium, all."*

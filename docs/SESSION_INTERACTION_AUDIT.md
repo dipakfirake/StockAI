@@ -4699,3 +4699,29 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **6 of 6 passed (100% green)** in 47.28s.
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 2m 52s (exit code 0)**.
 - **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` & `frontend`.
+
+
+---
+
+### Session Entry 95: Financial RAG Entity Resolution Hardening & Groq Multi-Model Failover
+- **Timestamp:** 2026-11-19 19:45:00 IST (14:15:00 UTC)
+- **User Prompt:**
+  `"StockAI Assistant Groq + RAG ... should i buy PC Jewellers or hold or sell or need to drop this idea in current situation. 🎯 SHOULD Trade Plan & Quant Analysis [⚡ Mid Cap] • Signal & Conviction: HOLD (Score: 50.0/100 | CMP: ₹0.00) ..."`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Causes**:
+     - `frontend/src/components/AIAssistantWidget.tsx` contained `userMsg.match(/[A-Z0-9-]+(?:\.NS)?/i)` which extracted the very first word (`"should"`) from the sentence and passed it as `symbol_hint` to `/api/ai/chat`.
+     - `backend/services/rag_service.py` accepted `symbol_hint` blindly without stop word checks, converting it into `SHOULD.NS`.
+     - `COMMON_TICKER_MAP` mapped `"idea"` to `IDEA.NS`, hijacking sentences containing `"drop this idea"`.
+     - `PCJEWELLER.NS` aliases were not mapped in the dictionary.
+     - `groq_service.py` failed when `llama-3.3-70b-versatile` returned HTTP 404, without attempting active production models.
+  2. **Remediations Implemented**:
+     - Removed frontend regex symbol extraction; user query passed directly to RAG entity pipeline.
+     - Added comprehensive `common_stop_words` filter on `symbol_hint` and regex matchers.
+     - Added `PCJEWELLER.NS` aliases (`pc jeweller`, `pc jewellers`, `pcjeweller`, `pcj`). Replaced `"idea"` with `"vodafone idea"` and `"vi"`.
+     - Added `cmp <= 0.0` guard preventing ₹0.00 plans from rendering on unavailable data.
+     - Implemented dynamic Groq model fallback (`qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `llama-3.1-8b-instant`). Live verification confirmed sub-50ms inference via Groq.
+- **Verification Evidence**:
+  - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **6 of 6 passed (100% green)** in 38.06s.
+  - End-to-end Python test on `"should i buy PC Jewellers or hold or sell or need to drop this idea in current situation."`: Successfully extracted `PCJEWELLER.NS` (CMP ₹14.50, Best Buy ₹14.41, SL ₹13.85, Target ₹16.26, R:R 3.3:1) and generated live Groq response via `qwen/qwen3.8-27b`.
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 48.19s (exit code 0)**.
+- **Next Safe Step**: Deploy on live server via `cd /home/opc/StockAI && git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend`.

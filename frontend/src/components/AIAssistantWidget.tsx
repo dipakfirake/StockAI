@@ -103,12 +103,8 @@ export default function AIAssistantWidget() {
     setInput('')
     setLoading(true)
 
-    // Extract symbol if present (basic regex for Indian symbols)
-    const symbolMatch = userMsg.match(/[A-Z0-9-]+(?:\.NS)?/i)
-    const symbol = symbolMatch ? symbolMatch[0] : undefined
-
     try {
-      const res = await aiApi.chat(userMsg, symbol)
+      const res = await aiApi.chat(userMsg)
       const reply = res.data.reply || res.data.response || 'No response.'
       setMessages(prev => [...prev, { role: 'assistant', content: reply }])
     } catch (err: any) {

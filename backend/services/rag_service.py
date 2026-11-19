@@ -215,8 +215,15 @@ COMMON_TICKER_MAP = {
     "ola electric": "OLAELEC.NS",
     "yes bank": "YESBANK.NS",
     "yesbank": "YESBANK.NS",
-    "idea": "IDEA.NS",
     "vodafone idea": "IDEA.NS",
+    "vodafone": "IDEA.NS",
+    "vi": "IDEA.NS",
+    "pc jeweller": "PCJEWELLER.NS",
+    "pc jewellers": "PCJEWELLER.NS",
+    "pcjeweller": "PCJEWELLER.NS",
+    "pcjewellers": "PCJEWELLER.NS",
+    "pcj": "PCJEWELLER.NS",
+    "pc jewelers": "PCJEWELLER.NS",
 
     # --- BENCHMARK INDICES ---
     "nifty": "^NSEI",
@@ -292,10 +299,25 @@ class FinancialRAGService:
 
         # 3. Check for Symbol in hint or query
         resolved_sym = None
+        
+        # Guard against English stop words incorrectly passed as symbol hints
+        common_stop_words = {
+            "WHAT", "IS", "THE", "TARGET", "FOR", "PRICE", "OF", "HOW", "LOOKING", "TODAY",
+            "GIVE", "ME", "ANALYSIS", "ON", "CAN", "YOU", "CHECK", "SETUP", "LEVELS", "STOCK",
+            "SHARE", "VIEW", "RECOMMENDATION", "GOOD", "ENTER", "EXIT", "SHOULD", "I", "BUY",
+            "SELL", "HOLD", "TELL", "ABOUT", "TRADE", "PLAN", "FORECAST", "PREDICTION", "CMP",
+            "SUPPORT", "RESISTANCE", "PLEASE", "NOW", "TOMORROW", "THIS", "WEEK", "OR", "NEED",
+            "TO", "DROP", "IDEA", "IN", "CURRENT", "SITUATION", "BEST", "WOULD", "COULD", "WILL",
+            "SHALL", "CALL", "PUT", "OPTION", "FALLING", "RISING", "CHART", "REPORT", "NOT"
+        }
+
         if symbol_hint:
             norm = symbol_hint.upper().strip()
-            resolved_sym = norm if ("." in norm or norm.startswith("^")) else f"{norm}.NS"
-        else:
+            clean_token = norm.replace(".NS", "").replace(".BO", "")
+            if clean_token not in common_stop_words and len(clean_token) >= 2:
+                resolved_sym = norm if ("." in norm or norm.startswith("^")) else f"{norm}.NS"
+
+        if not resolved_sym:
             # Match known ticker map
             for alias, ticker in COMMON_TICKER_MAP.items():
                 pattern = r'\b' + re.escape(alias) + r'\b'
@@ -303,13 +325,14 @@ class FinancialRAGService:
                     resolved_sym = ticker
                     break
 
-            # Fallback regex for NSE symbols (e.g. TATAPOWER.NS or TATAPOWER)
+            # Fallback regex for standalone uppercase NSE symbols (e.g. TATAPOWER.NS or TATAPOWER)
             if not resolved_sym:
-                match = re.search(r'\b[A-Z0-9-]{3,12}(?:\.NS)?\b', query)
-                if match:
-                    token = match.group(0).upper()
-                    if token not in ["WHAT", "HOW", "WHY", "BUY", "SELL", "HOLD", "TODAY", "STOCK", "SHARE", "PRICE"]:
-                        resolved_sym = token if "." in token else f"{token}.NS"
+                matches = re.findall(r'\b[A-Z0-9-]{2,12}(?:\.NS)?\b', query)
+                for m in matches:
+                    token = m.upper().replace(".NS", "")
+                    if token not in common_stop_words and not token.isdigit():
+                        resolved_sym = m if "." in m else f"{token}.NS"
+                        break
 
         if resolved_sym:
             return "STOCK_ANALYSIS", resolved_sym
@@ -329,18 +352,21 @@ class FinancialRAGService:
         # 2. Dynamic Universal Stock Search Fallback (Searches PostgreSQL & Yahoo for ALL stocks)
         try:
             q_lower = query.lower().strip()
-            # Stop words filter to isolate potential ticker/company names
             stop_words = {
                 "what", "is", "the", "target", "for", "price", "of", "how", "looking", "today",
                 "give", "me", "analysis", "on", "can", "you", "check", "setup", "levels", "stock",
                 "share", "view", "recommendation", "good", "enter", "exit", "should", "i", "buy",
                 "sell", "hold", "tell", "about", "trade", "plan", "forecast", "prediction", "cmp",
-                "support", "resistance", "please", "now", "tomorrow", "this", "week"
+                "support", "resistance", "please", "now", "tomorrow", "this", "week", "or", "need",
+                "to", "drop", "idea", "in", "current", "situation", "best", "would", "could", "will"
             }
             tokens = [w for w in re.findall(r'[a-zA-Z0-9]+', q_lower) if w not in stop_words]
             if tokens:
                 candidate = " ".join(tokens).strip()
                 search_results = await market_data_service.search_stocks(candidate)
+                # If plural (e.g. "jewellers"), try singular form as well
+                if not search_results and candidate.endswith("s"):
+                    search_results = await market_data_service.search_stocks(candidate[:-1])
                 if search_results and len(search_results) > 0:
                     matched_sym = search_results[0]["symbol"]
                     resolved_sym = matched_sym if ("." in matched_sym or matched_sym.startswith("^")) else f"{matched_sym}.NS"
@@ -479,9 +505,16 @@ class FinancialRAGService:
 
         if intent == "STOCK_ANALYSIS" and context.get("symbol"):
             sym = context["symbol"].replace(".NS", "")
+            cmp = float(context.get("cmp", 0.0))
+            if cmp <= 0.0:
+                return (
+                    f"### ⚠️ {sym} Data Unavailable\n"
+                    f"- **Notice**: Live market quotes or trading history for **{sym}** could not be retrieved.\n"
+                    f"- **Guidance**: Please check that the company name or symbol is correctly spelled (e.g. *'PC Jeweller'*, *'TCS'*, *'Suzlon'*)."
+                )
+
             action = context["action"]
             score = context["total_score"]
-            cmp = context["cmp"]
             cap_segment = context.get("cap_segment", "MID_CAP")
             cap_badge_map = {
                 "LARGE_CAP": "[💎 Large Cap]",
