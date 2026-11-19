@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     MODEL_VERSION: str = "rule_based_v1"
     SHAP_MAX_FEATURES: int = 10
 
+    # Groq AI LLM (Ultra-Fast Inference & Token-Efficient RAG)
+    GROQ_API_KEY: str | None = None
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_TEMPERATURE: float = 0.2
+    GROQ_MAX_TOKENS: int = 280
+    GROQ_TIMEOUT_SECONDS: float = 8.0
+
     # SMTP is intentionally reserved for HIGH-priority alert delivery.
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587

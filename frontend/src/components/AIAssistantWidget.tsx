@@ -1,11 +1,66 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, X, Bot, Trash2, Sparkles } from 'lucide-react'
+import { MessageSquare, Send, X, Bot, Trash2, Sparkles, Zap } from 'lucide-react'
 import { aiApi } from '../services/api'
 
 const STORAGE_KEY = 'ai_assistant_history'
 const MAX_PERSISTED = 12
 
-const INITIAL_MSG = { role: 'assistant' as const, content: 'Hi! I am your StockAI assistant. Ask me about the market, e.g. "How is the market today?" or "Should I buy TCS.NS?"' }
+const INITIAL_MSG = { 
+  role: 'assistant' as const, 
+  content: 'Hi! I am your StockAI Institutional Assistant powered by Groq & Advanced Quantitative RAG. Ask me for stock setups (e.g. "Should I buy TCS?"), market regime ("How is Nifty today?"), or technical concepts ("What is Anchor VWAP?").' 
+}
+
+const QUICK_PROMPTS = [
+  '📊 Nifty Regime',
+  '🎯 Should I buy TCS?',
+  '🚀 Tata Motors Setup',
+  '💡 What is Anchor VWAP?',
+]
+
+function renderFormattedMessage(content: string) {
+  const lines = content.split('\n')
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {lines.map((line, idx) => {
+        const trimmed = line.trim()
+        if (!trimmed) return <div key={idx} style={{ height: 4 }} />
+        
+        // Header ###
+        if (trimmed.startsWith('### ')) {
+          return (
+            <div key={idx} style={{ fontWeight: 700, fontSize: 13, color: '#38bdf8', marginBottom: 2 }}>
+              {trimmed.replace('### ', '')}
+            </div>
+          )
+        }
+        
+        // Bullet point - ...
+        const isBullet = trimmed.startsWith('- ') || trimmed.startsWith('• ')
+        const cleanLine = isBullet ? trimmed.substring(2) : trimmed
+
+        // Parse bold **text**
+        const parts = cleanLine.split(/(\*\*.*?\*\*)/g)
+        const renderedParts = parts.map((part, pIdx) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={pIdx} style={{ color: 'var(--color-text-primary)' }}>{part.slice(2, -2)}</strong>
+          }
+          return part
+        })
+
+        if (isBullet) {
+          return (
+            <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+              <span style={{ color: '#8b5cf6', flexShrink: 0 }}>•</span>
+              <span style={{ flex: 1 }}>{renderedParts}</span>
+            </div>
+          )
+        }
+
+        return <div key={idx}>{renderedParts}</div>
+      })}
+    </div>
+  )
+}
 
 function loadHistory() {
   try {
@@ -39,11 +94,10 @@ export default function AIAssistantWidget() {
     localStorage.removeItem(STORAGE_KEY)
   }
 
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim()) return
+  async function sendMessage(text: string) {
+    if (!text.trim()) return
 
-    const userMsg = input.trim()
+    const userMsg = text.trim()
     setMessages(prev => [...prev, { role: 'user', content: userMsg }])
     setInput('')
     setLoading(true)
@@ -66,6 +120,11 @@ export default function AIAssistantWidget() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleSend(e: React.FormEvent) {
+    e.preventDefault()
+    await sendMessage(input)
   }
 
   if (!isOpen) {
@@ -99,7 +158,9 @@ export default function AIAssistantWidget() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: 'white', fontSize: 14 }}>
           <Sparkles size={16} color="#8b5cf6" />
           StockAI Assistant
-          <span style={{ fontSize: 10, background: 'rgba(139,92,246,0.3)', color: '#c4b5fd', padding: '2px 6px', borderRadius: 10, marginLeft: 4 }}>AI</span>
+          <span style={{ fontSize: 10, background: 'rgba(16, 185, 129, 0.25)', color: '#34d399', padding: '2px 6px', borderRadius: 10, marginLeft: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+            <Zap size={10} /> Groq + RAG
+          </span>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
@@ -137,7 +198,7 @@ export default function AIAssistantWidget() {
             border: m.role === 'assistant' ? '1px solid var(--color-border)' : 'none',
             animation: i === messages.length - 1 ? 'fadeInUp 0.25s ease forwards' : 'none',
           }}>
-            {m.content}
+            {m.role === 'assistant' ? renderFormattedMessage(m.content) : m.content}
           </div>
         ))}
         {loading && (
@@ -158,6 +219,33 @@ export default function AIAssistantWidget() {
           </div>
         )}
         <div ref={messagesEndRef} />
+      </div>
+
+      {/* Quick Prompts */}
+      <div style={{ padding: '6px 12px', display: 'flex', gap: 6, overflowX: 'auto', borderTop: '1px solid rgba(255,255,255,0.05)', scrollbarWidth: 'none' }}>
+        {QUICK_PROMPTS.map((prompt, pIdx) => (
+          <button
+            key={pIdx}
+            type="button"
+            onClick={() => sendMessage(prompt)}
+            disabled={loading}
+            style={{
+              fontSize: 11,
+              whiteSpace: 'nowrap',
+              padding: '3px 8px',
+              borderRadius: 12,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'var(--color-text-secondary)',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(59, 130, 246, 0.15)'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#3b82f6'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.1)'; }}
+          >
+            {prompt}
+          </button>
+        ))}
       </div>
 
       {/* Input */}

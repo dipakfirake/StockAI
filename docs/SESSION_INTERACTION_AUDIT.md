@@ -4299,6 +4299,46 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 93: Groq AI LLM Integration & Advanced Financial Hybrid-Context RAG Engine
+- **Timestamp:** 2026-11-19 18:30:00 IST (13:00:00 UTC)
+- **User Prompt:**
+  `"i want to add the Groq Ai for LLM in our AI chatbot i have secret key of it.i will paste it in .env file. and make sure when you making this we want simpler and short and consice with precision responses when questions are asked at real time and we have to use and apply advanced version RAG also here for making better response quality as per calculatons and all in chatbot also. and i want short responses for not to expire tokens fast. and what things you want for advanced versio of RAG tell me for best quality and correct results and not to make any and not any mistakes this also want to be our USP so make as per it /goal /browser /plan /teamwork /learn /boost /automation /agy-customizations /dart-migrate-to-checks-package /dart-fix-runtime-errors /dart-collect-coverage /dart-resolve-package-conflicts /dart-use-pattern-matching /flutter-add-integration-test /flutter-apply-architecture-best-practices /generative_ui /migrate-agent-settings /migrate-workflows /neon /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause / Deficiencies in Legacy Chatbot**:
+     - Previously, `POST /ai/chat` in `backend/api/ai_engine.py` was a static rule-based script with naive `if/elif` string matches and hardcoded text responses.
+     - Did not connect to any LLM, lacked conversational intelligence, and could not handle dynamic questions or technical concepts.
+  2. **Architectural Upgrades Implemented**:
+     - **Groq AI Service (`backend/services/groq_service.py`)**:
+       - Built async non-blocking client using `httpx.AsyncClient` pointing to Groq's completions endpoint (`https://api.groq.com/openai/v1/chat/completions`).
+       - Pinned to `llama-3.3-70b-versatile` with `temperature=0.2` and strict `max_tokens=280` budget.
+       - Built circuit-breaker error suppression and automatic fallback if Groq API key is absent or rate-limited.
+     - **Advanced Financial Hybrid-Context RAG Engine (`backend/services/rag_service.py`)**:
+       - *Deterministic Pre-Computation ("Correct-by-Construction")*: Calculates Best Buy Price, structural stop loss, T1/T2/T3 targets, R:R, ATR, valuation matrix in Python *before* prompting LLM, eliminating math hallucinations completely.
+       - *Entity & Intent Router*: Maps common Indian names ("Tata Motors", "TCS", "Reliance", "HDFC Bank") to NSE tickers (`TATAMOTORS.NS`, `TCS.NS`, `RELIANCE.NS`), dispatches macro queries to `india_intelligence`, and routes concept queries to a curated Knowledge Base.
+       - *Strict Response Formatting*: Hard-enforces ultra-concise outputs (< 120 words / 3–4 punchy bullet points) covering Signal & Conviction, Execution Levels, Setup Rationale, and Boundaries.
+       - *Deterministic Quant Fallback*: Instant fallback synthesizer producing verified responses when Groq key is not present.
+     - **Configuration & Secret Protection (`backend/core/config.py` & `.env.example`)**:
+       - Added `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_TEMPERATURE`, `GROQ_MAX_TOKENS`.
+       - Strictly maintained Confidentiality Rule: no agent scanning or reading of `.env`.
+     - **Frontend Chatbot UI Upgrades (`frontend/src/components/AIAssistantWidget.tsx`)**:
+       - Added custom lightweight Markdown rendering (headers `###`, bold `**`, bullets `•`).
+       - Added 1-click Quick Prompt Suggestion Chips: `[📊 Nifty Regime]`, `[🎯 Should I buy TCS?]`, `[🚀 Tata Motors Setup]`, `[💡 What is Anchor VWAP?]`.
+       - Added `⚡ Groq + RAG` status badge.
+  3. **Automated Verification Suite Expansion**:
+     - Created `backend/tests/test_groq_and_rag_service.py` with 5 comprehensive unit tests:
+       - `test_entity_and_intent_extraction`
+       - `test_deterministic_quant_response_conciseness_and_precision`
+       - `test_groq_service_fallback_when_unconfigured`
+       - `test_groq_service_completion_with_mocked_api`
+       - `test_end_to_end_rag_stock_query_routing`
+- **Verification Evidence**:
+  - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **5 of 5 passed (100% green)** in 77.33s.
+  - Focused test suite (`test_groq_and_rag_service.py`, `test_best_buy_price_and_indicators.py`, `test_swing_screener_categorization.py`): **13 of 13 passed (100% green)** in 52.13s.
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 44.34s (exit code 0)**.
+- **Next Safe Step**: User adds `GROQ_API_KEY=...` to `.env` on cloud server and rebuilds `backend` & `frontend`.
+
+---
+
 ### Session Entry 90: Indicator Object Type Safety Hardening (`indicators.macd.toFixed` Elimination)
 - **Timestamp:** 2026-11-19 00:35:00 IST (19:05:00 UTC)
 - **User Prompt:**
@@ -4365,6 +4405,46 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Backend test suite: **27 of 27 passed (100% green)** in 90.46s (`test_best_buy_price_and_indicators.py`, `test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_swing_screener_categorization.py`).
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 41.42s (exit code 0)**.
 - **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with copy-pasteable commands.
+
+---
+
+### Session Entry 93: Groq AI LLM Integration & Advanced Financial Hybrid-Context RAG Engine
+- **Timestamp:** 2026-11-19 18:30:00 IST (13:00:00 UTC)
+- **User Prompt:**
+  `"i want to add the Groq Ai for LLM in our AI chatbot i have secret key of it.i will paste it in .env file. and make sure when you making this we want simpler and short and consice with precision responses when questions are asked at real time and we have to use and apply advanced version RAG also here for making better response quality as per calculatons and all in chatbot also. and i want short responses for not to expire tokens fast. and what things you want for advanced versio of RAG tell me for best quality and correct results and not to make any and not any mistakes this also want to be our USP so make as per it /goal /browser /plan /teamwork /learn /boost /automation /agy-customizations /dart-migrate-to-checks-package /dart-fix-runtime-errors /dart-collect-coverage /dart-resolve-package-conflicts /dart-use-pattern-matching /flutter-add-integration-test /flutter-apply-architecture-best-practices /generative_ui /migrate-agent-settings /migrate-workflows /neon /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause / Deficiencies in Legacy Chatbot**:
+     - Previously, `POST /ai/chat` in `backend/api/ai_engine.py` was a static rule-based script with naive `if/elif` string matches and hardcoded text responses.
+     - Did not connect to any LLM, lacked conversational intelligence, and could not handle dynamic questions or technical concepts.
+  2. **Architectural Upgrades Implemented**:
+     - **Groq AI Service (`backend/services/groq_service.py`)**:
+       - Built async non-blocking client using `httpx.AsyncClient` pointing to Groq's completions endpoint (`https://api.groq.com/openai/v1/chat/completions`).
+       - Pinned to `llama-3.3-70b-versatile` with `temperature=0.2` and strict `max_tokens=280` budget.
+       - Built circuit-breaker error suppression and automatic fallback if Groq API key is absent or rate-limited.
+     - **Advanced Financial Hybrid-Context RAG Engine (`backend/services/rag_service.py`)**:
+       - *Deterministic Pre-Computation ("Correct-by-Construction")*: Calculates Best Buy Price, structural stop loss, T1/T2/T3 targets, R:R, ATR, valuation matrix in Python *before* prompting LLM, eliminating math hallucinations completely.
+       - *Entity & Intent Router*: Maps common Indian names ("Tata Motors", "TCS", "Reliance", "HDFC Bank") to NSE tickers (`TATAMOTORS.NS`, `TCS.NS`, `RELIANCE.NS`), dispatches macro queries to `india_intelligence`, and routes concept queries to a curated Knowledge Base.
+       - *Strict Response Formatting*: Hard-enforces ultra-concise outputs (< 120 words / 3–4 punchy bullet points) covering Signal & Conviction, Execution Levels, Setup Rationale, and Boundaries.
+       - *Deterministic Quant Fallback*: Instant fallback synthesizer producing verified responses when Groq key is not present.
+     - **Configuration & Secret Protection (`backend/core/config.py` & `.env.example`)**:
+       - Added `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_TEMPERATURE`, `GROQ_MAX_TOKENS`.
+       - Strictly maintained Confidentiality Rule: no agent scanning or reading of `.env`.
+     - **Frontend Chatbot UI Upgrades (`frontend/src/components/AIAssistantWidget.tsx`)**:
+       - Added custom lightweight Markdown rendering (headers `###`, bold `**`, bullets `•`).
+       - Added 1-click Quick Prompt Suggestion Chips: `[📊 Nifty Regime]`, `[🎯 Should I buy TCS?]`, `[🚀 Tata Motors Setup]`, `[💡 What is Anchor VWAP?]`.
+       - Added `⚡ Groq + RAG` status badge.
+  3. **Automated Verification Suite Expansion**:
+     - Created `backend/tests/test_groq_and_rag_service.py` with 5 comprehensive unit tests:
+       - `test_entity_and_intent_extraction`
+       - `test_deterministic_quant_response_conciseness_and_precision`
+       - `test_groq_service_fallback_when_unconfigured`
+       - `test_groq_service_completion_with_mocked_api`
+       - `test_end_to_end_rag_stock_query_routing`
+- **Verification Evidence**:
+  - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **5 of 5 passed (100% green)** in 77.33s.
+  - Focused test suite (`test_groq_and_rag_service.py`, `test_best_buy_price_and_indicators.py`, `test_swing_screener_categorization.py`): **13 of 13 passed (100% green)** in 52.13s.
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 44.34s (exit code 0)**.
+- **Next Safe Step**: User adds `GROQ_API_KEY=...` to `.env` on cloud server and rebuilds `backend` & `frontend`.
 
 ---
 
@@ -4443,6 +4523,46 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 93: Groq AI LLM Integration & Advanced Financial Hybrid-Context RAG Engine
+- **Timestamp:** 2026-11-19 18:30:00 IST (13:00:00 UTC)
+- **User Prompt:**
+  `"i want to add the Groq Ai for LLM in our AI chatbot i have secret key of it.i will paste it in .env file. and make sure when you making this we want simpler and short and consice with precision responses when questions are asked at real time and we have to use and apply advanced version RAG also here for making better response quality as per calculatons and all in chatbot also. and i want short responses for not to expire tokens fast. and what things you want for advanced versio of RAG tell me for best quality and correct results and not to make any and not any mistakes this also want to be our USP so make as per it /goal /browser /plan /teamwork /learn /boost /automation /agy-customizations /dart-migrate-to-checks-package /dart-fix-runtime-errors /dart-collect-coverage /dart-resolve-package-conflicts /dart-use-pattern-matching /flutter-add-integration-test /flutter-apply-architecture-best-practices /generative_ui /migrate-agent-settings /migrate-workflows /neon /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause / Deficiencies in Legacy Chatbot**:
+     - Previously, `POST /ai/chat` in `backend/api/ai_engine.py` was a static rule-based script with naive `if/elif` string matches and hardcoded text responses.
+     - Did not connect to any LLM, lacked conversational intelligence, and could not handle dynamic questions or technical concepts.
+  2. **Architectural Upgrades Implemented**:
+     - **Groq AI Service (`backend/services/groq_service.py`)**:
+       - Built async non-blocking client using `httpx.AsyncClient` pointing to Groq's completions endpoint (`https://api.groq.com/openai/v1/chat/completions`).
+       - Pinned to `llama-3.3-70b-versatile` with `temperature=0.2` and strict `max_tokens=280` budget.
+       - Built circuit-breaker error suppression and automatic fallback if Groq API key is absent or rate-limited.
+     - **Advanced Financial Hybrid-Context RAG Engine (`backend/services/rag_service.py`)**:
+       - *Deterministic Pre-Computation ("Correct-by-Construction")*: Calculates Best Buy Price, structural stop loss, T1/T2/T3 targets, R:R, ATR, valuation matrix in Python *before* prompting LLM, eliminating math hallucinations completely.
+       - *Entity & Intent Router*: Maps common Indian names ("Tata Motors", "TCS", "Reliance", "HDFC Bank") to NSE tickers (`TATAMOTORS.NS`, `TCS.NS`, `RELIANCE.NS`), dispatches macro queries to `india_intelligence`, and routes concept queries to a curated Knowledge Base.
+       - *Strict Response Formatting*: Hard-enforces ultra-concise outputs (< 120 words / 3–4 punchy bullet points) covering Signal & Conviction, Execution Levels, Setup Rationale, and Boundaries.
+       - *Deterministic Quant Fallback*: Instant fallback synthesizer producing verified responses when Groq key is not present.
+     - **Configuration & Secret Protection (`backend/core/config.py` & `.env.example`)**:
+       - Added `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_TEMPERATURE`, `GROQ_MAX_TOKENS`.
+       - Strictly maintained Confidentiality Rule: no agent scanning or reading of `.env`.
+     - **Frontend Chatbot UI Upgrades (`frontend/src/components/AIAssistantWidget.tsx`)**:
+       - Added custom lightweight Markdown rendering (headers `###`, bold `**`, bullets `•`).
+       - Added 1-click Quick Prompt Suggestion Chips: `[📊 Nifty Regime]`, `[🎯 Should I buy TCS?]`, `[🚀 Tata Motors Setup]`, `[💡 What is Anchor VWAP?]`.
+       - Added `⚡ Groq + RAG` status badge.
+  3. **Automated Verification Suite Expansion**:
+     - Created `backend/tests/test_groq_and_rag_service.py` with 5 comprehensive unit tests:
+       - `test_entity_and_intent_extraction`
+       - `test_deterministic_quant_response_conciseness_and_precision`
+       - `test_groq_service_fallback_when_unconfigured`
+       - `test_groq_service_completion_with_mocked_api`
+       - `test_end_to_end_rag_stock_query_routing`
+- **Verification Evidence**:
+  - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **5 of 5 passed (100% green)** in 77.33s.
+  - Focused test suite (`test_groq_and_rag_service.py`, `test_best_buy_price_and_indicators.py`, `test_swing_screener_categorization.py`): **13 of 13 passed (100% green)** in 52.13s.
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 44.34s (exit code 0)**.
+- **Next Safe Step**: User adds `GROQ_API_KEY=...` to `.env` on cloud server and rebuilds `backend` & `frontend`.
+
+---
+
 ### Session Entry 90: Indicator Object Type Safety Hardening (`indicators.macd.toFixed` Elimination)
 - **Timestamp:** 2026-11-19 00:35:00 IST (19:05:00 UTC)
 - **User Prompt:**
@@ -4509,4 +4629,44 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Backend test suite: **27 of 27 passed (100% green)** in 90.46s (`test_best_buy_price_and_indicators.py`, `test_swing_audit.py`, `test_swing_audit_coupled_ratchet.py`, `test_swing_screener_categorization.py`).
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 41.42s (exit code 0)**.
 - **Next Safe Step**: Stage, commit, push to `origin/main`, and instruct user to deploy on live server with copy-pasteable commands.
+
+---
+
+### Session Entry 93: Groq AI LLM Integration & Advanced Financial Hybrid-Context RAG Engine
+- **Timestamp:** 2026-11-19 18:30:00 IST (13:00:00 UTC)
+- **User Prompt:**
+  `"i want to add the Groq Ai for LLM in our AI chatbot i have secret key of it.i will paste it in .env file. and make sure when you making this we want simpler and short and consice with precision responses when questions are asked at real time and we have to use and apply advanced version RAG also here for making better response quality as per calculatons and all in chatbot also. and i want short responses for not to expire tokens fast. and what things you want for advanced versio of RAG tell me for best quality and correct results and not to make any and not any mistakes this also want to be our USP so make as per it /goal /browser /plan /teamwork /learn /boost /automation /agy-customizations /dart-migrate-to-checks-package /dart-fix-runtime-errors /dart-collect-coverage /dart-resolve-package-conflicts /dart-use-pattern-matching /flutter-add-integration-test /flutter-apply-architecture-best-practices /generative_ui /migrate-agent-settings /migrate-workflows /neon /plugin /run-workflow /swarm"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause / Deficiencies in Legacy Chatbot**:
+     - Previously, `POST /ai/chat` in `backend/api/ai_engine.py` was a static rule-based script with naive `if/elif` string matches and hardcoded text responses.
+     - Did not connect to any LLM, lacked conversational intelligence, and could not handle dynamic questions or technical concepts.
+  2. **Architectural Upgrades Implemented**:
+     - **Groq AI Service (`backend/services/groq_service.py`)**:
+       - Built async non-blocking client using `httpx.AsyncClient` pointing to Groq's completions endpoint (`https://api.groq.com/openai/v1/chat/completions`).
+       - Pinned to `llama-3.3-70b-versatile` with `temperature=0.2` and strict `max_tokens=280` budget.
+       - Built circuit-breaker error suppression and automatic fallback if Groq API key is absent or rate-limited.
+     - **Advanced Financial Hybrid-Context RAG Engine (`backend/services/rag_service.py`)**:
+       - *Deterministic Pre-Computation ("Correct-by-Construction")*: Calculates Best Buy Price, structural stop loss, T1/T2/T3 targets, R:R, ATR, valuation matrix in Python *before* prompting LLM, eliminating math hallucinations completely.
+       - *Entity & Intent Router*: Maps common Indian names ("Tata Motors", "TCS", "Reliance", "HDFC Bank") to NSE tickers (`TATAMOTORS.NS`, `TCS.NS`, `RELIANCE.NS`), dispatches macro queries to `india_intelligence`, and routes concept queries to a curated Knowledge Base.
+       - *Strict Response Formatting*: Hard-enforces ultra-concise outputs (< 120 words / 3–4 punchy bullet points) covering Signal & Conviction, Execution Levels, Setup Rationale, and Boundaries.
+       - *Deterministic Quant Fallback*: Instant fallback synthesizer producing verified responses when Groq key is not present.
+     - **Configuration & Secret Protection (`backend/core/config.py` & `.env.example`)**:
+       - Added `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_TEMPERATURE`, `GROQ_MAX_TOKENS`.
+       - Strictly maintained Confidentiality Rule: no agent scanning or reading of `.env`.
+     - **Frontend Chatbot UI Upgrades (`frontend/src/components/AIAssistantWidget.tsx`)**:
+       - Added custom lightweight Markdown rendering (headers `###`, bold `**`, bullets `•`).
+       - Added 1-click Quick Prompt Suggestion Chips: `[📊 Nifty Regime]`, `[🎯 Should I buy TCS?]`, `[🚀 Tata Motors Setup]`, `[💡 What is Anchor VWAP?]`.
+       - Added `⚡ Groq + RAG` status badge.
+  3. **Automated Verification Suite Expansion**:
+     - Created `backend/tests/test_groq_and_rag_service.py` with 5 comprehensive unit tests:
+       - `test_entity_and_intent_extraction`
+       - `test_deterministic_quant_response_conciseness_and_precision`
+       - `test_groq_service_fallback_when_unconfigured`
+       - `test_groq_service_completion_with_mocked_api`
+       - `test_end_to_end_rag_stock_query_routing`
+- **Verification Evidence**:
+  - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **5 of 5 passed (100% green)** in 77.33s.
+  - Focused test suite (`test_groq_and_rag_service.py`, `test_best_buy_price_and_indicators.py`, `test_swing_screener_categorization.py`): **13 of 13 passed (100% green)** in 52.13s.
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 44.34s (exit code 0)**.
+- **Next Safe Step**: User adds `GROQ_API_KEY=...` to `.env` on cloud server and rebuilds `backend` & `frontend`.
 

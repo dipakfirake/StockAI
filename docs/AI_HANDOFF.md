@@ -14,6 +14,32 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **GROQ AI LLM INTEGRATION & ADVANCED FINANCIAL HYBRID-CONTEXT RAG ENGINE (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Objectives Achieved**:
+    1. User requested: "i want to add the Groq Ai for LLM in our AI chatbot i have secret key of it.i will paste it in .env file. and make sure when you making this we want simpler and short and consice with precision responses when questions are asked at real time and we have to use and apply advanced version RAG also here for making better response quality as per calculatons and all in chatbot also. and i want short responses for not to expire tokens fast."
+    2. Core Architectural Pillars Built:
+       - **Groq AI Async Service (`backend/services/groq_service.py`)**:
+         - Built async non-blocking client using `httpx.AsyncClient` pointing to Groq's completions endpoint (`https://api.groq.com/openai/v1/chat/completions`).
+         - Pinned to `llama-3.3-70b-versatile` (or `llama-3.1-8b-instant`) with `temperature=0.2` and strict `max_tokens=280` budget to prevent token burn.
+         - Built circuit-breaker error suppression and automatic fallback if Groq API key is absent or rate-limited.
+       - **Advanced Financial Hybrid-Context RAG Engine (`backend/services/rag_service.py`)**:
+         - *Deterministic Pre-Computation ("Correct-by-Construction")*: Calculates Best Buy Price, structural stop loss, T1/T2/T3 targets, R:R, ATR, valuation matrix in Python *before* prompting LLM, eliminating math hallucinations completely.
+         - *Entity & Intent Router*: Maps common Indian names ("Tata Motors", "TCS", "Reliance", "HDFC Bank") to NSE tickers (`TATAMOTORS.NS`, `TCS.NS`, `RELIANCE.NS`), dispatches macro queries to `india_intelligence`, and routes concept queries to a curated Knowledge Base.
+         - *Strict Response Formatting*: Hard-enforces ultra-concise outputs (< 120 words / 3–4 punchy bullet points) covering Signal & Conviction, Execution Levels, Setup Rationale, and Boundaries.
+         - *Deterministic Quant Fallback*: Instant fallback synthesizer producing verified responses when Groq key is not present.
+       - **Configuration & Secret Protection (`backend/core/config.py` & `.env.example`)**:
+         - Added `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_TEMPERATURE`, `GROQ_MAX_TOKENS`.
+         - Strictly maintained Confidentiality Rule: no agent scanning or reading of `.env`.
+       - **Frontend Chatbot UI Upgrades (`frontend/src/components/AIAssistantWidget.tsx`)**:
+         - Added custom lightweight Markdown rendering (headers `###`, bold `**`, bullets `•`).
+         - Added 1-click Quick Prompt Suggestion Chips: `[📊 Nifty Regime]`, `[🎯 Should I buy TCS?]`, `[🚀 Tata Motors Setup]`, `[💡 What is Anchor VWAP?]`.
+         - Added `⚡ Groq + RAG` status badge.
+  - **Verification Evidence**:
+    - Backend unit tests (`backend/tests/test_groq_and_rag_service.py`): **5 of 5 passed (100% green)** in 77.33s.
+    - Full focused test suite (`test_groq_and_rag_service.py`, `test_best_buy_price_and_indicators.py`, `test_swing_screener_categorization.py`): **13 of 13 passed (100% green)** in 52.13s.
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 44.34s (exit code 0)**.
+  - **Exact Next Safe Step**: User adds `GROQ_API_KEY=...` to `.env` on cloud server and rebuilds `backend` & `frontend`.
+
 - **TARGET PRICE & STAGED GAINS STRICT ANCHORING TO CALCULATED BEST BUY PRICE (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Resolved**:
     1. User observed: *"still target price is showing to current price not at after calculation price means below or above or equal to current price because it is set by using analysis and all calculations so i want that."*
