@@ -4670,3 +4670,32 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 44.34s (exit code 0)**.
 - **Next Safe Step**: User adds `GROQ_API_KEY=...` to `.env` on cloud server and rebuilds `backend` & `frontend`.
 
+
+
+---
+
+### Session Entry 94: All-Market-Cap Advanced Financial RAG & Dynamic Entity Search Resolution
+- **Timestamp:** 2026-11-19 19:10:00 IST (13:40:00 UTC)
+- **User Prompt:**
+  `"so you are only analysing Nifty 50 for RAG or what ?i want it for all types of stocks in market small, big, medium, all."`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Root Cause Analysis & Scope Clarification**:
+     - Clarified that the quantitative screener (`screener_service._analyze_symbol`) and market data services already support **all stocks in the Indian market** across Large, Mid, Small, and Micro caps.
+     - However, the RAG entity resolution in `backend/services/rag_service.py` relied on a static dictionary of ~40 blue-chips and an uppercase-only regex pattern, which failed when users queried Small/Mid-cap stocks in lowercase or conversational phrasing (e.g. *"what about suzlon energy"* or *"analyze premier energies"*).
+  2. **Architectural Upgrades Implemented**:
+     - **Expanded Multi-Cap Ticker Map (`backend/services/rag_service.py`)**:
+       - Added dozens of popular Small-Cap names (`SUZLON`, `IREDA`, `CDSL`, `BSE`, `MAZDOCK`, `RVNL`, `IRFC`, `KAYNES`, `KALYANKJIL`, `ZENTEC`, `PREMIERENE`, `PAYTM`, `NYKAA`, `OLAELEC`, `YESBANK`, `COCHINSHIP`, `HUDCO`, `NBCC`, `MOTILALOFS`, `IRCTC`).
+       - Added prominent Mid-Caps (`POLYCAB`, `DIXON`, `CAMS`, `FEDERALBNK`, `BEL`, `HAL`, `CUMMINSIND`, `GODREJPROP`, `PIIND`, `TRENT`, `DEEPAKNTR`, `PERSISTENT`, `COFORGE`, `LTIM`, `PFC`, `RECLTD`, `TATAPOWER`, `ASHOKLEY`, `TVSMOTOR`, `HEROMOTOCO`, `BAJAJ-AUTO`, `HAVELLS`, `VEDL`, `SAIL`, `NATIONALUM`, `NMDC`, `JINDALSTEL`, `JSWSTEEL`, `APOLLOHOSP`, `CIPLA`, `DRREDDY`, `LUPIN`, `DIVISLAB`, `AUROPHARMA`, `BPCL`, `ONGC`, `GAIL`, `HINDALCO`, `INDUSINDBK`, `BANKBARODA`, `PNB`, `AUBANK`, `BANDHANBNK`, `IDFCFIRSTB`).
+     - **Dynamic Universal Stock Search Fallback (`extract_intent_and_entity_async`)**:
+       - When an entity is not in the predefined map, the system cleans conversational stopwords and queries `market_data_service.search_stocks()`.
+       - Seamlessly searches both PostgreSQL and Yahoo Finance across thousands of NSE and BSE listed equities to dynamically resolve any Small, Mid, or Large cap company.
+     - **Market Cap Badging in RAG Response**:
+       - Both Groq prompt and deterministic synthesizer explicitly display market cap category badges: `[💎 Large Cap]`, `[⚡ Mid Cap]`, `[🌱 Small Cap]`, and `[🚀 Fast Growth]`.
+     - **Frontend Quick Suggestions (`frontend/src/components/AIAssistantWidget.tsx`)**:
+       - Added multi-cap prompt chips: `[📊 Nifty Regime]`, `[💎 Should I buy TCS?]`, `[⚡ Polycab Setup]`, `[🌱 Analyze Suzlon]`, `[💡 What is Anchor VWAP?]`.
+  3. **Automated Verification Suite Expansion**:
+     - Updated `backend/tests/test_groq_and_rag_service.py` with multi-cap entity resolution tests and `test_dynamic_universal_stock_search_async`.
+- **Verification Evidence**:
+  - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **6 of 6 passed (100% green)** in 47.28s.
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 2m 52s (exit code 0)**.
+- **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` & `frontend`.

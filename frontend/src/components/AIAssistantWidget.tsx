@@ -7,13 +7,14 @@ const MAX_PERSISTED = 12
 
 const INITIAL_MSG = { 
   role: 'assistant' as const, 
-  content: 'Hi! I am your StockAI Institutional Assistant powered by Groq & Advanced Quantitative RAG. Ask me for stock setups (e.g. "Should I buy TCS?"), market regime ("How is Nifty today?"), or technical concepts ("What is Anchor VWAP?").' 
+  content: 'Hi! I am your StockAI Institutional Assistant powered by Groq & Advanced Multi-Cap RAG. Ask me for setups on any Large, Mid, or Small-Cap stock (e.g. "Should I buy TCS?", "Analyze Suzlon", "IREDA target"), market regime ("How is Nifty today?"), or technical concepts ("What is Anchor VWAP?").' 
 }
 
 const QUICK_PROMPTS = [
   '📊 Nifty Regime',
-  '🎯 Should I buy TCS?',
-  '🚀 Tata Motors Setup',
+  '💎 Should I buy TCS?',
+  '⚡ Polycab Setup',
+  '🌱 Analyze Suzlon',
   '💡 What is Anchor VWAP?',
 ]
 

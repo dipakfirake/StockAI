@@ -33,7 +33,8 @@ def test_entity_and_intent_extraction():
     intent, entity = rag.extract_intent_and_entity("Is the market breadth bullish or bearish right now?")
     assert intent == "MARKET_REGIME"
 
-    # 3. Stock Analysis Queries with Named Entity Resolution
+    # 3. Stock Analysis Queries with Named Entity Resolution (Multi-Cap)
+    # Large Cap
     intent, entity = rag.extract_intent_and_entity("Should I buy Tata Motors today?")
     assert intent == "STOCK_ANALYSIS"
     assert entity == "TATAMOTORS.NS"
@@ -46,6 +47,43 @@ def test_entity_and_intent_extraction():
     assert intent == "STOCK_ANALYSIS"
     assert entity == "RELIANCE.NS"
 
+    # Mid Cap
+    intent, entity = rag.extract_intent_and_entity("How is Polycab looking for swing trade?")
+    assert intent == "STOCK_ANALYSIS"
+    assert entity == "POLYCAB.NS"
+
+    intent, entity = rag.extract_intent_and_entity("Is Dixon Tech a buy?")
+    assert intent == "STOCK_ANALYSIS"
+    assert entity == "DIXON.NS"
+
+    # Small Cap
+    intent, entity = rag.extract_intent_and_entity("Analyze Suzlon Energy for me")
+    assert intent == "STOCK_ANALYSIS"
+    assert entity == "SUZLON.NS"
+
+    intent, entity = rag.extract_intent_and_entity("What is the stop loss for IREDA?")
+    assert intent == "STOCK_ANALYSIS"
+    assert entity == "IREDA.NS"
+
+    intent, entity = rag.extract_intent_and_entity("Should I buy CDSL?")
+    assert intent == "STOCK_ANALYSIS"
+    assert entity == "CDSL.NS"
+
+
+@pytest.mark.asyncio
+async def test_dynamic_universal_stock_search_async():
+    """Verify that extract_intent_and_entity_async dynamically searches DB/Yahoo for any Small/Mid/Large cap stock."""
+    rag = FinancialRAGService()
+
+    fake_search_results = [
+        {"symbol": "PREMIERENE", "name": "Premier Energies Limited", "exchange": "NSE"}
+    ]
+
+    with patch("backend.services.market_data.market_data_service.search_stocks", new=AsyncMock(return_value=fake_search_results)):
+        intent, entity = await rag.extract_intent_and_entity_async("What is the trade plan for Premier Energies?")
+        assert intent == "STOCK_ANALYSIS"
+        assert entity == "PREMIERENE.NS"
+
 
 def test_deterministic_quant_response_conciseness_and_precision():
     """Verify that deterministic quant synthesis produces punchy bullet points under 120 words with verified numbers."""
@@ -56,6 +94,7 @@ def test_deterministic_quant_response_conciseness_and_precision():
         "cmp": 4150.0,
         "action": "BUY",
         "total_score": 78.5,
+        "cap_segment": "LARGE_CAP",
         "is_fast_growth": True,
         "trade_plan": {
             "best_buy_price": 4120.0,
@@ -82,6 +121,8 @@ def test_deterministic_quant_response_conciseness_and_precision():
     assert "₹4,382.50" in reply
     assert "+6.4%" in reply
     assert "2.5:1" in reply
+    assert "[💎 Large Cap]" in reply
+    assert "[🚀 Fast Growth]" in reply
 
     # Token and brevity check: response should be under 120 words
     word_count = len(reply.split())

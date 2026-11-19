@@ -14,6 +14,25 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **ALL-MARKET-CAP ADVANCED FINANCIAL RAG & DYNAMIC ENTITY SEARCH RESOLUTION (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Resolved**:
+    1. User asked: *"so you are only analysing Nifty 50 for RAG or what ?i want it for all types of stocks in market small, big, medium, all."*
+    2. Architecture & Implementation:
+       - Clarified and fortified multi-cap capability: The underlying quantitative screener and RAG retrieval analyze **all stocks across the Indian stock market** (Large, Mid, Small, Micro).
+       - **Expanded Multi-Cap Ticker Knowledge Map (`backend/services/rag_service.py`)**:
+         - Added comprehensive aliases for popular Small-Caps (`SUZLON.NS`, `IREDA.NS`, `CDSL.NS`, `BSE.NS`, `MAZDOCK.NS`, `RVNL.NS`, `IRFC.NS`, `KAYNES.NS`, `KALYANKJIL.NS`, `ZENTEC.NS`, `PREMIERENE.NS`, `PAYTM.NS`, `NYKAA.NS`, `OLAELEC.NS`, `YESBANK.NS`, `IDEA.NS`, `COCHINSHIP.NS`, `HUDCO.NS`, `NBCC.NS`, `MOTILALOFS.NS`, `IRCTC.NS`, etc.).
+         - Added Mid-Caps (`POLYCAB.NS`, `DIXON.NS`, `CAMS.NS`, `FEDERALBNK.NS`, `BEL.NS`, `HAL.NS`, `CUMMINSIND.NS`, `GODREJPROP.NS`, `PIIND.NS`, `TRENT.NS`, `DEEPAKNTR.NS`, `PERSISTENT.NS`, `COFORGE.NS`, `LTIM.NS`, `PFC.NS`, `RECLTD.NS`, `TATAPOWER.NS`, `ASHOKLEY.NS`, `TVSMOTOR.NS`, `HEROMOTOCO.NS`, `BAJAJ-AUTO.NS`, `HAVELLS.NS`, `VEDL.NS`, `SAIL.NS`, `NATIONALUM.NS`, `NMDC.NS`, `JINDALSTEL.NS`, `JSWSTEEL.NS`, `APOLLOHOSP.NS`, `CIPLA.NS`, `DRREDDY.NS`, `LUPIN.NS`, `DIVISLAB.NS`, `AUROPHARMA.NS`, `BPCL.NS`, `ONGC.NS`, `GAIL.NS`, `HINDALCO.NS`, `INDUSINDBK.NS`, `BANKBARODA.NS`, `PNB.NS`, `AUBANK.NS`, `BANDHANBNK.NS`, `IDFCFIRSTB.NS`).
+       - **Dynamic Universal Stock Search Fallback (`extract_intent_and_entity_async`)**:
+         - When a query contains an unmapped or colloquial company name (e.g. *"what is the trade plan for Premier Energies?"*), the engine cleans conversational stopwords and queries `market_data_service.search_stocks()`, searching both local PostgreSQL and Yahoo Finance across thousands of NSE and BSE stocks.
+       - **Market Cap Badging in RAG Output**:
+         - In both Groq prompt and deterministic synthesizer, responses dynamically append category badges: `[💎 Large Cap]`, `[⚡ Mid Cap]`, `[🌱 Small Cap]`, and `[🚀 Fast Growth]`.
+       - **Frontend Quick Prompt Suggestions (`frontend/src/components/AIAssistantWidget.tsx`)**:
+         - Added Multi-Cap prompt chips: `[📊 Nifty Regime]`, `[💎 Should I buy TCS?]`, `[⚡ Polycab Setup]`, `[🌱 Analyze Suzlon]`, `[💡 What is Anchor VWAP?]`.
+  - **Verification Evidence**:
+    - Backend unit tests (`backend/tests/test_groq_and_rag_service.py`): **6 of 6 passed (100% green)** in 47.28s (covering multi-cap classification, dynamic async search, and token brevity).
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 2m 52s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` & `frontend`.
+
 - **GROQ AI LLM INTEGRATION & ADVANCED FINANCIAL HYBRID-CONTEXT RAG ENGINE (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Objectives Achieved**:
     1. User requested: "i want to add the Groq Ai for LLM in our AI chatbot i have secret key of it.i will paste it in .env file. and make sure when you making this we want simpler and short and consice with precision responses when questions are asked at real time and we have to use and apply advanced version RAG also here for making better response quality as per calculatons and all in chatbot also. and i want short responses for not to expire tokens fast."

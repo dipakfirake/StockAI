@@ -26,8 +26,9 @@ from backend.services.groq_service import groq_service
 
 logger = logging.getLogger(__name__)
 
-# Curated Indian Ticker Aliases for Fast Entity Resolution
+# Curated Indian Ticker Aliases for Fast Entity Resolution (Multi-Cap: Large, Mid, Small, Micro)
 COMMON_TICKER_MAP = {
+    # --- LARGE CAP BLUE CHIPS ---
     "tcs": "TCS.NS",
     "tata consultancy": "TCS.NS",
     "infosys": "INFY.NS",
@@ -65,14 +66,159 @@ COMMON_TICKER_MAP = {
     "asianpaint": "ASIANPAINT.NS",
     "sun pharma": "SUNPHARMA.NS",
     "sunpharma": "SUNPHARMA.NS",
-    "angelone": "ANGELONE.NS",
-    "angel one": "ANGELONE.NS",
+    "ntpc": "NTPC.NS",
+    "powergrid": "POWERGRID.NS",
+    "power grid": "POWERGRID.NS",
+    "coal india": "COALINDIA.NS",
+    "coalindia": "COALINDIA.NS",
+    "m&m": "M&M.NS",
+    "mahindra": "M&M.NS",
+    "ultratech": "ULTRACEMCO.NS",
+    "ultracemco": "ULTRACEMCO.NS",
+    "adani ent": "ADANIENT.NS",
+    "adanient": "ADANIENT.NS",
+    "adani ports": "ADANIPORTS.NS",
+    "adaniports": "ADANIPORTS.NS",
+    "hindustan unilever": "HINDUNILVR.NS",
+    "hul": "HINDUNILVR.NS",
+    "hindunilvr": "HINDUNILVR.NS",
+
+    # --- MID CAP GROWTH LEADERS ---
+    "polycab": "POLYCAB.NS",
+    "dixon": "DIXON.NS",
+    "dixon tech": "DIXON.NS",
+    "cams": "CAMS.NS",
+    "federal bank": "FEDERALBNK.NS",
+    "federalbank": "FEDERALBNK.NS",
+    "bel": "BEL.NS",
+    "bharat electronics": "BEL.NS",
+    "hal": "HAL.NS",
+    "hindustan aeronautics": "HAL.NS",
+    "cummins": "CUMMINSIND.NS",
+    "cummins india": "CUMMINSIND.NS",
+    "godrej properties": "GODREJPROP.NS",
+    "godrejprop": "GODREJPROP.NS",
+    "pi industries": "PIIND.NS",
+    "piind": "PIIND.NS",
+    "trent": "TRENT.NS",
+    "deepak nitrite": "DEEPAKNTR.NS",
+    "deepakntr": "DEEPAKNTR.NS",
+    "persistent": "PERSISTENT.NS",
+    "persistent systems": "PERSISTENT.NS",
+    "coforge": "COFORGE.NS",
+    "ltimindtree": "LTIM.NS",
+    "ltim": "LTIM.NS",
+    "pfc": "PFC.NS",
+    "power finance": "PFC.NS",
+    "rec": "RECLTD.NS",
+    "recltd": "RECLTD.NS",
+    "tata power": "TATAPOWER.NS",
+    "tatapower": "TATAPOWER.NS",
+    "ashok leyland": "ASHOKLEY.NS",
+    "ashokley": "ASHOKLEY.NS",
+    "tvs motor": "TVSMOTOR.NS",
+    "tvsmotor": "TVSMOTOR.NS",
+    "hero motocorp": "HEROMOTOCO.NS",
+    "heromotoco": "HEROMOTOCO.NS",
+    "bajaj auto": "BAJAJ-AUTO.NS",
+    "havells": "HAVELLS.NS",
+    "vedanta": "VEDL.NS",
+    "vedl": "VEDL.NS",
+    "sail": "SAIL.NS",
+    "national aluminium": "NATIONALUM.NS",
+    "nalco": "NATIONALUM.NS",
+    "nmdc": "NMDC.NS",
+    "jindal steel": "JINDALSTEL.NS",
+    "jindalstel": "JINDALSTEL.NS",
+    "jsw steel": "JSWSTEEL.NS",
+    "jswsteel": "JSWSTEEL.NS",
+    "apollo hospitals": "APOLLOHOSP.NS",
+    "apollohosp": "APOLLOHOSP.NS",
+    "cipla": "CIPLA.NS",
+    "dr reddy": "DRREDDY.NS",
+    "drreddy": "DRREDDY.NS",
+    "lupin": "LUPIN.NS",
+    "divis": "DIVISLAB.NS",
+    "divislab": "DIVISLAB.NS",
+    "aurobindo": "AUROPHARMA.NS",
+    "auropharma": "AUROPHARMA.NS",
+    "bpcl": "BPCL.NS",
+    "ongc": "ONGC.NS",
+    "gail": "GAIL.NS",
+    "hindalco": "HINDALCO.NS",
+    "indusind": "INDUSINDBK.NS",
+    "indusind bank": "INDUSINDBK.NS",
+    "bank of baroda": "BANKBARODA.NS",
+    "bob": "BANKBARODA.NS",
+    "pnb": "PNB.NS",
+    "punjab national bank": "PNB.NS",
+    "au bank": "AUBANK.NS",
+    "aubank": "AUBANK.NS",
+    "bandhan bank": "BANDHANBNK.NS",
+    "bandhanbank": "BANDHANBNK.NS",
+    "idfc first": "IDFCFIRSTB.NS",
+    "idfcfirstb": "IDFCFIRSTB.NS",
     "bsoft": "BSOFT.NS",
     "birlasoft": "BSOFT.NS",
     "eichermot": "EICHERMOT.NS",
     "eicher": "EICHERMOT.NS",
     "ioc": "IOC.NS",
     "indian oil": "IOC.NS",
+
+    # --- SMALL CAP & FAST GROWTH STARS ---
+    "suzlon": "SUZLON.NS",
+    "suzlon energy": "SUZLON.NS",
+    "ireda": "IREDA.NS",
+    "indian renewable": "IREDA.NS",
+    "cdsl": "CDSL.NS",
+    "central depository": "CDSL.NS",
+    "bse": "BSE.NS",
+    "bombay stock exchange": "BSE.NS",
+    "mazdock": "MAZDOCK.NS",
+    "mazagon dock": "MAZDOCK.NS",
+    "mazagon": "MAZDOCK.NS",
+    "rvnl": "RVNL.NS",
+    "rail vikas": "RVNL.NS",
+    "irfc": "IRFC.NS",
+    "indian railway finance": "IRFC.NS",
+    "kaynes": "KAYNES.NS",
+    "kaynes tech": "KAYNES.NS",
+    "kalyan": "KALYANKJIL.NS",
+    "kalyan jewellers": "KALYANKJIL.NS",
+    "kalyankjil": "KALYANKJIL.NS",
+    "angelone": "ANGELONE.NS",
+    "angel one": "ANGELONE.NS",
+    "rblbank": "RBLBANK.NS",
+    "rbl": "RBLBANK.NS",
+    "rbl bank": "RBLBANK.NS",
+    "zentec": "ZENTEC.NS",
+    "zen tech": "ZENTEC.NS",
+    "zen technologies": "ZENTEC.NS",
+    "premierene": "PREMIERENE.NS",
+    "premier energies": "PREMIERENE.NS",
+    "zomato": "ZOMATO.NS",
+    "swiggy": "SWIGGY.NS",
+    "jiofin": "JIOFIN.NS",
+    "jio financial": "JIOFIN.NS",
+    "cochin shipyard": "COCHINSHIP.NS",
+    "cochinship": "COCHINSHIP.NS",
+    "hudco": "HUDCO.NS",
+    "nbcc": "NBCC.NS",
+    "motilal": "MOTILALOFS.NS",
+    "motilal oswal": "MOTILALOFS.NS",
+    "irctc": "IRCTC.NS",
+    "paytm": "PAYTM.NS",
+    "one97": "PAYTM.NS",
+    "nykaa": "NYKAA.NS",
+    "fsn e-commerce": "NYKAA.NS",
+    "ola": "OLAELEC.NS",
+    "ola electric": "OLAELEC.NS",
+    "yes bank": "YESBANK.NS",
+    "yesbank": "YESBANK.NS",
+    "idea": "IDEA.NS",
+    "vodafone idea": "IDEA.NS",
+
+    # --- BENCHMARK INDICES ---
     "nifty": "^NSEI",
     "nifty 50": "^NSEI",
     "nifty50": "^NSEI",
@@ -167,6 +313,40 @@ class FinancialRAGService:
 
         if resolved_sym:
             return "STOCK_ANALYSIS", resolved_sym
+
+        return "GENERAL", None
+
+    async def extract_intent_and_entity_async(self, query: str, symbol_hint: Optional[str] = None) -> Tuple[str, Optional[str]]:
+        """
+        Asynchronously extract intent and entity, with dynamic live database / Yahoo search fallback
+        for all Small-Cap, Mid-Cap, and Large-Cap Indian equities.
+        """
+        # 1. Fast synchronous resolution via curated knowledge bases and multi-cap ticker map
+        intent, entity = self.extract_intent_and_entity(query, symbol_hint)
+        if intent != "GENERAL" or entity:
+            return intent, entity
+
+        # 2. Dynamic Universal Stock Search Fallback (Searches PostgreSQL & Yahoo for ALL stocks)
+        try:
+            q_lower = query.lower().strip()
+            # Stop words filter to isolate potential ticker/company names
+            stop_words = {
+                "what", "is", "the", "target", "for", "price", "of", "how", "looking", "today",
+                "give", "me", "analysis", "on", "can", "you", "check", "setup", "levels", "stock",
+                "share", "view", "recommendation", "good", "enter", "exit", "should", "i", "buy",
+                "sell", "hold", "tell", "about", "trade", "plan", "forecast", "prediction", "cmp",
+                "support", "resistance", "please", "now", "tomorrow", "this", "week"
+            }
+            tokens = [w for w in re.findall(r'[a-zA-Z0-9]+', q_lower) if w not in stop_words]
+            if tokens:
+                candidate = " ".join(tokens).strip()
+                search_results = await market_data_service.search_stocks(candidate)
+                if search_results and len(search_results) > 0:
+                    matched_sym = search_results[0]["symbol"]
+                    resolved_sym = matched_sym if ("." in matched_sym or matched_sym.startswith("^")) else f"{matched_sym}.NS"
+                    return "STOCK_ANALYSIS", resolved_sym
+        except Exception as e:
+            logger.debug(f"[RAG] Universal stock search failed for candidate '{query}': {e}")
 
         return "GENERAL", None
 
@@ -302,6 +482,15 @@ class FinancialRAGService:
             action = context["action"]
             score = context["total_score"]
             cmp = context["cmp"]
+            cap_segment = context.get("cap_segment", "MID_CAP")
+            cap_badge_map = {
+                "LARGE_CAP": "[💎 Large Cap]",
+                "MID_CAP": "[⚡ Mid Cap]",
+                "SMALL_CAP": "[🌱 Small Cap]"
+            }
+            cap_badge = cap_badge_map.get(cap_segment, "[📊 Multi-Cap]")
+            growth_badge = " [🚀 Fast Growth]" if context.get("is_fast_growth") else ""
+
             plan = context.get("trade_plan", {})
             best_buy = plan.get("best_buy_price", cmp)
             sl = plan.get("stop_loss", cmp * 0.96)
@@ -313,10 +502,9 @@ class FinancialRAGService:
             advice = plan.get("entry_advice", "Price structure confirmed.")
             supp = context.get("support", sl)
             res = context.get("resistance", t2)
-            growth_badge = " [🚀 Fast Growth]" if context.get("is_fast_growth") else ""
 
             return (
-                f"### 🎯 {sym} Trade Plan & Quant Analysis{growth_badge}\n"
+                f"### 🎯 {sym} Trade Plan & Quant Analysis {cap_badge}{growth_badge}\n"
                 f"- **Signal & Conviction**: **{action}** (Score: **{score}/100** | CMP: ₹{cmp:,.2f})\n"
                 f"- **Execution Levels**: Best Buy: **₹{best_buy:,.2f}** | SL: **₹{sl:,.2f}** (-{risk}%) | Target: **₹{t2:,.2f}** (+{gain}%) | R:R: **{rr}:1**\n"
                 f"- **Institutional Setup**: {advice} (Expected Hold: {hold})\n"
@@ -325,19 +513,19 @@ class FinancialRAGService:
 
         return (
             "I am your StockAI Institutional Assistant powered by Groq & Advanced Quantitative RAG. "
-            "Ask me for stock setups (e.g. *'Should I buy TCS?'*), market regime (*'How is Nifty today?'*), or technical concepts (*'What is Anchor VWAP?'*)."
+            "Ask me for stock setups across Large, Mid, and Small caps (e.g. *'Should I buy TCS?'*, *'Analyze Suzlon'*), market regime (*'How is Nifty today?'*), or technical concepts (*'What is Anchor VWAP?'*)."
         )
 
     async def process_chat_query(self, message: str, symbol_hint: Optional[str] = None) -> Dict[str, Any]:
         """
         Master RAG pipeline:
-        1. Extract intent & entities
+        1. Extract intent & entities (with dynamic multi-cap search)
         2. Retrieve multi-source quantitative context
         3. Pre-compute and verify mathematical figures
         4. Query Groq AI with token-budgeted prompt
         5. Seamlessly fallback to deterministic synthesis if Groq unavailable
         """
-        intent, entity = self.extract_intent_and_entity(message, symbol_hint)
+        intent, entity = await self.extract_intent_and_entity_async(message, symbol_hint)
 
         # Context retrieval
         context: Dict[str, Any] = {}
@@ -365,14 +553,16 @@ class FinancialRAGService:
             "You are StockAI, an elite Wall Street & Dalal Street institutional quantitative analyst.\n"
             "MANDATORY RULES:\n"
             "1. Extreme brevity & precision: Responses MUST be under 110 words in exactly 3 to 4 punchy bullet points.\n"
-            "2. ZERO MATH HALLUCINATIONS: You are strictly forbidden from inventing price targets or calculating new percentages. "
+            "2. MULTI-CAP COVERAGE: You analyze Large-Cap, Mid-Cap, and Small-Cap Indian equities with equal institutional rigor.\n"
+            "3. ZERO MATH HALLUCINATIONS: You are strictly forbidden from inventing price targets or calculating new percentages. "
             "You MUST cite ONLY the pre-calculated numbers provided in the Ground Truth Context.\n"
-            "3. Format strictly with bold numbers and clean Markdown:\n"
+            "4. Format strictly with bold numbers and clean Markdown:\n"
+            "   Header format: ### 🎯 [SYMBOL] Trade Plan & Quant Analysis [[💎 Large Cap] / [⚡ Mid Cap] / [🌱 Small Cap]] [[🚀 Fast Growth]]\n"
             "   - **Signal & Conviction**: [BUY / SELL / HOLD] (Score: X/100 | CMP: ₹...)\n"
             "   - **Execution Levels**: Best Buy: ₹... | SL: ₹... (-X%) | Target: ₹... (+Y%) | R:R: Z:1\n"
             "   - **Setup & Confluence**: 1-2 sentence core reason\n"
             "   - **Key Boundaries**: Support: ₹... | Resistance: ₹...\n"
-            "4. No conversational filler or legal disclaimers. Get straight to the point."
+            "5. No conversational filler or legal disclaimers. Get straight to the point."
         )
 
         user_prompt = f"User Question: {message}\n\nGround Truth Context:\n{context}"
