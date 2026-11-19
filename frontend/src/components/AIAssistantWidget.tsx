@@ -1,9 +1,22 @@
 import { useState, useRef, useEffect } from 'react'
 import { MessageSquare, Send, X, Bot, Trash2, Sparkles, Zap } from 'lucide-react'
-import { aiApi } from '../services/api'
+import { aiApi, stocksApi } from '../services/api'
 
 const STORAGE_KEY = 'ai_assistant_history'
 const MAX_PERSISTED = 12
+
+interface StockSuggestion {
+  symbol: string
+  name: string
+  exchange: string
+  type?: string
+}
+
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  cached?: boolean
+}
 
 const INITIAL_MSG = { 
   role: 'assistant' as const, 
@@ -63,20 +76,27 @@ function renderFormattedMessage(content: string) {
   )
 }
 
-function loadHistory() {
+function loadHistory(): ChatMessage[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as { role: 'user' | 'assistant'; content: string }[]
+    if (raw) return JSON.parse(raw) as ChatMessage[]
   } catch { }
   return [INITIAL_MSG]
 }
 
 export default function AIAssistantWidget() {
   const [isOpen, setIsOpen] = useState(false)
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>(loadHistory)
+  const [messages, setMessages] = useState<ChatMessage[]>(loadHistory)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // '@' Stock Mention Autocomplete State
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<StockSuggestion[]>([])
+  const [selectedIdx, setSelectedIdx] = useState<number>(0)
+  const [showSuggestions, setShowSuggestions] = useState(false)
 
   // Persist chat history on every change
   useEffect(() => {
@@ -90,6 +110,105 @@ export default function AIAssistantWidget() {
     }
   }, [messages, isOpen])
 
+  // Debounced search for '@' stock mentions
+  useEffect(() => {
+    if (mentionQuery === null || !showSuggestions) {
+      setSuggestions([])
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const q = mentionQuery.trim()
+        if (q.length === 0) {
+          // Default popular multi-cap suggestions when user just types '@'
+          setSuggestions([
+            { symbol: 'PCJEWELLER.NS', name: 'PC Jeweller', exchange: 'NSE' },
+            { symbol: 'RELIANCE.NS', name: 'Reliance Industries', exchange: 'NSE' },
+            { symbol: 'TCS.NS', name: 'Tata Consultancy Services', exchange: 'NSE' },
+            { symbol: 'POLYCAB.NS', name: 'Polycab India', exchange: 'NSE' },
+            { symbol: 'SUZLON.NS', name: 'Suzlon Energy', exchange: 'NSE' },
+            { symbol: 'IREDA.NS', name: 'Indian Renewable Energy', exchange: 'NSE' },
+            { symbol: 'TATAMOTORS.NS', name: 'Tata Motors', exchange: 'NSE' },
+            { symbol: 'CDSL.NS', name: 'Central Depository Services', exchange: 'NSE' }
+          ])
+          return
+        }
+
+        const res = await stocksApi.search(q)
+        const results = res.data?.results || []
+        setSuggestions(results.slice(0, 7))
+      } catch (err) {
+        console.debug('Mention search error:', err)
+      }
+    }, 120)
+
+    return () => clearTimeout(timer)
+  }, [mentionQuery, showSuggestions])
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value
+    setInput(val)
+
+    // Check if there's an '@' mention query before cursor
+    const cursorPos = e.target.selectionStart || val.length
+    const textBeforeCursor = val.slice(0, cursorPos)
+    const match = textBeforeCursor.match(/@([a-zA-Z0-9-]*)$/)
+
+    if (match) {
+      setMentionQuery(match[1])
+      setShowSuggestions(true)
+      setSelectedIdx(0)
+    } else {
+      setShowSuggestions(false)
+      setMentionQuery(null)
+    }
+  }
+
+  function selectSuggestion(s: StockSuggestion) {
+    const rawSymbol = s.symbol.replace('.NS', '').replace('.BO', '')
+    const inputVal = input
+    const cursorPos = inputRef.current?.selectionStart || inputVal.length
+    const textBeforeCursor = inputVal.slice(0, cursorPos)
+    const textAfterCursor = inputVal.slice(cursorPos)
+
+    // Replace '@mentionQuery' with '@RAW_SYMBOL '
+    const updatedBefore = textBeforeCursor.replace(/@([a-zA-Z0-9-]*)$/, `@${rawSymbol} `)
+    const newInput = updatedBefore + textAfterCursor
+
+    setInput(newInput)
+    setShowSuggestions(false)
+    setMentionQuery(null)
+
+    // Restore focus to input
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus()
+        const newPos = updatedBefore.length
+        inputRef.current.setSelectionRange(newPos, newPos)
+      }
+    }, 10)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!showSuggestions || suggestions.length === 0) return
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSelectedIdx(prev => (prev + 1) % suggestions.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSelectedIdx(prev => (prev - 1 + suggestions.length) % suggestions.length)
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (suggestions[selectedIdx]) {
+        e.preventDefault()
+        selectSuggestion(suggestions[selectedIdx])
+      }
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false)
+    }
+  }
+
   function clearHistory() {
     setMessages([INITIAL_MSG])
     localStorage.removeItem(STORAGE_KEY)
@@ -101,12 +220,14 @@ export default function AIAssistantWidget() {
     const userMsg = text.trim()
     setMessages(prev => [...prev, { role: 'user', content: userMsg }])
     setInput('')
+    setShowSuggestions(false)
     setLoading(true)
 
     try {
       const res = await aiApi.chat(userMsg)
       const reply = res.data.reply || res.data.response || 'No response.'
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }])
+      const isCached = Boolean(res.data.cached)
+      setMessages(prev => [...prev, { role: 'assistant', content: reply, cached: isCached }])
     } catch (err: any) {
       console.error(err)
       if (err.response?.status === 403) {
@@ -195,6 +316,11 @@ export default function AIAssistantWidget() {
             border: m.role === 'assistant' ? '1px solid var(--color-border)' : 'none',
             animation: i === messages.length - 1 ? 'fadeInUp 0.25s ease forwards' : 'none',
           }}>
+            {m.cached && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 6px', borderRadius: 4, marginBottom: 4 }}>
+                <Zap size={10} /> Instant Cached (0 tokens)
+              </div>
+            )}
             {m.role === 'assistant' ? renderFormattedMessage(m.content) : m.content}
           </div>
         ))}
@@ -245,14 +371,97 @@ export default function AIAssistantWidget() {
         ))}
       </div>
 
+      {/* Floating '@' Stock Mention Autocomplete Dropdown */}
+      <div style={{ position: 'relative' }}>
+        {showSuggestions && suggestions.length > 0 && (
+          <div style={{
+            position: 'absolute',
+            bottom: 56,
+            left: 10,
+            right: 10,
+            background: 'var(--color-bg-card, #1a2234)',
+            border: '1px solid rgba(59, 130, 246, 0.4)',
+            borderRadius: 10,
+            boxShadow: '0 -10px 25px rgba(0,0,0,0.6)',
+            maxHeight: 220,
+            overflowY: 'auto',
+            zIndex: 100,
+            display: 'flex',
+            flexDirection: 'column',
+            padding: 4
+          }}>
+            <div style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: '#38bdf8',
+              padding: '5px 8px',
+              borderBottom: '1px solid rgba(255,255,255,0.08)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span>TAG STOCK (@)</span>
+              <span style={{ fontSize: 9, color: 'var(--color-text-secondary, #94a3b8)', fontWeight: 400 }}>↑↓ to navigate, Enter to select</span>
+            </div>
+            {suggestions.map((s, idx) => (
+              <div
+                key={s.symbol}
+                onClick={() => selectSuggestion(s)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '7px 9px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  background: idx === selectedIdx ? 'rgba(59, 130, 246, 0.25)' : 'transparent',
+                  transition: 'background 0.1s ease',
+                }}
+                onMouseEnter={() => setSelectedIdx(idx)}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+                  <span style={{
+                    background: 'rgba(16, 185, 129, 0.18)',
+                    color: '#34d399',
+                    fontWeight: 700,
+                    fontSize: 11,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    fontFamily: 'monospace',
+                    flexShrink: 0
+                  }}>
+                    @{s.symbol.replace('.NS', '').replace('.BO', '')}
+                  </span>
+                  <span style={{ fontSize: 12, color: 'var(--color-text-primary, #fff)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.name}
+                  </span>
+                </div>
+                <span style={{
+                  fontSize: 10,
+                  color: 'var(--color-text-secondary, #94a3b8)',
+                  background: 'rgba(255,255,255,0.06)',
+                  padding: '1px 5px',
+                  borderRadius: 4,
+                  flexShrink: 0
+                }}>
+                  {s.exchange || 'NSE'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Input */}
       <form onSubmit={handleSend} style={{ borderTop: '1px solid var(--color-border)', padding: 10, display: 'flex', gap: 8 }}>
         <input
+          ref={inputRef}
           className="input"
           style={{ flex: 1, borderRadius: 20, fontSize: 13, padding: '8px 14px' }}
-          placeholder="Ask about stocks, market, signals..."
+          placeholder="Ask anything or type @ to mention stock (e.g. @PC)..."
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
         />
         <button type="submit" disabled={loading} style={{
           background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',

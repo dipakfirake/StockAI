@@ -73,6 +73,48 @@ def test_entity_and_intent_extraction():
     assert intent == "STOCK_ANALYSIS"
     assert entity == "PCJEWELLER.NS"
 
+    # 4. Explicit '@' Stock Mention Autocomplete
+    intent, entity = rag.extract_intent_and_entity("@PCJEWELLER should I buy or hold?")
+    assert intent == "STOCK_ANALYSIS"
+    assert entity == "PCJEWELLER.NS"
+
+    intent, entity = rag.extract_intent_and_entity("Tell me about @TCS levels")
+    assert intent == "STOCK_ANALYSIS"
+    assert entity == "TCS.NS"
+
+
+@pytest.mark.asyncio
+async def test_multi_user_semantic_response_caching():
+    """Verify that repeated queries for the same stock hit the cache, saving Groq tokens and cost."""
+    rag = FinancialRAGService()
+
+    fake_context = {
+        "symbol": "PCJEWELLER.NS",
+        "cmp": 14.50,
+        "action": "HOLD",
+        "total_score": 56.6,
+        "cap_segment": "MID_CAP",
+        "trade_plan": {
+            "best_buy_price": 14.41,
+            "stop_loss": 13.85,
+            "target_2": 16.26,
+            "expected_gain_pct": 12.8,
+            "risk_pct": 3.9,
+            "reward_to_risk": 3.3
+        }
+    }
+
+    with patch.object(rag, "retrieve_stock_context", new=AsyncMock(return_value=fake_context)):
+        # First call: computes and stores in cache
+        res1 = await rag.process_chat_query("@PCJEWELLER should I hold or sell?")
+        assert res1 is not None
+        assert res1.get("entity") == "PCJEWELLER.NS"
+
+        # Second call (simulating another user or repeat query): served from cache
+        res2 = await rag.process_chat_query("@PCJEWELLER should I hold or sell?")
+        assert res2 is not None
+        assert res2.get("cached") is True
+
 
 @pytest.mark.asyncio
 async def test_dynamic_universal_stock_search_async():

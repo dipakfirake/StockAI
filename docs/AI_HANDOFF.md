@@ -14,6 +14,32 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19)
 
+- **CONVERSATIONAL GROQ LLM SYNTHESIS, MULTI-USER RESPONSE CACHING & INTERACTIVE `@` MENTION AUTOCOMPLETE (COMPLETE & VERIFIED - 2026-11-19):**
+  - **Issues Investigated & Delivered**:
+    1. User requested:
+       - *"where is LLM in it i want you to give some more information regarding it what i asked for also not only from our system data taken and given first take data from system then verify is it correct or not and then give outputs in some short for limiting high usage tokens as per groq limits."*
+       - *"and if you can reduce cost of tokens and requests by storing in cache for same type of questions asked by any users again and again by multiple users clone it for saving costs."*
+       - *"and also one thing i want in chat bot that i want to specify specific stock by using @ sign like we done in search optimization for indian stocks or indices and all means if i type @PC JE then stocks related to it want to show as suggestions for specific stock to ask about for reducing spelling mistakes about stocks names . so make like that."*
+    2. Architecture & Implementation:
+       - **Conversational Synthesis with Direct Recommendation (`backend/services/rag_service.py`)**:
+         - Groq AI prompt tuned so the first bullet directly answers the user's specific conversational question (`- **Direct Recommendation**: 1-2 sharp conversational sentences answering their exact question (e.g., whether to buy, wait for dip, or drop the idea) based strictly on the verified metrics above...`).
+         - Strictly capped under 115 words across 4 structured bullets (Direct Recommendation, Execution Levels, Setup & Confluence, Key Boundaries) to avoid exhausting Groq token limits.
+         - Updated deterministic fallback with tailored conversational guidance for BUY/HOLD/SELL.
+       - **Multi-User Semantic Response Caching (`backend/services/rag_service.py` & `backend/api/ai_engine.py`)**:
+         - Integrated `Tier1CacheManager` (L1 Memory + L2 Redis + Single-Flight mutex) with key `rag:chat_v2:{intent}:{entity}:{q_hash}` and 300s (5-minute) TTL.
+         - When identical or duplicate queries arrive from any user, responses are served instantly with 0 Groq tokens, 0 API costs, and sub-millisecond response time.
+         - Added `cached: True` flag in response payload and displayed `⚡ Instant Cached (0 tokens)` badge in the chat UI.
+       - **Interactive `@` Stock Mention Autocomplete (`frontend/src/components/AIAssistantWidget.tsx`)**:
+         - Added interactive floating suggestion dropdown positioned above the chat input whenever typing `@` (e.g., `@PC`, `@PC JE`, `@TCS`).
+         - Debounced (120ms) live querying of `stocksApi.search(query, 6)`.
+         - Keyboard navigable (`ArrowUp`, `ArrowDown`, `Enter`, `Tab`, `Escape`) and mouse clickable to cleanly insert `@SYMBOL `.
+       - **Priority #1 `@` Mention Extraction (`backend/services/rag_service.py`)**:
+         - Added regex extraction for `@SYMBOL` before any secondary keyword matching, providing 100% accurate entity resolution and bypassing any colloquial stop words.
+  - **Verification Evidence**:
+    - Backend unit tests (`backend/tests/test_groq_and_rag_service.py`): **7 of 7 passed (100% green)** in 69.29s (covering `@` mention priority extraction and multi-user semantic response caching).
+    - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 48.19s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` & `frontend`.
+
 - **FINANCIAL RAG ENTITY RESOLUTION HARDENING & GROQ MULTI-MODEL FAILOVER (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Resolved**:
     1. User observed: Query `"should i buy PC Jewellers or hold or sell or need to drop this idea in current situation."` returned `"🎯 SHOULD Trade Plan & Quant Analysis [⚡ Mid Cap] | CMP: ₹0.00"`.

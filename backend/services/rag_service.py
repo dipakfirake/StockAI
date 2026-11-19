@@ -14,10 +14,13 @@ Architectural Pillars (Our Platform's Core USP):
 """
 
 import re
+import time
+import hashlib
 import asyncio
 import logging
 from typing import Dict, Any, Optional, Tuple, List
 
+from backend.core.cache_manager import cache_manager
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service, candles_to_df
 from backend.services.screener import screener_service
@@ -311,6 +314,15 @@ class FinancialRAGService:
             "SHALL", "CALL", "PUT", "OPTION", "FALLING", "RISING", "CHART", "REPORT", "NOT"
         }
 
+        # 3A. Priority #1: Explicit '@' Mention in Query (e.g., @PCJEWELLER, @TCS, @RELIANCE)
+        mention_match = re.search(r'@([A-Za-z0-9-]{2,15}(?:\.NS|\.BO)?)', query)
+        if mention_match:
+            raw_mention = mention_match.group(1).upper()
+            clean_mention = raw_mention.replace(".NS", "").replace(".BO", "")
+            if clean_mention not in common_stop_words:
+                resolved_sym = raw_mention if ("." in raw_mention or raw_mention.startswith("^")) else f"{raw_mention}.NS"
+                return "STOCK_ANALYSIS", resolved_sym
+
         if symbol_hint:
             norm = symbol_hint.upper().strip()
             clean_token = norm.replace(".NS", "").replace(".BO", "")
@@ -536,29 +548,52 @@ class FinancialRAGService:
             supp = context.get("support", sl)
             res = context.get("resistance", t2)
 
+            # Direct tailored advice addressing user dilemma
+            if "BUY" in action:
+                direct_rec = f"Favorable momentum setup ({rr}:1 R:R). Accumulate near the Best Buy level of ₹{best_buy:,.2f} rather than chasing CMP, keeping a structural stop loss at ₹{sl:,.2f}."
+            elif "SELL" in action:
+                direct_rec = f"Unfavorable risk profile (Score: {score}/100). Drop new long entries and wait for confirmed base reversal."
+            else:
+                direct_rec = f"Consolidating in range. Do not rush to buy at CMP or drop the idea completely; wait for a pullback to accumulate near the support base at ₹{best_buy:,.2f}."
+
             return (
-                f"### 🎯 {sym} Trade Plan & Quant Analysis {cap_badge}{growth_badge}\n"
+                f"### 🎯 {sym} Trade Plan & Quant Strategy {cap_badge}{growth_badge}\n"
+                f"- **Direct Recommendation**: {direct_rec}\n"
                 f"- **Signal & Conviction**: **{action}** (Score: **{score}/100** | CMP: ₹{cmp:,.2f})\n"
                 f"- **Execution Levels**: Best Buy: **₹{best_buy:,.2f}** | SL: **₹{sl:,.2f}** (-{risk}%) | Target: **₹{t2:,.2f}** (+{gain}%) | R:R: **{rr}:1**\n"
-                f"- **Institutional Setup**: {advice} (Expected Hold: {hold})\n"
-                f"- **Key Price Boundaries**: Support: **₹{supp:,.2f}** | Resistance: **₹{res:,.2f}**"
+                f"- **Setup & Confluence**: {advice} (Key Boundaries: Support: ₹{supp:,.2f} | Resistance: ₹{res:,.2f})"
             )
 
         return (
             "I am your StockAI Institutional Assistant powered by Groq & Advanced Quantitative RAG. "
-            "Ask me for stock setups across Large, Mid, and Small caps (e.g. *'Should I buy TCS?'*, *'Analyze Suzlon'*), market regime (*'How is Nifty today?'*), or technical concepts (*'What is Anchor VWAP?'*)."
+            "Ask me for stock setups across Large, Mid, and Small caps (e.g. *'@PCJEWELLER'*, *'Should I buy TCS?'*, *'Analyze Suzlon'*), market regime (*'How is Nifty today?'*), or technical concepts (*'What is Anchor VWAP?'*)."
         )
 
     async def process_chat_query(self, message: str, symbol_hint: Optional[str] = None) -> Dict[str, Any]:
         """
         Master RAG pipeline:
-        1. Extract intent & entities (with dynamic multi-cap search)
-        2. Retrieve multi-source quantitative context
-        3. Pre-compute and verify mathematical figures
-        4. Query Groq AI with token-budgeted prompt
-        5. Seamlessly fallback to deterministic synthesis if Groq unavailable
+        1. Extract intent & entities (with @ mention priority & dynamic multi-cap search)
+        2. Multi-User Semantic Cache check (L1 Memory + L2 Redis + SingleFlight)
+        3. Retrieve multi-source quantitative context
+        4. Pre-compute and verify mathematical figures in Python
+        5. Query Groq AI with token-budgeted conversational synthesis
+        6. Seamlessly fallback to deterministic synthesis if Groq unavailable
+        7. Cache response for subsequent users / repeat queries
         """
         intent, entity = await self.extract_intent_and_entity_async(message, symbol_hint)
+
+        # Multi-User Semantic Cache Check: Avoid duplicate LLM token burn for identical/similar questions
+        cache_key = None
+        if entity:
+            clean_q = re.sub(r'[^a-zA-Z0-9]', '', message.lower())
+            q_hash = hashlib.md5(clean_q.encode('utf-8')).hexdigest()[:8]
+            cache_key = f"rag:chat_v2:{intent}:{entity}:{q_hash}"
+            cached_resp = await cache_manager.get(cache_key)
+            if cached_resp and isinstance(cached_resp, dict):
+                logger.info(f"⚡ [RAG Cache Hit] Serving cached response for {entity} ({intent})")
+                cached_resp_copy = dict(cached_resp)
+                cached_resp_copy["cached"] = True
+                return cached_resp_copy
 
         # Context retrieval
         context: Dict[str, Any] = {}
@@ -572,29 +607,34 @@ class FinancialRAGService:
         # If Groq is not configured or concept query, return high-speed deterministic response
         if not groq_service.is_configured():
             reply = self.generate_deterministic_response(intent, entity, context, message)
-            return {
+            resp = {
                 "reply": reply,
                 "response": reply,
                 "intent": intent,
                 "source": "deterministic_quant_rag",
                 "entity": entity,
-                "groq_active": False
+                "groq_active": False,
+                "cached": False
             }
+            if cache_key and context.get("cmp", 0) > 0:
+                await cache_manager.set(cache_key, resp, ttl=300)
+            return resp
 
         # Build Token-Budgeted Precision Prompt for Groq AI
         system_prompt = (
             "You are StockAI, an elite Wall Street & Dalal Street institutional quantitative analyst.\n"
-            "MANDATORY RULES:\n"
-            "1. Extreme brevity & precision: Responses MUST be under 110 words in exactly 3 to 4 punchy bullet points.\n"
-            "2. MULTI-CAP COVERAGE: You analyze Large-Cap, Mid-Cap, and Small-Cap Indian equities with equal institutional rigor.\n"
-            "3. ZERO MATH HALLUCINATIONS: You are strictly forbidden from inventing price targets or calculating new percentages. "
-            "You MUST cite ONLY the pre-calculated numbers provided in the Ground Truth Context.\n"
-            "4. Format strictly with bold numbers and clean Markdown:\n"
-            "   Header format: ### 🎯 [SYMBOL] Trade Plan & Quant Analysis [[💎 Large Cap] / [⚡ Mid Cap] / [🌱 Small Cap]] [[🚀 Fast Growth]]\n"
+            "MANDATORY INSTRUCTIONS:\n"
+            "1. CONVERSATIONAL SYNTHESIS & DIRECT ADVICE: Address the user's specific question directly in the first bullet point. "
+            "(For example, if they ask whether to buy, hold, sell, or drop the idea, give unambiguous direct advice on their dilemma based on the quantitative setup).\n"
+            "2. VERIFIED QUANT GROUND TRUTH: All mathematical values (Best Buy, Stop Loss, Targets, R:R, CMP) provided in the Ground Truth Context are already calculated and verified in Python. "
+            "You are strictly forbidden from inventing numbers or altering percentages. Cite ONLY the verified figures provided.\n"
+            "3. EXTREME BREVITY & TOKEN BUDGET: Responses MUST be under 115 words in exactly 4 punchy bullet points to prevent token expiration.\n"
+            "4. RESPONSE FORMAT (Markdown):\n"
+            "   Header format: ### 🎯 [SYMBOL] Trade Plan & Quant Strategy [[💎 Large Cap] / [⚡ Mid Cap] / [🌱 Small Cap]] [[🚀 Fast Growth]]\n"
+            "   - **Direct Recommendation**: 1-2 sharp conversational sentences answering their exact question (e.g. whether to enter, wait for pullback, or drop the trade).\n"
             "   - **Signal & Conviction**: [BUY / SELL / HOLD] (Score: X/100 | CMP: ₹...)\n"
             "   - **Execution Levels**: Best Buy: ₹... | SL: ₹... (-X%) | Target: ₹... (+Y%) | R:R: Z:1\n"
-            "   - **Setup & Confluence**: 1-2 sentence core reason\n"
-            "   - **Key Boundaries**: Support: ₹... | Resistance: ₹...\n"
+            "   - **Setup & Confluence**: Key technical structural reason and boundaries (Support: ₹... | Resistance: ₹...).\n"
             "5. No conversational filler or legal disclaimers. Get straight to the point."
         )
 
@@ -608,7 +648,7 @@ class FinancialRAGService:
         )
 
         if groq_res and groq_res.get("content"):
-            return {
+            resp = {
                 "reply": groq_res["content"],
                 "response": groq_res["content"],
                 "intent": intent,
@@ -617,19 +657,27 @@ class FinancialRAGService:
                 "tokens_used": groq_res.get("tokens_used"),
                 "latency_ms": groq_res.get("latency_ms"),
                 "entity": entity,
-                "groq_active": True
+                "groq_active": True,
+                "cached": False
             }
+            if cache_key and context.get("cmp", 0) > 0:
+                await cache_manager.set(cache_key, resp, ttl=300)
+            return resp
 
         # Fallback to deterministic RAG if Groq call failed or timed out
         reply = self.generate_deterministic_response(intent, entity, context, message)
-        return {
+        resp = {
             "reply": reply,
             "response": reply,
             "intent": intent,
             "source": "deterministic_fallback_rag",
             "entity": entity,
-            "groq_active": False
+            "groq_active": False,
+            "cached": False
         }
+        if cache_key and context.get("cmp", 0) > 0:
+            await cache_manager.set(cache_key, resp, ttl=300)
+        return resp
 
 
 rag_service = FinancialRAGService()

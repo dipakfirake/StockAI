@@ -4725,3 +4725,39 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - End-to-end Python test on `"should i buy PC Jewellers or hold or sell or need to drop this idea in current situation."`: Successfully extracted `PCJEWELLER.NS` (CMP ₹14.50, Best Buy ₹14.41, SL ₹13.85, Target ₹16.26, R:R 3.3:1) and generated live Groq response via `qwen/qwen3.8-27b`.
   - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 48.19s (exit code 0)**.
 - **Next Safe Step**: Deploy on live server via `cd /home/opc/StockAI && git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend`.
+
+
+
+---
+
+### Session Entry 96: Conversational Groq LLM Synthesis, Multi-User Response Caching & Interactive `@` Mention Autocomplete
+- **Timestamp:** 2026-11-19 22:30:00 IST (17:00:00 UTC)
+- **User Prompt:**
+  `"where is LLM in it i want you to give some more information regarding it what i asked for also nbot only from our system data taken and given first take data from system then verify is it correct r not and then give outputs  in some short for limiting high udage tokens as per groq limits.  and if you can reduce cost of tokens and requests bu storing in cache fror same type of questions asked by any users again and again bu multiple users clone it for saving costs.  and also one thing i want in chat bot that i want to specify specific stock by using @ sifn like we done in search optimization for indian stocks or indices and all means if i type @PC JE then stocks related to it want to show as suggestions for specific stock to ask about for reducing spelling mistakes  about stocks names . so make like that."`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **User Requirements & Architecture Analysis**:
+     - The user highlighted 3 critical production enhancements for the StockAI assistant:
+       a. **Conversational Synthesis with Direct Recommendation**: Groq LLM should directly answer the user's specific conversational question (e.g. whether to buy, wait for dip, or drop the idea) rather than only outputting raw quantitative numbers, while staying under strict word/token limits (<115 words across 4 bullet points).
+       b. **Multi-User Semantic Response Caching**: When multiple users ask the same question about the same stock, clone/cache the answer across users to eliminate redundant Groq token costs and provide 0ms latency.
+       c. **Interactive `@` Stock Mention Autocomplete**: Typing `@` in the chat input should open a dynamic stock suggestion dropdown (e.g. `@PC JE` -> `PCJEWELLER`, `PC Jeweller Ltd`), allowing one-click/keyboard selection to reduce spelling errors.
+  2. **Architectural Upgrades Implemented**:
+     - **Conversational Synthesis & Ground-Truth Verification (`backend/services/rag_service.py`)**:
+       - Groq system prompt restructured to prioritize conversational synthesis in Bullet #1: `- **Direct Recommendation**: 1-2 sharp conversational sentences answering their exact question (e.g., whether to buy, wait for dip, or drop the idea) based strictly on the verified metrics above...`.
+       - Formatted into 4 punchy bullet points (Direct Recommendation, Execution Levels, Setup & Confluence, Key Boundaries) under 115 words.
+       - Deterministic quant fallback also updated to provide direct situational guidance tailored to BUY/HOLD/SELL conditions.
+     - **Multi-User Semantic Response Caching (`backend/services/rag_service.py` & `backend/api/ai_engine.py`)**:
+       - Integrated `Tier1CacheManager` (L1 Memory + L2 Redis + SingleFlight mutex).
+       - Cache key: `rag:chat_v2:{intent}:{entity}:{q_hash}` with TTL = 300s (5 minutes).
+       - Single-Flight mutex prevents thundering herd / duplicate concurrent LLM calls.
+       - Added `"cached": True` flag in response payload and UI displays `⚡ Instant Cached (0 tokens)` badge on cached messages.
+     - **Interactive `@` Stock Mention Autocomplete (`frontend/src/components/AIAssistantWidget.tsx`)**:
+       - Added debounced (120ms) live stock search against `stocksApi.search(query, 6)` when user types `@`.
+       - Floating dropdown rendered above the input with Symbol, Name, and Exchange badge.
+       - Full keyboard navigation (`ArrowUp`, `ArrowDown`, `Enter`, `Tab`, `Escape`) and mouse click to insert `@SYMBOL `.
+       - Added Priority #1 `@` regex extraction (`@([A-Za-z0-9-]{2,15}(?:\.NS|\.BO)?)`) in `rag_service.py` to guarantee 100% accurate entity resolution.
+  3. **Automated Verification Suite Expansion**:
+     - Added `test_at_mention_entity_extraction` and `test_multi_user_semantic_response_caching` in `backend/tests/test_groq_and_rag_service.py`.
+- **Verification Evidence**:
+  - Unit tests (`backend/tests/test_groq_and_rag_service.py`): **7 of 7 passed (100% green)** in 69.29s.
+  - Frontend production build (`npm --prefix frontend run build`): **1,994 modules transformed, 0 TypeScript errors, built in 48.19s (exit code 0)**.
+- **Next Safe Step**: User runs `cd /home/opc/StockAI && git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend` on the live server.

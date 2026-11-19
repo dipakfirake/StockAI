@@ -89,6 +89,7 @@ async def ai_chat(
         "intent": result.get("intent"),
         "entity": result.get("entity"),
         "groq_active": result.get("groq_active", False),
+        "cached": result.get("cached", False),
         "tokens_used": result.get("tokens_used"),
         "latency_ms": result.get("latency_ms"),
         "type": "text"
