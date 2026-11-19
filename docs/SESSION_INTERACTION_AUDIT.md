@@ -4813,3 +4813,22 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Regression test suite (`test_alert_tasks.py`, `test_groq_and_rag_service.py`): **8 of 8 passed (100% green)** in 95.75s.
   - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 56.81s (exit code 0)**.
 - **Next Safe Step**: User runs `cd /home/opc/StockAI && git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend` on the live server.
+
+
+---
+
+### Session Entry 98: Zerodha Order Modal CNC Default & Dual-Mode Stop Loss/Target (% vs Value)
+- **Timestamp:** 2026-11-20 00:05:00 IST (18:35:00 UTC)
+- **User Prompt:**
+  `"and in buy stock popup the MIS (Intraday) want not be default cnc want to be default. and stop loss also want to be has 2 types 1 is value and 1 is set by percentage like i want -5% like that manually typed"`
+- **Forensic Investigation & Architectural Remediations**:
+  1. **Strict CNC Default Enforcement**:
+     - In `frontend/src/components/ZerodhaOrderModal.tsx`, ensured `productType` strictly defaults to `CNC` (Longterm / Delivery) on initialization and whenever props/modal open state resets.
+  2. **Dual-Mode Stop Loss & Target (% vs Value ₹)**:
+     - Implemented dynamic dual-mode toggle (`% Percent` vs `₹ Value`) for Stop Loss and Target in `ZerodhaOrderModal.tsx`.
+     - In `% Percent` mode, user can manually type values like `-5%`, `-3%`, or `-7.5%`. Automatically calculates the trigger price `activePrice * (1 + riskPct / 100)` and displays `Trigger Price: ₹X (-5.0% from ₹CMP)`.
+     - In `₹ Value` mode, user can type the absolute price (e.g. ₹95.00), and the system dynamically computes and displays the risk percentage.
+     - Symmetrical dual-mode controls added for Target as well.
+  3. **Verification**:
+     - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built successfully in 39.51s (exit code 0)**.
+- **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `frontend`.

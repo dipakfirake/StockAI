@@ -29,7 +29,8 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
          - Extended `alert_tasks._evaluate_alerts_async()` to evaluate proximity thresholds and emit instant `alert_toast` WebSocket envelopes.
        - **Zerodha Kite-Style Interactive Order Modal (`frontend/src/components/ZerodhaOrderModal.tsx`)**:
          - Replicates Zerodha Kite's order popup with BUY (blue `#387ed1`) vs SELL (orange `#ff5722`) mode switch.
-         - Product types: CNC (Delivery) & MIS (Intraday with 5x leverage).
+         - Product types: CNC (Delivery) & MIS (Intraday with 5x leverage). Strictly defaults to CNC (Longterm / Delivery).
+          - Dual-Mode Stop Loss & Target (Value ₹ vs Percentage %): Interactive toggle allows typing either absolute prices (e.g. ₹95.00) or manual percentages (e.g. -5% risk, +10% gain) with instantaneous 2-way synchronization.
          - Order types: Market, Limit, SL, SL-M.
          - Steppers and quick buttons for Quantity (`+10`, `+25`, `+50`, `+100`), Limit Price, and Trigger Price.
          - GTT Protection with Target & Stop Loss inputs pre-populated from Screener calculations.

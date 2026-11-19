@@ -29,7 +29,7 @@ export default function ZerodhaOrderModal({
   onOrderSuccess,
 }: ZerodhaOrderModalProps) {
   const [direction, setDirection] = useState<'BUY' | 'SELL'>(defaultDirection)
-  const [productType, setProductType] = useState<'CNC' | 'MIS'>('CNC')
+  const [productType, setProductType] = useState<'CNC' | 'MIS'>('CNC') // CNC is strict default
   const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT' | 'SL' | 'SL_M'>('MARKET')
   
   const [quantity, setQuantity] = useState<number>(10)
@@ -48,6 +48,13 @@ export default function ZerodhaOrderModal({
   const [stopLoss, setStopLoss] = useState<number>(() => {
     return initialStopLoss ? Number(initialStopLoss.toFixed(2)) : Number((currentPrice * 0.96).toFixed(2))
   })
+
+  // Dual-mode Stop Loss & Target controls (Value in ₹ or Percent in %)
+  const [slMode, setSlMode] = useState<'VALUE' | 'PERCENT'>('PERCENT')
+  const [slPercentInput, setSlPercentInput] = useState<string>('-4.0')
+  const [targetMode, setTargetMode] = useState<'VALUE' | 'PERCENT'>('PERCENT')
+  const [targetPercentInput, setTargetPercentInput] = useState<string>('8.0')
+
   const [autoSetAlerts, setAutoSetAlerts] = useState<boolean>(true)
   const [showChargesBreakdown, setShowChargesBreakdown] = useState<boolean>(false)
   const [submitting, setSubmitting] = useState<boolean>(false)
@@ -55,10 +62,22 @@ export default function ZerodhaOrderModal({
   // Sync state whenever props change
   useEffect(() => {
     setDirection(defaultDirection)
+    setProductType('CNC') // Ensure CNC is always default (not MIS)
     const baseP = bestBuyPrice && bestBuyPrice > 0 ? bestBuyPrice : currentPrice
     setLimitPrice(Number(baseP.toFixed(2)))
-    setTargetPrice(initialTarget ? Number(initialTarget.toFixed(2)) : Number((baseP * 1.08).toFixed(2)))
-    setStopLoss(initialStopLoss ? Number(initialStopLoss.toFixed(2)) : Number((baseP * 0.96).toFixed(2)))
+    
+    // Stop Loss initial calculation
+    const calculatedSl = initialStopLoss ? Number(initialStopLoss.toFixed(2)) : Number((baseP * 0.96).toFixed(2))
+    setStopLoss(calculatedSl)
+    const slPct = baseP > 0 ? Number((((calculatedSl - baseP) / baseP) * 100).toFixed(1)) : -4.0
+    setSlPercentInput(slPct < 0 ? String(slPct) : `-${slPct}`)
+
+    // Target initial calculation
+    const calculatedTgt = initialTarget ? Number(initialTarget.toFixed(2)) : Number((baseP * 1.08).toFixed(2))
+    setTargetPrice(calculatedTgt)
+    const tgtPct = baseP > 0 ? Number((((calculatedTgt - baseP) / baseP) * 100).toFixed(1)) : 8.0
+    setTargetPercentInput(String(tgtPct))
+
     setTriggerPrice(initialStopLoss ? Number(initialStopLoss.toFixed(2)) : Number((baseP * 0.98).toFixed(2)))
   }, [symbol, currentPrice, bestBuyPrice, initialTarget, initialStopLoss, defaultDirection])
 
@@ -93,6 +112,46 @@ export default function ZerodhaOrderModal({
 
   const handleQuickQty = (add: number) => {
     setQuantity(prev => Math.max(1, prev + add))
+  }
+
+  // Handlers for dual-mode Stop Loss (₹ Value vs % Percent)
+  const handleSlPercentChange = (valStr: string) => {
+    setSlPercentInput(valStr)
+    const cleaned = valStr.replace('%', '').trim()
+    const parsed = parseFloat(cleaned)
+    if (!isNaN(parsed) && activePrice > 0) {
+      const riskPct = parsed > 0 ? -parsed : parsed
+      const calculated = Number((activePrice * (1 + riskPct / 100)).toFixed(2))
+      setStopLoss(calculated)
+    }
+  }
+
+  const handleSlPriceChange = (val: number) => {
+    setStopLoss(val)
+    if (activePrice > 0 && val > 0) {
+      const pct = Number((((val - activePrice) / activePrice) * 100).toFixed(1))
+      setSlPercentInput(String(pct))
+    }
+  }
+
+  // Handlers for dual-mode Target (₹ Value vs % Percent)
+  const handleTargetPercentChange = (valStr: string) => {
+    setTargetPercentInput(valStr)
+    const cleaned = valStr.replace('%', '').replace('+', '').trim()
+    const parsed = parseFloat(cleaned)
+    if (!isNaN(parsed) && activePrice > 0) {
+      const gainPct = Math.abs(parsed)
+      const calculated = Number((activePrice * (1 + gainPct / 100)).toFixed(2))
+      setTargetPrice(calculated)
+    }
+  }
+
+  const handleTargetPriceChange = (val: number) => {
+    setTargetPrice(val)
+    if (activePrice > 0 && val > 0) {
+      const pct = Number((((val - activePrice) / activePrice) * 100).toFixed(1))
+      setTargetPercentInput(String(pct))
+    }
   }
 
   const handleSubmitOrder = async (e: React.FormEvent) => {
@@ -498,57 +557,187 @@ export default function ZerodhaOrderModal({
             </div>
 
             {enableGtt && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {/* Target Section (₹ Value vs % Percent) */}
                 <div>
-                  <label style={{ fontSize: 11, color: '#10b981', display: 'block', marginBottom: 3, fontWeight: 600 }}>
-                    Target (₹)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={targetPrice}
-                    onChange={e => setTargetPrice(parseFloat(e.target.value) || 0)}
-                    style={{
-                      width: '100%',
-                      padding: '6px 10px',
-                      fontSize: 13,
-                      fontFamily: 'monospace',
-                      fontWeight: 600,
-                      borderRadius: 4,
-                      border: '1px solid rgba(16, 185, 129, 0.4)',
-                      background: 'rgba(16, 185, 129, 0.05)',
-                      color: 'var(--color-text-primary, #ffffff)',
-                    }}
-                  />
-                  <div style={{ fontSize: 10, color: 'var(--color-text-muted, #8a92a6)', marginTop: 2 }}>
-                    +{(((targetPrice - activePrice) / activePrice) * 100).toFixed(1)}% gain
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <label style={{ fontSize: 11, color: '#10b981', fontWeight: 700 }}>
+                      Target
+                    </label>
+                    <div style={{ display: 'flex', background: 'rgba(16, 185, 129, 0.12)', borderRadius: 12, padding: 2 }}>
+                      <button
+                        type="button"
+                        onClick={() => setTargetMode('PERCENT')}
+                        style={{
+                          border: 'none',
+                          background: targetMode === 'PERCENT' ? '#10b981' : 'transparent',
+                          color: targetMode === 'PERCENT' ? '#ffffff' : 'var(--color-text-muted, #8a92a6)',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 7px',
+                          borderRadius: 10,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        % Percent
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTargetMode('VALUE')}
+                        style={{
+                          border: 'none',
+                          background: targetMode === 'VALUE' ? '#10b981' : 'transparent',
+                          color: targetMode === 'VALUE' ? '#ffffff' : 'var(--color-text-muted, #8a92a6)',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 7px',
+                          borderRadius: 10,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ₹ Value
+                      </button>
+                    </div>
                   </div>
+
+                  {targetMode === 'PERCENT' ? (
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="e.g. 10%"
+                        value={targetPercentInput}
+                        onChange={e => handleTargetPercentChange(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '6px 10px',
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          border: '1px solid rgba(16, 185, 129, 0.4)',
+                          background: 'rgba(16, 185, 129, 0.05)',
+                          color: 'var(--color-text-primary, #ffffff)',
+                        }}
+                      />
+                      <div style={{ fontSize: 10, color: 'var(--color-text-muted, #8a92a6)', marginTop: 2 }}>
+                        Target: <strong style={{ color: '#10b981' }}>₹{targetPrice.toFixed(2)}</strong> (+{targetPercentInput.includes('%') ? targetPercentInput : `${targetPercentInput}%`})
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <input
+                        type="number"
+                        step="0.05"
+                        value={targetPrice}
+                        onChange={e => handleTargetPriceChange(parseFloat(e.target.value) || 0)}
+                        style={{
+                          width: '100%',
+                          padding: '6px 10px',
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          border: '1px solid rgba(16, 185, 129, 0.4)',
+                          background: 'rgba(16, 185, 129, 0.05)',
+                          color: 'var(--color-text-primary, #ffffff)',
+                        }}
+                      />
+                      <div style={{ fontSize: 10, color: 'var(--color-text-muted, #8a92a6)', marginTop: 2 }}>
+                        Gain: <strong style={{ color: '#10b981' }}>+{(((targetPrice - activePrice) / activePrice) * 100).toFixed(1)}%</strong> from ₹{activePrice.toFixed(2)}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
+                {/* Stop Loss Section (Dual Mode: ₹ Value vs % Percent) */}
                 <div>
-                  <label style={{ fontSize: 11, color: '#ef4444', display: 'block', marginBottom: 3, fontWeight: 600 }}>
-                    Stop Loss (₹)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={stopLoss}
-                    onChange={e => setStopLoss(parseFloat(e.target.value) || 0)}
-                    style={{
-                      width: '100%',
-                      padding: '6px 10px',
-                      fontSize: 13,
-                      fontFamily: 'monospace',
-                      fontWeight: 600,
-                      borderRadius: 4,
-                      border: '1px solid rgba(239, 68, 68, 0.4)',
-                      background: 'rgba(239, 68, 68, 0.05)',
-                      color: 'var(--color-text-primary, #ffffff)',
-                    }}
-                  />
-                  <div style={{ fontSize: 10, color: 'var(--color-text-muted, #8a92a6)', marginTop: 2 }}>
-                    {(((stopLoss - activePrice) / activePrice) * 100).toFixed(1)}% risk
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <label style={{ fontSize: 11, color: '#ef4444', fontWeight: 700 }}>
+                      Stop Loss
+                    </label>
+                    <div style={{ display: 'flex', background: 'rgba(239, 68, 68, 0.12)', borderRadius: 12, padding: 2 }}>
+                      <button
+                        type="button"
+                        onClick={() => setSlMode('PERCENT')}
+                        style={{
+                          border: 'none',
+                          background: slMode === 'PERCENT' ? '#ef4444' : 'transparent',
+                          color: slMode === 'PERCENT' ? '#ffffff' : 'var(--color-text-muted, #8a92a6)',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 7px',
+                          borderRadius: 10,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        % Percent
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSlMode('VALUE')}
+                        style={{
+                          border: 'none',
+                          background: slMode === 'VALUE' ? '#ef4444' : 'transparent',
+                          color: slMode === 'VALUE' ? '#ffffff' : 'var(--color-text-muted, #8a92a6)',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 7px',
+                          borderRadius: 10,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ₹ Value
+                      </button>
+                    </div>
                   </div>
+
+                  {slMode === 'PERCENT' ? (
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="e.g. -5%"
+                        value={slPercentInput}
+                        onChange={e => handleSlPercentChange(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '6px 10px',
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          background: 'rgba(239, 68, 68, 0.05)',
+                          color: 'var(--color-text-primary, #ffffff)',
+                        }}
+                      />
+                      <div style={{ fontSize: 10, color: 'var(--color-text-muted, #8a92a6)', marginTop: 2 }}>
+                        Trigger: <strong style={{ color: '#ef4444' }}>₹{stopLoss.toFixed(2)}</strong> ({slPercentInput.includes('%') ? slPercentInput : `${slPercentInput}%`})
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <input
+                        type="number"
+                        step="0.05"
+                        value={stopLoss}
+                        onChange={e => handleSlPriceChange(parseFloat(e.target.value) || 0)}
+                        style={{
+                          width: '100%',
+                          padding: '6px 10px',
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          background: 'rgba(239, 68, 68, 0.05)',
+                          color: 'var(--color-text-primary, #ffffff)',
+                        }}
+                      />
+                      <div style={{ fontSize: 10, color: 'var(--color-text-muted, #8a92a6)', marginTop: 2 }}>
+                        Risk: <strong style={{ color: '#ef4444' }}>{(((stopLoss - activePrice) / activePrice) * 100).toFixed(1)}%</strong> from ₹{activePrice.toFixed(2)}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
