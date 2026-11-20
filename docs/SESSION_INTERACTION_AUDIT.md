@@ -4900,3 +4900,31 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Regression Suite**: `backend/tests/test_alert_tasks.py` -> **1/1 passed**.
   - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 14.83s (exit code 0)**.
 - **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` and `frontend`.
+
+
+---
+
+### Session Entry 101: Forensic Diagnosis & Resolution for 504 Gateway Time-out on Live Server
+- **Timestamp:** 2026-11-20 11:42:00 IST (06:12:00 UTC)
+- **User Prompt:**
+  `"api/presence/leave:1 Failed to load resource: the server responded with a status of 504 (Gateway Time-out)"`
+  *(Attached screenshot of https://stockai-live.duckdns.org/health/liv showing "504 Gateway Time-out nginx/1.20.1")*
+- **Forensic Diagnosis & Live Infrastructure Audit**:
+  1. **Nginx vs Uvicorn Architecture**:
+     - Nginx on the live server (`92.4.71.210`) is 100% operational (port 80/443 handshake clean; returns HTTP 200 for frontend root `/`).
+     - When Nginx proxies `/api/...` or `/health/...` to upstream backend `http://127.0.0.1:8000`, the backend failed to return a response before Nginx's 60s timeout, causing Nginx to emit `504 Gateway Time-out`.
+     - Direct live probe `curl -i -m 10 https://stockai-live.duckdns.org/api/health` confirmed 0 bytes received before timeout.
+  2. **1-OCPU Resource Starvation & CPU Saturation Root Causes**:
+     - In `backend/services/sentinel.py`, `_surveillance_loop` was running every 2.0 seconds (`await asyncio.sleep(2.0)`), constantly executing `SELECT 1` DB probes, Redis pings, and disk file reads.
+     - On container boot, `if self._audit_runs % 1800 == 1:` evaluated to True on the very first loop (run 1), immediately launching `system_validator.run_all_tests()`, which spawned 10 intensive validation suites (ML bounds, data leakage, SQL injection, DB latency). On an ARM64 1 OCPU machine, this immediately saturated CPU and deadlocked the Uvicorn event loop.
+     - In `backend/tasks/screener_poller.py`, the large-cap loop ran immediately upon boot with 0 delay.
+     - In `backend/core/rate_limiter.py`, `/health/live` and `/health/liv` were not in the rate limiter bypass tuple.
+- **Architectural Remediations**:
+  1. **Sentinel Surveillance Throttle & Startup Decoupling (`backend/services/sentinel.py`)**:
+     - Relaxed surveillance frequency from 2s to 30.0s (`await asyncio.sleep(30.0)`).
+     - Deferred hourly validation test suite to `self._audit_runs > 0 and self._audit_runs % 120 == 0`, completely preventing boot-phase CPU spikes.
+  2. **Screener Warmup Delay (`backend/tasks/screener_poller.py`)**:
+     - Added 60s initial boot warmup delay (`await asyncio.sleep(60.0)`) before heavy symbol scanning.
+  3. **Rate Limiter Health Probe Bypass (`backend/core/rate_limiter.py`)**:
+     - Explicitly bypassed all `/health` and `/api/health` prefixes from rate limiting locks.
+- **Next Safe Step**: User runs lightweight `sudo docker compose restart backend` on live server to free Uvicorn workers.

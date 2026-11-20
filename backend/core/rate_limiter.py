@@ -112,7 +112,7 @@ class TokenBucketRateLimiter:
         if request.method == "OPTIONS":
             return None
         path = request.url.path
-        if path in ("/", "/health", "/docs", "/redoc", "/openapi.json"):
+        if path in ("/", "/health", "/docs", "/redoc", "/openapi.json") or path.startswith("/health") or path.startswith("/api/health"):
             return None
 
         tier_key = self.determine_tier(path)

@@ -79,8 +79,8 @@ class SentinelService:
                 await self.run_full_system_audit()
                 self._audit_runs += 1
 
-                # Automated Hourly Cybersecurity & System Validation Sweep
-                if self._audit_runs % 1800 == 1:
+                # Automated Hourly Cybersecurity & System Validation Sweep (deferred until after boot)
+                if self._audit_runs > 0 and self._audit_runs % 120 == 0:
                     try:
                         from backend.services.system_validator import system_validator
                         asyncio.create_task(system_validator.run_all_tests(trigger_source="AUTOMATED_HOURLY"))
@@ -89,8 +89,8 @@ class SentinelService:
             except Exception as e:
                 logger.error(f"🛡️ [Sentinel] Error inside surveillance loop: {e}")
             
-            # High-frequency surveillance: check every 2 seconds
-            await asyncio.sleep(2.0)
+            # Surveillance interval: check every 30 seconds to conserve 1-OCPU resources
+            await asyncio.sleep(30.0)
 
     async def run_full_system_audit(self) -> Dict[str, Any]:
         """Execute concurrent probes across all system corners."""

@@ -15,7 +15,8 @@ async def poll_screener_cache():
     # We will poll the Large Cap universe + some popular mid/small caps
     universe = list(LARGE_CAP_SYMBOLS)
     
-    logger.info(f"Starting Background Screener Poller for {len(universe)} symbols...")
+    logger.info(f"Starting Background Screener Poller for {len(universe)} symbols (initial warmup delay: 60s)...")
+    await asyncio.sleep(60.0)
     
     while True:
         try:
