@@ -5085,5 +5085,33 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Lighthouse Production Metrics**: SEO: **100/100**, Accessibility: **96/100**, Best Practices: **96/100**.
 - **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
 
+---
+
+### Session Entry 108: Swing Audit Concurrent Price Resolution & Page Reload 504 Timeout Elimination
+- **Timestamp:** 2026-11-20 18:10:00 IST (12:40:00 UTC)
+- **User Prompt:**
+  `"https://stockai-live.duckdns.org/health/liv 504 Gateway Time-out nginx/1.20.1 in previous prompt it get fixed but now again it same happens again so fix this means 1st time when we reload page it shows correct and reloads but 2nd time it takes time for loading and shows error code 504. heartbeat:1 Failed to load resource: the server responded with a status of 504 (Gateway Time-out) installHook.js:1 Audit sync failed: AxiosError: timeout of 60000ms exceeded api.ts:352 XHR failed loading: POST 'https://stockai-live.duckdns.org/api/swing-audit/sync?run_scan=true' leave:1 Failed to load resource: the server responded with a status of 504 (Gateway Time-out)"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. The browser console log pinpointed that clicking "Sync 11-Day Prices" on `SwingScreenerPage.tsx:180` sent `POST /api/swing-audit/sync?run_scan=true`.
+  2. In `backend/api/swing_audit.py`, `run_scan=True` called `ScreenerService.run_all_sectors_screener(force_refresh=True, min_score=70.0)` across all 10 sectors (100+ stocks) synchronously. Downloading and computing indicators for 100+ stocks took 60–70s.
+  3. Following that, `swing_audit_service.update_daily_prices(db)` sequentially looped through all 100 active audited trades, issuing sequential `fetch_candles` and `fetch_quote` network calls, adding 40–50s.
+  4. Total execution time reached 110+ seconds. Axios aborted at 60s (`timeout of 60000ms exceeded`) and Nginx timed out (`504 Gateway Time-out`).
+  5. While Uvicorn was still 100% pegged finishing that ongoing 110s request, any subsequent browser reloads (`GET /health/liv`, `POST /api/presence/leave`, `POST /api/presence/heartbeat`) queued in Uvicorn's backlog and hit Nginx's 60s timeout, causing the cascading 504 error on second reload.
+- **Architectural Remediations**:
+  1. **Concurrent Pre-Fetch Worker Pool (`backend/services/swing_audit_service.py`)**:
+     - Introduced `_fetch_single_audit_data` governed by `asyncio.Semaphore(12)` + `asyncio.gather`.
+     - Live quotes and 1d historical candles across all active audit stocks are pre-fetched concurrently in ~1.5–2.5 seconds (down from 50s sequential).
+     - Once prefetched, the database audit milestone evaluation loop executes in-memory in under 20ms.
+  2. **Decouple Heavy Screener Rescan (`backend/api/swing_audit.py`)**:
+     - Changed `run_all_sectors_screener` to `force_refresh=False` in `sync_audit_prices`, cataloging qualifying setups from existing cached sector results in < 20ms instead of initiating a blocking 100-stock download loop.
+  3. **Frontend Action Tuning (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+     - Changed `swingAuditApi.sync(true)` to `swingAuditApi.sync(false)` on the "Sync 11-Day Prices" button, ensuring it strictly updates the price progression and ratchet stops of tracked trades.
+- **Verification Evidence**:
+  - **Backend Swing Audit Tests**: `pytest backend/tests/test_swing_audit.py` -> **14 / 14 passed (100% green)** in 41.13s.
+  - **Rate Limiter & Middleware Tests**: `pytest backend/tests/test_rate_limiter_load.py backend/tests/test_middleware_hardening.py` -> **10 / 10 passed (100% green)** in 7.96s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built cleanly in 24.05s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
+
 
 

@@ -176,8 +176,8 @@ export default function SwingScreenerPage() {
   const handleSyncAudit = async () => {
     setSyncingAudit(true)
     try {
-      toast.info('Synchronizing Audit', 'Running fresh screener scan and evaluating 11-day price milestones...')
-      const res = await swingAuditApi.sync(true)
+      toast.info('Synchronizing Audit', 'Evaluating 11-day price milestones and ratchet stops...')
+      const res = await swingAuditApi.sync(false)
       const cataloged = res.data.cataloged_count || 0
       const updated = res.data.updated_count || 0
       if (res.data.status === 'partial_success' || (updated === 0 && (res.data.total_trades || 0) > 0)) {

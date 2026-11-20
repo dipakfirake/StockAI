@@ -118,8 +118,8 @@ async def sync_audit_prices(
         if run_scan:
             try:
                 from backend.services.screener import ScreenerService
-                # Run multi-sector screener across ALL 10 sectors (including Energy/Oil & Resources and Smallcap Momentum)
-                screener_data = await ScreenerService.run_all_sectors_screener(force_refresh=True, min_score=70.0)
+                # Use cached screener results (force_refresh=False) to prevent 60+ second blocking HTTP freezes
+                screener_data = await ScreenerService.run_all_sectors_screener(force_refresh=False, min_score=70.0)
                 buy_candidates = screener_data.get("buy_stocks", []) if isinstance(screener_data, dict) else []
                 for item in buy_candidates:
                     score = float(item.get("total_score", 0.0) or 0.0)

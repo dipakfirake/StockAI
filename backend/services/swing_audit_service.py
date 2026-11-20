@@ -5,6 +5,7 @@ target/stoploss execution rules, and multi-sheet Excel generation.
 import os
 import math
 import uuid
+import asyncio
 from collections import defaultdict
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
@@ -421,11 +422,46 @@ class SwingAuditService:
             )
             audits = (await db.execute(audits_stmt)).scalars().all()
 
+            # High-performance concurrent pre-fetch of quotes and candles for all active audits
+            active_audits = [
+                a for a in audits
+                if not (a.status in ("TARGET_ACHIEVED", "TARGET_2_ACHIEVED", "STOPLOSS_HIT", "DAY_11_EXIT") and a.exit_price is not None)
+            ]
+
+            sem = asyncio.Semaphore(12)
+
+            async def _fetch_single_audit_data(aud):
+                async with sem:
+                    q = None
+                    try:
+                        q = await market_data_service.fetch_quote(aud.symbol)
+                    except Exception as q_err:
+                        logger.debug(f"Quote fetch fallback failed for {aud.symbol}: {q_err}")
+
+                    c = None
+                    try:
+                        c = await market_data_service.fetch_candles(aud.symbol, "1d", limit=30)
+                        if not c or not isinstance(c, list):
+                            clean = aud.symbol.replace(".NS", "").replace(".BO", "").strip().upper()
+                            alt = f"{clean}.BO" if aud.symbol.endswith(".NS") else f"{clean}.NS"
+                            c = await market_data_service.fetch_candles(alt, "1d", limit=30)
+                    except Exception as c_err:
+                        logger.debug(f"Candle fetch fallback failed for {aud.symbol}: {c_err}")
+                    return aud.id, c, q
+
+            prefetched_map = {}
+            if active_audits:
+                logger.info(f"Concurrently pre-fetching candles and quotes for {len(active_audits)} active audit stocks...")
+                prefetch_results = await asyncio.gather(*[_fetch_single_audit_data(a) for a in active_audits], return_exceptions=True)
+                for res in prefetch_results:
+                    if isinstance(res, tuple) and len(res) == 3:
+                        prefetched_map[res[0]] = (res[1], res[2])
+
             updated_count = 0
 
             for audit in audits:
                 # If trade was already exited in an earlier run, skip candle re-evaluation
-                if audit.status in ("TARGET_ACHIEVED", "STOPLOSS_HIT", "DAY_11_EXIT") and audit.exit_price is not None:
+                if audit.status in ("TARGET_ACHIEVED", "TARGET_2_ACHIEVED", "STOPLOSS_HIT", "DAY_11_EXIT") and audit.exit_price is not None:
                     continue
 
                 # Fetch daily candles from recommendation date to present
@@ -442,7 +478,12 @@ class SwingAuditService:
                     elif not isinstance(rec_date, date):
                         rec_date = date.today()
 
-                    candles = await market_data_service.fetch_candles(audit.symbol, "1d", limit=30)
+                    prefetched = prefetched_map.get(audit.id)
+                    candles = prefetched[0] if prefetched else None
+                    quote = prefetched[1] if prefetched else None
+
+                    if candles is None:
+                        candles = await market_data_service.fetch_candles(audit.symbol, "1d", limit=30)
                     if not candles or not isinstance(candles, list):
                         # Multi-tier fallback 1: Alternate exchange (.BO <-> .NS)
                         clean_sym = audit.symbol.replace(".NS", "").replace(".BO", "").strip().upper()
@@ -490,11 +531,11 @@ class SwingAuditService:
 
                     # Multi-tier fallback 3: Append trading day prices up through today
                     today_dt = date.today()
-                    quote = None
-                    try:
-                        quote = await market_data_service.fetch_quote(audit.symbol)
-                    except Exception as q_err:
-                        logger.debug(f"Quote fetch fallback failed for {audit.symbol}: {q_err}")
+                    if quote is None:
+                        try:
+                            quote = await market_data_service.fetch_quote(audit.symbol)
+                        except Exception as q_err:
+                            logger.debug(f"Quote fetch fallback failed for {audit.symbol}: {q_err}")
 
                     curr_price = 0.0
                     prev_close = 0.0

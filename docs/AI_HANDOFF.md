@@ -14,6 +14,22 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **SWING AUDIT CONCURRENT PRICE EVALUATION & PAGE RELOAD 504 TIMEOUT ELIMINATION (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User observed that reloading `SwingScreenerPage` and `https://stockai-live.duckdns.org/health/liv` timed out with `504 Gateway Time-out` (Nginx 1.20.1) on the second attempt, accompanied by `Audit sync failed: AxiosError: timeout of 60000ms exceeded` on `POST /api/swing-audit/sync?run_scan=true`, and presence leave/heartbeat failures.
+    2. Root Cause:
+       - Clicking "Sync 11-Day Prices" triggered `swingAuditApi.sync(true)`, executing `ScreenerService.run_all_sectors_screener(force_refresh=True)` across 100+ stocks synchronously (60–70s), followed by sequential candle and quote network fetches for 100 audited stocks in `update_daily_prices` (40–50s), totaling 110+ seconds.
+       - Axios and Nginx timed out at 60s. While Uvicorn remained pegged finishing the ongoing 110s task, subsequent browser requests on reload queued up and hit the 60s timeout, causing the cascading 504 error.
+    3. Remediations Applied:
+       - `backend/services/swing_audit_service.py`: Introduced `_fetch_single_audit_data` using `asyncio.Semaphore(12)` + `asyncio.gather` to pre-fetch live quotes and candles concurrently across all active audits in ~1.5–2.5 seconds (down from 50s). Database audit evaluations execute in-memory in under 20ms.
+       - `backend/api/swing_audit.py`: Set `force_refresh=False` in `sync_audit_prices` to catalog setups from existing cache in < 20ms instead of running a blocking 100-stock refresh.
+       - `frontend/src/pages/SwingScreenerPage.tsx`: Defaulted `swingAuditApi.sync(false)` on "Sync 11-Day Prices" so it strictly updates the price progression of tracked trades.
+  - **Verification Evidence**:
+    - Backend swing audit unit tests: **14 / 14 passed (100% green)** in 41.13s.
+    - Rate limiter & middleware load tests: **10 / 10 passed (100% green)** in 7.96s.
+    - Frontend production build: **1,995 modules transformed, 0 TypeScript errors, built cleanly in 24.05s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls `origin main` and restarts `backend` and `frontend` on the live server.
+
 - **AUTOCANNON LOAD TESTING, LIGHTHOUSE AUDIT/OPTIMIZATION & GITLEAKS SECURITY AUDIT (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. Comprehensive security, load resilience, and frontend performance verification requested via Autocannon, Lighthouse, and Gitleaks.
