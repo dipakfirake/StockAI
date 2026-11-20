@@ -9,7 +9,11 @@ from sqlalchemy.pool import NullPool
 
 is_celery = "celery" in sys.argv[0] or "celery" in sys.modules
 
-engine_kwargs = {"echo": settings.DEBUG}
+engine_kwargs = {
+    "echo": settings.DEBUG,
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+}
 if is_celery:
     engine_kwargs["poolclass"] = NullPool
 else:
