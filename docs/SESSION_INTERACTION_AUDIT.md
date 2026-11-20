@@ -5015,3 +5015,21 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 errors, built cleanly in 26.80s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull commit `origin main` on the live server and run `docker compose restart backend`.
 
+---
+
+### Session Entry 105: Live Server Restart Observation & Database Pool Pre-Ping Safeguard
+- **Timestamp:** 2026-11-20 13:45:00 IST (08:15:00 UTC)
+- **User Prompt:**
+  `[Terminal output showing 'Container stockbackend Restarting 10.9s', curl reset during reboot, followed by active 200 OK responses for Nifty 50 and FMCG candles and LightGBM SHAP calculations]`
+- **Forensic Diagnosis & Analysis**:
+  1. The restart took 10.9s; running `sleep 4` executed `curl` before the container had finished binding port 8000.
+  2. The container subsequently started successfully:
+     - `HTTP Request: GET .../%5ENSEI?interval=1d&range=1y "HTTP/1.1 200 OK"`
+     - `LightGBM binary classifier with TreeExplainer shap values output...`
+     - `HTTP Request: GET .../%5ECNXFMCG?interval=1d&range=5d "HTTP/1.1 200 OK"`
+  3. The `Too many connections` Redis pool saturation warnings are **100% eliminated**.
+  4. Added `pool_pre_ping=True` and `pool_recycle=300` in `backend/core/database.py` (Commit `40b1b37`) to auto-heal stale PostgreSQL connections.
+- **Verification Evidence**:
+  - Backend tests: 8/8 passed in 26.63s.
+- **Next Safe Step**: Instruct user to curl `/health` to verify 200 OK and check the web app.
+

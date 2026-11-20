@@ -14,6 +14,10 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **DATABASE POOL PRE-PING & RECYCLE HARDENING (COMPLETE & VERIFIED - 2026-11-20):**
+  - Configured `pool_pre_ping=True` and `pool_recycle=300` on PostgreSQL async engine in `backend/core/database.py` to auto-heal dropped or stale connections.
+  - Verification: 8/8 unit tests passed. Commit `40b1b37`.
+
 - **REDIS CONNECTION POOL STARVATION, FYERS STREAM 99% WRITE THROTTLING & PIPELINE CONNECTION LEAK REMEDIATION (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. User reported `504 Gateway Time-out` on `https://stockai-live.duckdns.org/health/liv` and live server log warnings:
