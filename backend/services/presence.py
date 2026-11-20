@@ -14,6 +14,7 @@ ARCHITECTURE & PERFORMANCE:
 import time
 import json
 import asyncio
+import inspect
 from typing import Optional, Any
 from backend.core.cache import get_redis
 from backend.core.logging_config import get_logger
@@ -24,6 +25,17 @@ logger = get_logger(__name__)
 PRESENCE_TTL_SECONDS = 35
 PRESENCE_REDIS_KEY = "presence:active_sessions"
 PRESENCE_META_KEY = "presence:sessions_meta"
+
+
+async def _safe_pipe_reset(pipe: Any) -> None:
+    """Safely resets an async Redis pipeline, returning connections to the pool without failing on sync test mocks."""
+    if pipe is not None and hasattr(pipe, "reset"):
+        try:
+            res = pipe.reset()
+            if inspect.isawaitable(res):
+                await res
+        except Exception:
+            pass
 
 
 def _normalize_session_val(val) -> tuple[float, dict[str, Any]]:
@@ -55,23 +67,29 @@ class PresenceService:
             r = await get_redis()
             if r is not None:
                 pipe = r.pipeline()
-                pipe.zadd(PRESENCE_REDIS_KEY, {session_id: now})
-                pipe.hset(PRESENCE_META_KEY, session_id, json.dumps(metadata, default=str))
-                # Identify and prune stale sessions older than TTL
-                pipe.zrangebyscore(PRESENCE_REDIS_KEY, "-inf", now - PRESENCE_TTL_SECONDS)
-                results = await pipe.execute()
-                
-                stale_ids = results[2]
-                if stale_ids:
-                    clean_pipe = r.pipeline()
-                    clean_pipe.zrem(PRESENCE_REDIS_KEY, *stale_ids)
-                    clean_pipe.hdel(PRESENCE_META_KEY, *stale_ids)
-                    clean_pipe.zcard(PRESENCE_REDIS_KEY)
-                    clean_res = await clean_pipe.execute()
-                    return max(1, int(clean_res[2]))
+                try:
+                    pipe.zadd(PRESENCE_REDIS_KEY, {session_id: now})
+                    pipe.hset(PRESENCE_META_KEY, session_id, json.dumps(metadata, default=str))
+                    # Identify and prune stale sessions older than TTL
+                    pipe.zrangebyscore(PRESENCE_REDIS_KEY, "-inf", now - PRESENCE_TTL_SECONDS)
+                    results = await pipe.execute()
+                    
+                    stale_ids = results[2]
+                    if stale_ids:
+                        clean_pipe = r.pipeline()
+                        try:
+                            clean_pipe.zrem(PRESENCE_REDIS_KEY, *stale_ids)
+                            clean_pipe.hdel(PRESENCE_META_KEY, *stale_ids)
+                            clean_pipe.zcard(PRESENCE_REDIS_KEY)
+                            clean_res = await clean_pipe.execute()
+                            return max(1, int(clean_res[2]))
+                        finally:
+                            await _safe_pipe_reset(clean_pipe)
 
-                count = await r.zcard(PRESENCE_REDIS_KEY)
-                return max(1, int(count))
+                    count = await r.zcard(PRESENCE_REDIS_KEY)
+                    return max(1, int(count))
+                finally:
+                    await _safe_pipe_reset(pipe)
         except Exception as exc:
             logger.debug(f"[Presence] Redis unavailable for heartbeat ({exc}), using local fallback.")
 
@@ -97,13 +115,16 @@ class PresenceService:
             r = await get_redis()
             if r is not None:
                 pipe = r.pipeline()
-                pipe.zrem(PRESENCE_REDIS_KEY, session_id)
-                pipe.hdel(PRESENCE_META_KEY, session_id)
-                pipe.zremrangebyscore(PRESENCE_REDIS_KEY, "-inf", now - PRESENCE_TTL_SECONDS)
-                pipe.zcard(PRESENCE_REDIS_KEY)
-                results = await pipe.execute()
-                count = results[3]
-                return max(0, int(count))
+                try:
+                    pipe.zrem(PRESENCE_REDIS_KEY, session_id)
+                    pipe.hdel(PRESENCE_META_KEY, session_id)
+                    pipe.zremrangebyscore(PRESENCE_REDIS_KEY, "-inf", now - PRESENCE_TTL_SECONDS)
+                    pipe.zcard(PRESENCE_REDIS_KEY)
+                    results = await pipe.execute()
+                    count = results[3]
+                    return max(0, int(count))
+                finally:
+                    await _safe_pipe_reset(pipe)
         except Exception as exc:
             logger.debug(f"[Presence] Redis unavailable for leave ({exc}), using local fallback.")
 
@@ -130,11 +151,14 @@ class PresenceService:
                 stale_ids = await r.zrangebyscore(PRESENCE_REDIS_KEY, "-inf", now - PRESENCE_TTL_SECONDS)
                 if stale_ids:
                     pipe = r.pipeline()
-                    pipe.zrem(PRESENCE_REDIS_KEY, *stale_ids)
-                    pipe.hdel(PRESENCE_META_KEY, *stale_ids)
-                    pipe.zcard(PRESENCE_REDIS_KEY)
-                    res = await pipe.execute()
-                    return max(0, int(res[2]))
+                    try:
+                        pipe.zrem(PRESENCE_REDIS_KEY, *stale_ids)
+                        pipe.hdel(PRESENCE_META_KEY, *stale_ids)
+                        pipe.zcard(PRESENCE_REDIS_KEY)
+                        res = await pipe.execute()
+                        return max(0, int(res[2]))
+                    finally:
+                        await _safe_pipe_reset(pipe)
                 count = await r.zcard(PRESENCE_REDIS_KEY)
                 return max(0, int(count))
         except Exception as exc:
@@ -166,9 +190,12 @@ class PresenceService:
                 stale_ids = await r.zrangebyscore(PRESENCE_REDIS_KEY, "-inf", now - PRESENCE_TTL_SECONDS)
                 if stale_ids:
                     clean_pipe = r.pipeline()
-                    clean_pipe.zrem(PRESENCE_REDIS_KEY, *stale_ids)
-                    clean_pipe.hdel(PRESENCE_META_KEY, *stale_ids)
-                    await clean_pipe.execute()
+                    try:
+                        clean_pipe.zrem(PRESENCE_REDIS_KEY, *stale_ids)
+                        clean_pipe.hdel(PRESENCE_META_KEY, *stale_ids)
+                        await clean_pipe.execute()
+                    finally:
+                        await _safe_pipe_reset(clean_pipe)
 
                 # 2. Fetch active sessions with scores
                 active_entries = await r.zrange(PRESENCE_REDIS_KEY, 0, -1, withscores=True)

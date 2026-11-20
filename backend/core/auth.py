@@ -145,7 +145,18 @@ async def verify_admin_docs_access(
             payload = jwt.decode(jwt_candidate, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
             user_id = payload.get("sub")
             if user_id:
-                result = await db.execute(select(User).where(User.id == user_id))
+                import uuid as _uuid
+                is_valid_uuid = False
+                try:
+                    _uuid.UUID(str(user_id))
+                    is_valid_uuid = True
+                except (ValueError, TypeError):
+                    is_valid_uuid = False
+
+                if is_valid_uuid:
+                    result = await db.execute(select(User).where(User.id == user_id))
+                else:
+                    result = await db.execute(select(User).where(User.email == user_id))
                 user = result.scalar_one_or_none()
                 if user and user.is_active and user.is_admin:
                     return user

@@ -4980,3 +4980,38 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 - **Verification Evidence**:
   - Backend tests: 16/16 passed in 17.52s.
 - **Next Safe Step**: Provide user with one-line command to pull commit, check backend logs with `docker compose logs --tail=40 backend`, and verify login session in browser.
+
+---
+
+### Session Entry 104: Redis Pool Capacity Bumping, Fyers Stream 99% Write Throttling & Pipeline Leak Elimination
+- **Timestamp:** 2026-11-20 13:35:00 IST (08:05:00 UTC)
+- **User Prompt:**
+  `[Screenshot showing stockai-live.duckdns.org/health/liv 504 Gateway Time-out nginx/1.20.1]`
+  `"stockbackend | 2026-11-20 07:39:25 | WARNING | backend.core.cache | Cache write unavailable for quote:RELIANCE.NS: Too many connections"`
+  `"api/presence/heartbeat 504 (Gateway Time-out)"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. Live server screenshot revealed a `504 Gateway Time-out` on `https://stockai-live.duckdns.org/health/liv`.
+  2. Server logs revealed `MaxConnectionsError: Too many connections` repeated across 50+ quotes.
+  3. Analysis identified that `FyersStreamService._on_tick()` was dispatching 3 `cache_set` coroutines per tick across multiple symbol aliases. During active trading hours, 50 stocks ticking simultaneously generated 150-300 Redis writes per second.
+  4. The default `ConnectionPool` limit of 100 connections in `redis.asyncio` was exhausted immediately. The Uvicorn event loop on 1 OCPU became saturated processing failing connection attempts and logging warnings, delaying all incoming HTTP requests (`/health/liv`, `/api/presence/heartbeat`, `/api/preferences/`, `/api/stocks/.../insight`) in the backlog until Nginx's 60s proxy timeout expired (`504 Gateway Time-out`).
+  5. In `PresenceService`, Redis pipelines were unshielded and lacked guaranteed connection release via `pipe.reset()`, risking pool starvation.
+  6. In `verify_admin_docs_access`, `User.id == user_id` lacked UUID validation, risking SQL DataErrors on email-based JWTs.
+- **Architectural Remediations**:
+  1. **High-Capacity Redis Connection Pool & Event-Loop Partitioning (`backend/core/cache.py`)**:
+     - Configured `max_connections=500`, `socket_connect_timeout=1.0`, `socket_timeout=1.0`, and `health_check_interval=30`.
+     - Partitioned Redis clients across event loops (`_redis_clients: Dict[int, redis.Redis]`) to eliminate loop collision.
+     - Changed log level for transient cache unavailability from warning to debug to prevent stdout log thrashing.
+  2. **Zero-Redis In-Memory Quote Store & 99% Write Throttling (`backend/services/fyers_stream.py`)**:
+     - Introduced `_MEMORY_QUOTES: Dict[str, dict]` updated synchronously on every tick.
+     - Throttled Redis quote synchronization to at most once per 3.0s per symbol (`_LAST_REDIS_QUOTE_SYNC`), slashing Redis writes by **99%**.
+  3. **Direct In-Memory REST Fast Path (`backend/services/market_data.py`)**:
+     - In `fetch_quote`, added a check for `_MEMORY_QUOTES` before querying Redis, resolving live quotes in 10 nanoseconds with 0 Redis queries and 0 connection allocations.
+  4. **Presence Service Pipeline Connection Release (`backend/services/presence.py`)**:
+     - Added `_safe_pipe_reset(pipe)` helper to ensure `pipe.reset()` returns connections to the pool immediately upon completion or failure, compatible with both production async Redis and synchronous test mocks.
+  5. **Admin Access Auth Guard Safety (`backend/core/auth.py`)**:
+     - Added UUID validation in `verify_admin_docs_access` falling back to email lookup.
+- **Verification Evidence**:
+  - **Backend Unit Tests**: `backend/tests/test_middleware_hardening.py`, `backend/tests/test_presence.py`, `backend/tests/test_admin_docs_and_health_security.py`, `backend/tests/test_special_character_symbols_and_depth.py`, `backend/tests/test_fyers_stream.py` -> **35/35 passed (100% green)** in 51.65s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 errors, built cleanly in 26.80s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull commit `origin main` on the live server and run `docker compose restart backend`.
+

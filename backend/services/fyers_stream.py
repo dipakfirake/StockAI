@@ -56,6 +56,10 @@ except Exception as e:
 # In-memory fast cache for resolved HSM tokens: {fyers_symbol: {"fyToken": ..., "symbol": ...}}
 _HSM_TOKEN_MEMORY_CACHE: Dict[str, dict] = {}
 
+# In-memory quote cache populated on every tick (zero Redis overhead)
+_MEMORY_QUOTES: Dict[str, dict] = {}
+_LAST_REDIS_QUOTE_SYNC: Dict[str, float] = {}
+
 
 def _patch_fyers_symbol_conversion():
     """
@@ -551,12 +555,28 @@ class FyersStreamService:
                     "data_status": "realtime"
                 }
 
-                # Store with 15s TTL so fast subsequent REST requests hit cache directly without hitting Fyers REST 50 req/min limit
-                for key_alias in (target_symbol, fyers_sym, clean_symbol):
-                    asyncio.run_coroutine_threadsafe(
-                        cache_set(f"quote:{key_alias}", cached_quote, ttl=15),
-                        self._loop
-                    )
+                # Update in-memory quote store immediately for 0ms sub-microsecond REST lookups (0 Redis queries)
+                _MEMORY_QUOTES[target_symbol] = cached_quote
+                _MEMORY_QUOTES[fyers_sym] = cached_quote
+                _MEMORY_QUOTES[clean_symbol] = cached_quote
+
+                # Throttle Redis writes to max 1 operation per 3.0s per symbol to eliminate Redis connection pool exhaustion
+                now_mono = time.monotonic()
+                if now_mono - _LAST_REDIS_QUOTE_SYNC.get(target_symbol, 0.0) >= 3.0:
+                    _LAST_REDIS_QUOTE_SYNC[target_symbol] = now_mono
+
+                    async def _sync_redis_quote_batch(quote_snap, aliases):
+                        try:
+                            for key_alias in aliases:
+                                await cache_set(f"quote:{key_alias}", quote_snap, ttl=15)
+                        except Exception:
+                            pass
+
+                    if self._loop and self._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            _sync_redis_quote_batch(cached_quote, (target_symbol, fyers_sym, clean_symbol)),
+                            self._loop
+                        )
 
         except Exception as e:
             logger.debug(f"Error handling Fyers tick: {e}")

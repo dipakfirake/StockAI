@@ -824,6 +824,15 @@ class MarketDataService:
         clean_symbol = original_symbol.replace(".NS", "").replace(".BO", "").replace("^", "").strip().upper()
         cache_key = f"quote:{original_symbol}"
         
+        # 0. Check in-memory fast quote store for instantaneous zero-overhead resolution (0 Redis queries)
+        try:
+            from backend.services.fyers_stream import _MEMORY_QUOTES
+            mem_quote = _MEMORY_QUOTES.get(original_symbol) or _MEMORY_QUOTES.get(fyers_symbol) or _MEMORY_QUOTES.get(clean_symbol)
+            if mem_quote and mem_quote.get("price", 0) > 0:
+                return mem_quote
+        except Exception:
+            pass
+
         # 1. Check multi-alias cache (target symbol, clean symbol, or fyers symbol)
         cached = await cache_get(cache_key) or await cache_get(f"quote:{fyers_symbol}") or await cache_get(f"quote:{clean_symbol}")
         if cached and cached.get("price", 0) > 0:

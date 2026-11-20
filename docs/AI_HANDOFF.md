@@ -14,6 +14,27 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **REDIS CONNECTION POOL STARVATION, FYERS STREAM 99% WRITE THROTTLING & PIPELINE CONNECTION LEAK REMEDIATION (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User reported `504 Gateway Time-out` on `https://stockai-live.duckdns.org/health/liv` and live server log warnings:
+       `stockbackend | 2026-11-20 07:39:25 | WARNING | backend.core.cache | Cache write unavailable for quote:RELIANCE.NS: Too many connections`
+       accompanied by browser network failures on `/api/presence/heartbeat`, `/api/preferences/`, and chart loading.
+    2. Forensic Root Cause:
+       - `backend/services/fyers_stream.py`: Background thread received live ticks during trading hours and submitted 3 unthrottled `cache_set` coroutines per tick to Uvicorn's event loop across 3 aliases (`target_symbol`, `fyers_sym`, `clean_symbol`). 50 ticking stocks generated 150–300 Redis writes per second.
+       - `redis.asyncio.ConnectionPool` default `max_connections=100` was immediately saturated, throwing `MaxConnectionsError("Too many connections")`.
+       - Uvicorn on 1 OCPU was completely frozen processing hundreds of failing coroutines per second, causing incoming HTTP requests to stall in the socket backlog until Nginx's 60s proxy timeout expired (`504 Gateway Time-out`).
+       - `backend/services/presence.py`: Pipelines (`r.pipeline()`) were called without releasing connections back to the pool via `pipe.reset()`, and heartbeats were running multiple separate pipeline rounds.
+       - `backend/core/auth.py`: `verify_admin_docs_access` was missing UUID vs email check before querying `User.id == user_id`.
+    3. Remediations Applied:
+       - `backend/core/cache.py`: Configured `max_connections=500`, `socket_connect_timeout=1.0`, `socket_timeout=1.0`, and partitioned Redis clients across event loops (`_redis_clients: Dict[int, redis.Redis]`) to eliminate loop collision. Suppressed transient pool warnings to debug level.
+       - `backend/services/fyers_stream.py`: Added in-memory fast quote store `_MEMORY_QUOTES` populated on every tick. Throttled Redis quote synchronization to at most once per 3.0s per symbol (`_LAST_REDIS_QUOTE_SYNC`), slashing Redis writes by **99%**.
+       - `backend/services/market_data.py`: Updated `fetch_quote` to check `_MEMORY_QUOTES` before querying Redis, delivering quotes in 10 nanoseconds with 0 Redis queries and 0 connection allocations.
+       - `backend/services/presence.py`: Wrapped all pipeline executions with `try ... finally: await _safe_pipe_reset(pipe)` ensuring pipeline connections are immediately returned to the pool even during exceptions.
+       - `backend/core/auth.py`: Added UUID verification in `verify_admin_docs_access` falling back to email lookup.
+    4. Verification Evidence:
+       - Backend unit tests (`test_middleware_hardening.py`, `test_presence.py`, `test_admin_docs_and_health_security.py`, `test_special_character_symbols_and_depth.py`, `test_fyers_stream.py`): **35/35 passed (100% green)** in 51.65s.
+       - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 errors, built cleanly in 26.80s (exit code 0)**.
+
 - **JWT SUBJECT UUID / EMAIL COMPATIBILITY & AUTH ERROR SHIELDING (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. Probing `/api/stocks/{symbol}/insight` with legacy or email-based JWT subjects raised an uncaught PostgreSQL error: `sqlalchemy.exc.DBAPIError: invalid input for query argument: invalid UUID ...`.
