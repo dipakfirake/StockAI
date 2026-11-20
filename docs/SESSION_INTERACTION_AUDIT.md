@@ -5087,6 +5087,40 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 110: Fyers Zero-Rate-Limit Governor & Single-Flight Coalesced Pipeline
+- **Timestamp:** 2026-11-20 19:30:00 IST (14:00:00 UTC)
+- **User Prompt:**
+  `"why rate limits exceeds of fyers again and again check that our full system wants to work fully but with that rate limits but our system wants to works smoothly with all aspects with rate limits of fyers and all. /goal /browser /plan /teamwork /learn /boost /automation /plugin /run-workflow /swarm /migrate-workflows"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. Uncoordinated concurrent calls via `asyncio.gather` across multiple services (LiveTicker, Watchlist, MarketDepth, Chart candles, Screener) fired simultaneous bursts exceeding Fyers' 4 req/sec safety threshold.
+  2. The previous rate limiter immediately rejected burst requests instead of smoothing them, triggering punitive 30-second circuit-breaker lockouts (`record_fyers_rate_limit(cooldown_seconds=30.0)`).
+  3. Lack of single-flight request coalescing meant multiple concurrent requests for the exact same symbol produced redundant outbound HTTP queries to Fyers.
+  4. Market depth cached with 1.0s TTL during market hours generated 30–60 calls/min per active viewing tab.
+- **Architectural Remediations**:
+  1. **Centralized Asynchronous Priority Rate Governor (`backend/services/fyers_rate_governor.py`)**:
+     - Built `FyersRateGovernor` enforcing minimum 250ms spacing ($\le$ 4 req/sec, $\le$ 40 req/min).
+     - Implemented Single-Flight Coalescing (mutex) across concurrent queries for identical symbols/endpoints.
+     - Implemented prioritized scheduling: `PRIORITY_USER_ACTION` (0), `PRIORITY_INTERACTIVE` (1), `PRIORITY_BACKGROUND` (2).
+     - Implemented adaptive 2.0s jittered backoff on transient `-360`/`429` errors with automatic retry.
+  2. **Market Data Integration (`backend/services/market_data.py`)**:
+     - Integrated `fyers_rate_governor.execute()` across `fetch_quote`, `fetch_quotes_bulk`, `fetch_candles`, and `probe_fyers_canary`.
+     - Reduced `record_fyers_rate_limit` cooldown from 30.0s to 3.0s transient backoff.
+  3. **Market Depth Throttling (`backend/services/market_depth_service.py`)**:
+     - Increased market-hours Redis cache TTL from 1.0s to 3.0s (slashing depth queries by 67%).
+     - Routed depth calls through `fyers_rate_governor` with `PRIORITY_INTERACTIVE` and single-flight coalescing.
+  4. **Settings Telemetry & Status Decoupling (`backend/api/settings.py`)**:
+     - Attached live `rate_governor` metrics to `/api/settings/fyers/status`.
+     - Strictly decoupled transient rate limit throttles from daily 06:00 AM IST token expiries.
+- **Verification Evidence**:
+  - **Fyers Rate Governor Tests**: `pytest backend/tests/test_fyers_rate_governor.py` -> **4 / 4 passed (100% green)** in 2.49s.
+  - **Dual-Connection, Failover & Depth Tests**: `pytest backend/tests/test_dual_connection_engine.py backend/tests/test_feed_failover_handover.py backend/tests/test_market_depth.py backend/tests/test_fyers_stream.py` -> **49 / 49 passed (100% green)** in 141.69s.
+  - **Swing Audit & Admin Security Tests**: `pytest backend/tests/test_swing_audit.py backend/tests/test_admin_docs_and_health_security.py` -> **22 / 22 passed (100% green)** in 47.57s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 14.55s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
+
+---
+
 ### Session Entry 109: Database Pool Protection & Non-Blocking Screener Aggregation
 - **Timestamp:** 2026-11-20 18:45:00 IST (13:15:00 UTC)
 - **User Prompt:**
@@ -5112,6 +5146,40 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Security, Auth & Rate Limiter Tests**: `pytest backend/tests/test_admin_docs_and_health_security.py backend/tests/test_rate_limiter_load.py backend/tests/test_middleware_hardening.py` -> **18 / 18 passed (100% green)** in 25.92s.
   - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built cleanly in 17.52s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
+---
+
+### Session Entry 110: Fyers Zero-Rate-Limit Governor & Single-Flight Coalesced Pipeline
+- **Timestamp:** 2026-11-20 19:30:00 IST (14:00:00 UTC)
+- **User Prompt:**
+  `"why rate limits exceeds of fyers again and again check that our full system wants to work fully but with that rate limits but our system wants to works smoothly with all aspects with rate limits of fyers and all. /goal /browser /plan /teamwork /learn /boost /automation /plugin /run-workflow /swarm /migrate-workflows"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. Uncoordinated concurrent calls via `asyncio.gather` across multiple services (LiveTicker, Watchlist, MarketDepth, Chart candles, Screener) fired simultaneous bursts exceeding Fyers' 4 req/sec safety threshold.
+  2. The previous rate limiter immediately rejected burst requests instead of smoothing them, triggering punitive 30-second circuit-breaker lockouts (`record_fyers_rate_limit(cooldown_seconds=30.0)`).
+  3. Lack of single-flight request coalescing meant multiple concurrent requests for the exact same symbol produced redundant outbound HTTP queries to Fyers.
+  4. Market depth cached with 1.0s TTL during market hours generated 30–60 calls/min per active viewing tab.
+- **Architectural Remediations**:
+  1. **Centralized Asynchronous Priority Rate Governor (`backend/services/fyers_rate_governor.py`)**:
+     - Built `FyersRateGovernor` enforcing minimum 250ms spacing ($\le$ 4 req/sec, $\le$ 40 req/min).
+     - Implemented Single-Flight Coalescing (mutex) across concurrent queries for identical symbols/endpoints.
+     - Implemented prioritized scheduling: `PRIORITY_USER_ACTION` (0), `PRIORITY_INTERACTIVE` (1), `PRIORITY_BACKGROUND` (2).
+     - Implemented adaptive 2.0s jittered backoff on transient `-360`/`429` errors with automatic retry.
+  2. **Market Data Integration (`backend/services/market_data.py`)**:
+     - Integrated `fyers_rate_governor.execute()` across `fetch_quote`, `fetch_quotes_bulk`, `fetch_candles`, and `probe_fyers_canary`.
+     - Reduced `record_fyers_rate_limit` cooldown from 30.0s to 3.0s transient backoff.
+  3. **Market Depth Throttling (`backend/services/market_depth_service.py`)**:
+     - Increased market-hours Redis cache TTL from 1.0s to 3.0s (slashing depth queries by 67%).
+     - Routed depth calls through `fyers_rate_governor` with `PRIORITY_INTERACTIVE` and single-flight coalescing.
+  4. **Settings Telemetry & Status Decoupling (`backend/api/settings.py`)**:
+     - Attached live `rate_governor` metrics to `/api/settings/fyers/status`.
+     - Strictly decoupled transient rate limit throttles from daily 06:00 AM IST token expiries.
+- **Verification Evidence**:
+  - **Fyers Rate Governor Tests**: `pytest backend/tests/test_fyers_rate_governor.py` -> **4 / 4 passed (100% green)** in 2.49s.
+  - **Dual-Connection, Failover & Depth Tests**: `pytest backend/tests/test_dual_connection_engine.py backend/tests/test_feed_failover_handover.py backend/tests/test_market_depth.py backend/tests/test_fyers_stream.py` -> **49 / 49 passed (100% green)** in 141.69s.
+  - **Swing Audit & Admin Security Tests**: `pytest backend/tests/test_swing_audit.py backend/tests/test_admin_docs_and_health_security.py` -> **22 / 22 passed (100% green)** in 47.57s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 14.55s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
 
 
 ---
@@ -5143,6 +5211,40 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 110: Fyers Zero-Rate-Limit Governor & Single-Flight Coalesced Pipeline
+- **Timestamp:** 2026-11-20 19:30:00 IST (14:00:00 UTC)
+- **User Prompt:**
+  `"why rate limits exceeds of fyers again and again check that our full system wants to work fully but with that rate limits but our system wants to works smoothly with all aspects with rate limits of fyers and all. /goal /browser /plan /teamwork /learn /boost /automation /plugin /run-workflow /swarm /migrate-workflows"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. Uncoordinated concurrent calls via `asyncio.gather` across multiple services (LiveTicker, Watchlist, MarketDepth, Chart candles, Screener) fired simultaneous bursts exceeding Fyers' 4 req/sec safety threshold.
+  2. The previous rate limiter immediately rejected burst requests instead of smoothing them, triggering punitive 30-second circuit-breaker lockouts (`record_fyers_rate_limit(cooldown_seconds=30.0)`).
+  3. Lack of single-flight request coalescing meant multiple concurrent requests for the exact same symbol produced redundant outbound HTTP queries to Fyers.
+  4. Market depth cached with 1.0s TTL during market hours generated 30–60 calls/min per active viewing tab.
+- **Architectural Remediations**:
+  1. **Centralized Asynchronous Priority Rate Governor (`backend/services/fyers_rate_governor.py`)**:
+     - Built `FyersRateGovernor` enforcing minimum 250ms spacing ($\le$ 4 req/sec, $\le$ 40 req/min).
+     - Implemented Single-Flight Coalescing (mutex) across concurrent queries for identical symbols/endpoints.
+     - Implemented prioritized scheduling: `PRIORITY_USER_ACTION` (0), `PRIORITY_INTERACTIVE` (1), `PRIORITY_BACKGROUND` (2).
+     - Implemented adaptive 2.0s jittered backoff on transient `-360`/`429` errors with automatic retry.
+  2. **Market Data Integration (`backend/services/market_data.py`)**:
+     - Integrated `fyers_rate_governor.execute()` across `fetch_quote`, `fetch_quotes_bulk`, `fetch_candles`, and `probe_fyers_canary`.
+     - Reduced `record_fyers_rate_limit` cooldown from 30.0s to 3.0s transient backoff.
+  3. **Market Depth Throttling (`backend/services/market_depth_service.py`)**:
+     - Increased market-hours Redis cache TTL from 1.0s to 3.0s (slashing depth queries by 67%).
+     - Routed depth calls through `fyers_rate_governor` with `PRIORITY_INTERACTIVE` and single-flight coalescing.
+  4. **Settings Telemetry & Status Decoupling (`backend/api/settings.py`)**:
+     - Attached live `rate_governor` metrics to `/api/settings/fyers/status`.
+     - Strictly decoupled transient rate limit throttles from daily 06:00 AM IST token expiries.
+- **Verification Evidence**:
+  - **Fyers Rate Governor Tests**: `pytest backend/tests/test_fyers_rate_governor.py` -> **4 / 4 passed (100% green)** in 2.49s.
+  - **Dual-Connection, Failover & Depth Tests**: `pytest backend/tests/test_dual_connection_engine.py backend/tests/test_feed_failover_handover.py backend/tests/test_market_depth.py backend/tests/test_fyers_stream.py` -> **49 / 49 passed (100% green)** in 141.69s.
+  - **Swing Audit & Admin Security Tests**: `pytest backend/tests/test_swing_audit.py backend/tests/test_admin_docs_and_health_security.py` -> **22 / 22 passed (100% green)** in 47.57s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 14.55s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
+
+---
+
 ### Session Entry 109: Database Pool Protection & Non-Blocking Screener Aggregation
 - **Timestamp:** 2026-11-20 18:45:00 IST (13:15:00 UTC)
 - **User Prompt:**
@@ -5168,6 +5270,40 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Security, Auth & Rate Limiter Tests**: `pytest backend/tests/test_admin_docs_and_health_security.py backend/tests/test_rate_limiter_load.py backend/tests/test_middleware_hardening.py` -> **18 / 18 passed (100% green)** in 25.92s.
   - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built cleanly in 17.52s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
+---
+
+### Session Entry 110: Fyers Zero-Rate-Limit Governor & Single-Flight Coalesced Pipeline
+- **Timestamp:** 2026-11-20 19:30:00 IST (14:00:00 UTC)
+- **User Prompt:**
+  `"why rate limits exceeds of fyers again and again check that our full system wants to work fully but with that rate limits but our system wants to works smoothly with all aspects with rate limits of fyers and all. /goal /browser /plan /teamwork /learn /boost /automation /plugin /run-workflow /swarm /migrate-workflows"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. Uncoordinated concurrent calls via `asyncio.gather` across multiple services (LiveTicker, Watchlist, MarketDepth, Chart candles, Screener) fired simultaneous bursts exceeding Fyers' 4 req/sec safety threshold.
+  2. The previous rate limiter immediately rejected burst requests instead of smoothing them, triggering punitive 30-second circuit-breaker lockouts (`record_fyers_rate_limit(cooldown_seconds=30.0)`).
+  3. Lack of single-flight request coalescing meant multiple concurrent requests for the exact same symbol produced redundant outbound HTTP queries to Fyers.
+  4. Market depth cached with 1.0s TTL during market hours generated 30–60 calls/min per active viewing tab.
+- **Architectural Remediations**:
+  1. **Centralized Asynchronous Priority Rate Governor (`backend/services/fyers_rate_governor.py`)**:
+     - Built `FyersRateGovernor` enforcing minimum 250ms spacing ($\le$ 4 req/sec, $\le$ 40 req/min).
+     - Implemented Single-Flight Coalescing (mutex) across concurrent queries for identical symbols/endpoints.
+     - Implemented prioritized scheduling: `PRIORITY_USER_ACTION` (0), `PRIORITY_INTERACTIVE` (1), `PRIORITY_BACKGROUND` (2).
+     - Implemented adaptive 2.0s jittered backoff on transient `-360`/`429` errors with automatic retry.
+  2. **Market Data Integration (`backend/services/market_data.py`)**:
+     - Integrated `fyers_rate_governor.execute()` across `fetch_quote`, `fetch_quotes_bulk`, `fetch_candles`, and `probe_fyers_canary`.
+     - Reduced `record_fyers_rate_limit` cooldown from 30.0s to 3.0s transient backoff.
+  3. **Market Depth Throttling (`backend/services/market_depth_service.py`)**:
+     - Increased market-hours Redis cache TTL from 1.0s to 3.0s (slashing depth queries by 67%).
+     - Routed depth calls through `fyers_rate_governor` with `PRIORITY_INTERACTIVE` and single-flight coalescing.
+  4. **Settings Telemetry & Status Decoupling (`backend/api/settings.py`)**:
+     - Attached live `rate_governor` metrics to `/api/settings/fyers/status`.
+     - Strictly decoupled transient rate limit throttles from daily 06:00 AM IST token expiries.
+- **Verification Evidence**:
+  - **Fyers Rate Governor Tests**: `pytest backend/tests/test_fyers_rate_governor.py` -> **4 / 4 passed (100% green)** in 2.49s.
+  - **Dual-Connection, Failover & Depth Tests**: `pytest backend/tests/test_dual_connection_engine.py backend/tests/test_feed_failover_handover.py backend/tests/test_market_depth.py backend/tests/test_fyers_stream.py` -> **49 / 49 passed (100% green)** in 141.69s.
+  - **Swing Audit & Admin Security Tests**: `pytest backend/tests/test_swing_audit.py backend/tests/test_admin_docs_and_health_security.py` -> **22 / 22 passed (100% green)** in 47.57s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 14.55s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
 
 
 

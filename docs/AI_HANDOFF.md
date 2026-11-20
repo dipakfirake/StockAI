@@ -14,6 +14,27 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **FYERS ZERO-RATE-LIMIT GOVERNOR & SINGLE-FLIGHT COALESCED PIPELINE (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User observed recurring Fyers API rate limit errors (`-360`, `429`, "too many requests") causing dual-engine failovers, throttled UI states, or temporary freezes across LiveTicker, Watchlist, MarketDepth, and Screener.
+    2. Root Cause:
+       - Uncoordinated concurrent calls via `asyncio.gather` fired simultaneous bursts exceeding Fyers' 4 req/sec safety threshold.
+       - The rate limiter immediately rejected burst requests instead of smoothing them, triggering punitive 30-second circuit-breaker lockouts (`record_fyers_rate_limit(cooldown_seconds=30.0)`).
+       - Lack of single-flight coalescing meant 3 concurrent requests for the same symbol produced 3 independent outbound queries.
+       - Market depth cached with 1.0s TTL during market hours generated 30–60 calls/min per tab.
+    3. Remediations Applied:
+       - `backend/services/fyers_rate_governor.py`: Built `FyersRateGovernor` implementing an asynchronous priority leaky-bucket queue enforcing 250ms spacing ($\le$ 4 req/sec, $\le$ 40 req/min), Single-Flight Request Coalescing (mutex) across concurrent queries, and adaptive 2.0s jittered backoff on transient `-360`/`429` errors.
+       - `backend/services/market_data.py`: Integrated `fyers_rate_governor.execute()` across `fetch_quote`, `fetch_quotes_bulk`, `fetch_candles`, and `probe_fyers_canary`. Reduced `record_fyers_rate_limit` cooldown from 30.0s to 3.0s transient backoff.
+       - `backend/services/market_depth_service.py`: Routed depth calls through `fyers_rate_governor` with `PRIORITY_INTERACTIVE` and increased market-hours Redis cache TTL from 1.0s to 3.0s (slashing depth queries by 67%).
+       - `backend/api/settings.py`: Attached live `rate_governor` metrics to `/api/settings/fyers/status` and differentiated transient throttles from daily 06:00 AM IST token expiries.
+  - **Verification Evidence**:
+    - Fyers Rate Governor tests (`backend/tests/test_fyers_rate_governor.py`): **4 / 4 passed (100% green)** in 2.49s.
+    - Full dual-connection, failover, depth & stream tests (`test_dual_connection_engine.py`, `test_feed_failover_handover.py`, `test_market_depth.py`, `test_fyers_stream.py`): **49 / 49 passed (100% green)** in 141.69s.
+    - Swing audit & security tests (`test_swing_audit.py`, `test_admin_docs_and_health_security.py`): **22 / 22 passed (100% green)** in 47.57s.
+    - Total Backend Tests Verified: **75 / 75 passed (100% green)**.
+    - Frontend production build: **1,995 modules transformed, 0 TypeScript errors, built in 14.55s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls `origin main` and restarts `backend` and `frontend` on the live server.
+
 - **SWING AUDIT CONCURRENT PRICE EVALUATION & PAGE RELOAD 504 TIMEOUT ELIMINATION (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. User observed that reloading `SwingScreenerPage` and `https://stockai-live.duckdns.org/health/liv` timed out with `504 Gateway Time-out` (Nginx 1.20.1) on the second attempt, accompanied by `Audit sync failed: AxiosError: timeout of 60000ms exceeded` on `POST /api/swing-audit/sync?run_scan=true`, and presence leave/heartbeat failures.

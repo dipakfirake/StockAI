@@ -308,6 +308,12 @@ async def get_fyers_status(
         except Exception:
             pass
 
+    try:
+        from backend.services.fyers_rate_governor import fyers_rate_governor
+        gov_metrics = fyers_rate_governor.get_metrics()
+    except Exception:
+        gov_metrics = {}
+
     start_t = time.perf_counter()
     try:
         fyers = fyersModel.FyersModel(client_id=client_id, is_async=False, token=access_token, log_path="")
@@ -328,6 +334,7 @@ async def get_fyers_status(
                 "masked_fy_id": _mask_id(raw_fy_id),
                 "message": f"Fyers live market feed is connected and operational (Direct API ping: {ping_ms}ms).",
                 "dual_engine": feed_info,
+                "rate_governor": gov_metrics,
                 "ping_ms": ping_ms,
                 "checked_at_ist": checked_at_ist,
                 "checked_at_iso": checked_at_iso,
@@ -351,7 +358,7 @@ async def get_fyers_status(
                 or "too many requests" in err.lower()
             )
             if is_rate_limit:
-                MarketDataService.record_fyers_rate_limit(reason=err, cooldown_seconds=30.0)
+                MarketDataService.record_fyers_rate_limit(reason=err, cooldown_seconds=3.0)
                 feed_info = MarketDataService.get_feed_status()
                 result = {
                     "configured": True,
@@ -360,8 +367,9 @@ async def get_fyers_status(
                     "name": "Trader",
                     "fy_id": client_id,
                     "masked_fy_id": _mask_id(client_id),
-                    "message": f"Fyers Standard plan rate limit reached (cooling down 30s). Token is active & valid; feed safely routed to Yahoo backup: {err}",
+                    "message": f"Fyers rate limit reached (cooling down 3s). Token is active & valid; feed safely routed to Yahoo backup: {err}",
                     "dual_engine": feed_info,
+                    "rate_governor": gov_metrics,
                     "ping_ms": ping_ms,
                     "checked_at_ist": checked_at_ist,
                     "checked_at_iso": checked_at_iso,

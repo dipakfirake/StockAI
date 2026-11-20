@@ -485,7 +485,7 @@ class MarketDataService:
         logger.warning(f"Dual-Engine Failover Engaged: Fyers marked expired ({reason}). Active feed switched to Yahoo Finance Backup.")
 
     @classmethod
-    def record_fyers_rate_limit(cls, reason: str = "Rate limit reached", cooldown_seconds: float = 30.0) -> None:
+    def record_fyers_rate_limit(cls, reason: str = "Rate limit reached", cooldown_seconds: float = 3.0) -> None:
         """Throttles Fyers temporarily WITHOUT marking the token expired."""
         import time
         cls._fyers_cooldown_until = max(cls._fyers_cooldown_until, time.time() + cooldown_seconds)
@@ -493,6 +493,11 @@ class MarketDataService:
         cls._active_engine = "BACKUP_YAHOO"
         cls._circuit_state = "OPEN"
         cls._canary_in_progress = False
+        try:
+            from backend.services.fyers_rate_governor import fyers_rate_governor
+            fyers_rate_governor.trigger_backoff(cooldown_seconds, reason=reason)
+        except Exception:
+            pass
         logger.warning(f"Dual-Engine: Fyers rate-limited ({reason}). Temporarily diverting to Yahoo Finance backup for {cooldown_seconds}s. Token remains VALID.")
 
     @classmethod
@@ -529,7 +534,12 @@ class MarketDataService:
         try:
             fyers = await cls._get_fyers_client()
             norm_sym = cls._normalise_symbol(probe_symbol)
-            response = await asyncio.to_thread(fyers.quotes, {"symbols": norm_sym})
+            from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_USER_ACTION
+            response = await fyers_rate_governor.execute(
+                lambda: asyncio.to_thread(fyers.quotes, {"symbols": norm_sym}),
+                priority=PRIORITY_USER_ACTION,
+                coalescing_key=f"canary:{norm_sym}"
+            )
             if response.get("s") == "ok" and response.get("d"):
                 v = response["d"][0].get("v", {})
                 lp = float(v.get("lp", 0.0) or 0.0)
@@ -868,7 +878,12 @@ class MarketDataService:
                 fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbol}
                 
-                response = await asyncio.to_thread(fyers.quotes, data)
+                from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_USER_ACTION
+                response = await fyers_rate_governor.execute(
+                    lambda: asyncio.to_thread(fyers.quotes, data),
+                    priority=PRIORITY_USER_ACTION,
+                    coalescing_key=f"quote:{fyers_symbol}"
+                )
                 if response.get("s") == "ok" and response.get("d"):
                     quote_data = response["d"][0]["v"]
                     
@@ -1069,7 +1084,12 @@ class MarketDataService:
                     chunk_keys = fyers_keys[i : i + 50]
                     fyers_symbols_str = ",".join(chunk_keys)
                     data = {"symbols": fyers_symbols_str}
-                    response = await asyncio.to_thread(fyers.quotes, data)
+                    from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_INTERACTIVE
+                    response = await fyers_rate_governor.execute(
+                        lambda: asyncio.to_thread(fyers.quotes, data),
+                        priority=PRIORITY_INTERACTIVE,
+                        coalescing_key=f"bulk:{fyers_symbols_str}"
+                    )
                     
                     if response.get("s") == "ok" and "d" in response:
                         MarketDataService._last_fyers_tick_time = now
@@ -1357,7 +1377,12 @@ class MarketDataService:
                     
                     max_retries = 2
                     for attempt in range(max_retries):
-                        response = await asyncio.to_thread(fyers.history, data)
+                        from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_BACKGROUND
+                        response = await fyers_rate_governor.execute(
+                            lambda: asyncio.to_thread(fyers.history, data),
+                            priority=PRIORITY_BACKGROUND,
+                            coalescing_key=f"candle:{fyers_symbol}:{fyers_interval}:{data['range_from']}:{data['range_to']}"
+                        )
                         if response.get("s") == "ok":
                             break
                         

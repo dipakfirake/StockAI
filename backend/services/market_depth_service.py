@@ -319,12 +319,17 @@ class MarketDepthService:
                 try:
                     fyers_instance = MarketDataService._get_fyers_model()
                     if fyers_instance:
-                        resp = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                fyers_instance.depth,
-                                {"symbol": norm_symbol, "ohlcv_flag": "1"}
+                        from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_INTERACTIVE
+                        resp = await fyers_rate_governor.execute(
+                            lambda: asyncio.wait_for(
+                                asyncio.to_thread(
+                                    fyers_instance.depth,
+                                    {"symbol": norm_symbol, "ohlcv_flag": "1"}
+                                ),
+                                timeout=2.0
                             ),
-                            timeout=2.0
+                            priority=PRIORITY_INTERACTIVE,
+                            coalescing_key=f"depth:{norm_symbol}"
                         )
                         if isinstance(resp, dict) and resp.get("s") == "ok" and "d" in resp:
                             fyers_d = resp["d"].get(norm_symbol, {})
@@ -402,8 +407,8 @@ class MarketDepthService:
                     }
                 depth_data = cls.generate_synthetic_depth(clean_symbol, quote, is_open=True)
 
-            # Store in Redis with 1.0s TTL during market hours
-            await cache_set(cache_key, depth_data, ttl=1)
+            # Store in Redis with 3.0s TTL during market hours to prevent depth poller churn
+            await cache_set(cache_key, depth_data, ttl=3)
             return depth_data
 
     @staticmethod
