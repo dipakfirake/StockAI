@@ -314,10 +314,35 @@ async def get_fyers_status(
     except Exception:
         gov_metrics = {}
 
+    # Fast-return if token is known expired and not force-refreshing (prevents blocking HTTP timeouts)
+    if not force_refresh and not MarketDataService._fyers_token_valid:
+        feed_info = MarketDataService.get_feed_status()
+        result = {
+            "configured": True,
+            "connected": False,
+            "token_status": "EXPIRED",
+            "name": "",
+            "fy_id": client_id,
+            "masked_fy_id": _mask_id(client_id),
+            "message": f"Fyers access token is expired ({MarketDataService._fyers_token_expired_reason or '06:00 AM IST daily renewal required'}). Dual Engine active via Yahoo Finance backup.",
+            "dual_engine": feed_info,
+            "rate_governor": gov_metrics,
+            "ping_ms": None,
+            "checked_at_ist": checked_at_ist,
+            "checked_at_iso": checked_at_iso,
+            "fyers_live_ping": False,
+            "token_preview": token_preview,
+        }
+        try:
+            await cache_set("fyers_live_status_cache", result, ttl=30)
+        except Exception:
+            pass
+        return result
+
     start_t = time.perf_counter()
     try:
         fyers = fyersModel.FyersModel(client_id=client_id, is_async=False, token=access_token, log_path="")
-        prof = await asyncio.wait_for(asyncio.to_thread(fyers.get_profile), timeout=7.0)
+        prof = await asyncio.wait_for(asyncio.to_thread(fyers.get_profile), timeout=3.5)
         ping_ms = round((time.perf_counter() - start_t) * 1000, 1)
 
         if prof.get("s") == "ok":
@@ -392,7 +417,7 @@ async def get_fyers_status(
             if is_auth_error:
                 MarketDataService.mark_fyers_token_expired(err)
                 feed_info = MarketDataService.get_feed_status()
-                return {
+                result = {
                     "configured": True,
                     "connected": False,
                     "token_status": "EXPIRED",
@@ -401,11 +426,18 @@ async def get_fyers_status(
                     "masked_fy_id": _mask_id(client_id),
                     "message": err,
                     "dual_engine": feed_info,
+                    "rate_governor": gov_metrics,
                     "ping_ms": ping_ms,
                     "checked_at_ist": checked_at_ist,
                     "checked_at_iso": checked_at_iso,
                     "fyers_live_ping": False,
+                    "token_preview": token_preview,
                 }
+                try:
+                    await cache_set("fyers_live_status_cache", result, ttl=30)
+                except Exception:
+                    pass
+                return result
 
             # Transient cluster error or non-auth notice: preserve active token state
             feed_info = MarketDataService.get_feed_status()
@@ -418,10 +450,12 @@ async def get_fyers_status(
                 "masked_fy_id": _mask_id(client_id),
                 "message": f"Fyers ping returned non-fatal response ({err}). Token preserved as active.",
                 "dual_engine": feed_info,
+                "rate_governor": gov_metrics,
                 "ping_ms": ping_ms,
                 "checked_at_ist": checked_at_ist,
                 "checked_at_iso": checked_at_iso,
                 "fyers_live_ping": False,
+                "token_preview": token_preview,
             }
             try:
                 await cache_set("fyers_live_status_cache", result, ttl=10)
@@ -434,7 +468,7 @@ async def get_fyers_status(
         is_timeout = isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "timeout" in err_str.lower()
         feed_info = MarketDataService.get_feed_status()
         if is_timeout:
-            return {
+            result = {
                 "configured": True,
                 "connected": MarketDataService._fyers_token_valid,
                 "token_status": "ACTIVE" if MarketDataService._fyers_token_valid else "TIMEOUT",
@@ -443,12 +477,19 @@ async def get_fyers_status(
                 "masked_fy_id": _mask_id(client_id),
                 "message": f"Fyers profile ping timed out ({ping_ms}ms). Token remains intact & valid; Yahoo backup active.",
                 "dual_engine": feed_info,
+                "rate_governor": gov_metrics,
                 "ping_ms": ping_ms,
                 "checked_at_ist": checked_at_ist,
                 "checked_at_iso": checked_at_iso,
                 "fyers_live_ping": False,
+                "token_preview": token_preview,
             }
-        return {
+            try:
+                await cache_set("fyers_live_status_cache", result, ttl=15)
+            except Exception:
+                pass
+            return result
+        result = {
             "configured": True,
             "connected": MarketDataService._fyers_token_valid,
             "token_status": "ACTIVE" if MarketDataService._fyers_token_valid else "ERROR",
@@ -457,11 +498,18 @@ async def get_fyers_status(
             "masked_fy_id": _mask_id(client_id),
             "message": f"Connection check encountered notice: {err_str}. Token remains active.",
             "dual_engine": feed_info,
+            "rate_governor": gov_metrics,
             "ping_ms": ping_ms,
             "checked_at_ist": checked_at_ist,
             "checked_at_iso": checked_at_iso,
             "fyers_live_ping": False,
+            "token_preview": token_preview,
         }
+        try:
+            await cache_set("fyers_live_status_cache", result, ttl=15)
+        except Exception:
+            pass
+        return result
 
 
 @router.get("/fyers/auth-url")

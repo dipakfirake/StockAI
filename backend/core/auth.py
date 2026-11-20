@@ -202,6 +202,15 @@ async def verify_admin_or_local(
     if is_local_ip and not is_external:
         return None  # Local probe allowed with zero DB overhead
 
+    # Fast-fail external unauthenticated requests with ZERO DB connection checkout
+    jwt_candidate = token or request.query_params.get("token") or request.cookies.get("access_token")
+    if not credentials and not jwt_candidate:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Administrator credentials required",
+            headers={"WWW-Authenticate": 'Basic realm="StockAI Administrative API"'},
+        )
+
     # External access: require Admin credentials with isolated session
     from backend.core.database import AsyncSessionLocal
     async with AsyncSessionLocal() as session:

@@ -271,7 +271,14 @@ async def poll_market_data():
                     await fyers_stream_service.subscribe_symbols(list(symbols))
                 else:
                     # Autonomous Dual Failover Engine: Active ONLY when Fyers is expired / disconnected.
-                    quotes_map = await market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=True)
+                    quotes_map = {}
+                    try:
+                        quotes_map = await asyncio.wait_for(
+                            market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=True),
+                            timeout=2.5
+                        )
+                    except (asyncio.TimeoutError, Exception) as fetch_err:
+                        logger.debug(f"[WebSocket] Dual-engine bulk quote poll notice: {fetch_err}")
                     now = time.monotonic()
                     for symbol, quote in quotes_map.items():
                         if quote and quote.get("price", 0) > 0:
@@ -319,9 +326,14 @@ async def poll_market_data():
 
         try:
             fyers_connected = fyers_stream_service.is_connected and MarketDataService._fyers_token_valid
-            poll_interval = 4.0 if fyers_connected else 3.0
+            if not is_indian_market_open():
+                poll_interval = 8.0  # Conserve VM resources when NSE is closed
+            elif fyers_connected:
+                poll_interval = 4.0
+            else:
+                poll_interval = 3.0
         except Exception:
-            poll_interval = 3.0
+            poll_interval = 4.0
 
         await asyncio.sleep(poll_interval)
 

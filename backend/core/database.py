@@ -19,6 +19,7 @@ if is_celery:
 else:
     engine_kwargs["pool_size"] = settings.DATABASE_POOL_SIZE
     engine_kwargs["max_overflow"] = settings.DATABASE_MAX_OVERFLOW
+    engine_kwargs["pool_timeout"] = 10.0
 
 import urllib.parse
 

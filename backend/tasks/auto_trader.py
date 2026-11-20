@@ -31,12 +31,23 @@ async def check_existing_position(db: AsyncSession, symbol: str) -> bool:
     count = result.scalar()
     return count > 0
 
-async def execute_smc_trade_if_confirmed(db: AsyncSession, symbol: str, smc_data: dict, is_enabled: bool):
+async def execute_smc_trade_if_confirmed(*args, **kwargs):
     """
     Multi-Timeframe Confirmation Logic.
     Takes a Daily FVG POI, fetches live 15-minute candles,
     and checks if there's a localized reversal confirmation.
+    Zero DB connection checkout unless a verified action requires trade execution.
     """
+    db = kwargs.get("db")
+    if len(args) == 4:
+        db, symbol, smc_data, is_enabled = args
+    elif len(args) == 3:
+        symbol, smc_data, is_enabled = args
+    else:
+        symbol = kwargs.get("symbol")
+        smc_data = kwargs.get("smc_data")
+        is_enabled = kwargs.get("is_enabled", False)
+
     try:
         fvgs = smc_data.get("fvgs", [])
         if not fvgs:
@@ -105,48 +116,54 @@ async def execute_smc_trade_if_confirmed(db: AsyncSession, symbol: str, smc_data
                         target = round(current_price - (risk * 2.5), 2)
 
                 if action:
-                    if await check_existing_position(db, symbol):
-                        logger.debug(f"[AutoTrader] Skipping {symbol}, already have an OPEN position.")
-                        return
-
-                    # Institutional Risk Management: 1% max account risk with capital cap
-                    risk_per_share = max(0.5, abs(current_price - stop))
-                    max_risk_rupees = 1000.0  # ₹1,000 max risk per setup (1% account equity)
-                    risk_based_qty = int(max_risk_rupees / risk_per_share)
-                    capital_capped_qty = int(MAX_CAPITAL_PER_TRADE / current_price) if current_price > 0 else 0
-                    quantity = min(risk_based_qty, capital_capped_qty) if risk_based_qty > 0 else capital_capped_qty
-                    if quantity <= 0:
-                        quantity = 1
-                        
-                    stop = round(stop, 2)
-                    
+                    stop_val = round(stop, 2)
                     if not is_enabled:
-                        # MANUAL MODE: Push Live Alert Toast to UI
+                        # MANUAL MODE: Push Live Alert Toast to UI (0 DB queries)
                         from backend.api.websocket import broadcast_alert
                         alert_msg = {
                             "title": f"SMC Zone Hit: {action} {symbol}",
-                            "message": f"15m Reversal Confirmed in Daily Zone! Target: {target}, SL: {stop}.",
+                            "message": f"15m Reversal Confirmed in Daily Zone! Target: {target}, SL: {stop_val}.",
                             "type": "info" if action == "BUY" else "warning"
                         }
                         await broadcast_alert(alert_msg)
                         logger.info(f"🔔 [AutoTrader] Sent manual alert for {symbol}: {action}")
                         return
 
-                    logger.info(f"🤖 [AutoTrader] Multi-Timeframe Confirmation for {symbol}: {action}")
-                    
-                    # Execute Paper Trade
-                    trade = await PaperTradingService.place_order(
-                        db=db,
-                        user_id=AI_TRADER_ID,
-                        symbol=symbol,
-                        direction=action,
-                        quantity=quantity,
-                        order_type="MARKET",
-                        product_type="INTRADAY", 
-                        target_price=target,
-                        stop_loss=stop
-                    )
-                    logger.info(f"✅ [AutoTrader] Executed Virtual {action} for {symbol}. Target: {target}, SL: {stop}")
+                    async def _place(session):
+                        if await check_existing_position(session, symbol):
+                            logger.debug(f"[AutoTrader] Skipping {symbol}, already have an OPEN position.")
+                            return
+
+                        # Institutional Risk Management: 1% max account risk with capital cap
+                        risk_per_share = max(0.5, abs(current_price - stop))
+                        max_risk_rupees = 1000.0  # ₹1,000 max risk per setup (1% account equity)
+                        risk_based_qty = int(max_risk_rupees / risk_per_share)
+                        capital_capped_qty = int(MAX_CAPITAL_PER_TRADE / current_price) if current_price > 0 else 0
+                        quantity = min(risk_based_qty, capital_capped_qty) if risk_based_qty > 0 else capital_capped_qty
+                        if quantity <= 0:
+                            quantity = 1
+
+                        logger.info(f"🤖 [AutoTrader] Multi-Timeframe Confirmation for {symbol}: {action}")
+                        
+                        # Execute Paper Trade
+                        trade = await PaperTradingService.place_order(
+                            db=session,
+                            user_id=AI_TRADER_ID,
+                            symbol=symbol,
+                            direction=action,
+                            quantity=quantity,
+                            order_type="MARKET",
+                            product_type="INTRADAY", 
+                            target_price=target,
+                            stop_loss=stop_val
+                        )
+                        logger.info(f"✅ [AutoTrader] Executed Virtual {action} for {symbol}. Target: {target}, SL: {stop_val}")
+
+                    if db is not None:
+                        await _place(db)
+                    else:
+                        async with AsyncSessionLocal() as local_db:
+                            await _place(local_db)
                     return # Exit after one valid setup per symbol
                 
     except Exception as e:
@@ -161,30 +178,32 @@ async def auto_trader_loop():
     
     while True:
         try:
-            now = datetime.now()
-            
             logger.info("🤖 [AutoTrader] Scanning 15-minute chart for SMC POI confirmations...")
             
-            async with AsyncSessionLocal() as db:
-                from backend.models.settings import SystemSettings
-                settings_rows = (await db.execute(select(SystemSettings).where(SystemSettings.key == "enable_auto_trader"))).scalars().all()
-                is_enabled = False
-                if settings_rows:
-                    is_enabled = settings_rows[0].value.lower() == "true"
+            # Isolated short check for enable_auto_trader flag
+            is_enabled = False
+            try:
+                async with AsyncSessionLocal() as db:
+                    from backend.models.settings import SystemSettings
+                    settings_rows = (await db.execute(select(SystemSettings).where(SystemSettings.key == "enable_auto_trader"))).scalars().all()
+                    if settings_rows:
+                        is_enabled = settings_rows[0].value.lower() == "true"
+            except Exception as dbe:
+                logger.debug(f"[AutoTrader] Error checking enable_auto_trader: {dbe}")
+            
+            if not is_enabled:
+                logger.info("🤖 [AutoTrader] Master switch is OFF. Running in MANUAL ALERT mode.")
                 
-                if not is_enabled:
-                    logger.info("🤖 [AutoTrader] Master switch is OFF. Running in MANUAL ALERT mode.")
-                    
-                # 1. Get the pre-calculated Daily Watchlist POIs
-                watchlist = smc_engine.get_watchlist()
-                
-                if not watchlist:
-                    logger.debug("[AutoTrader] Watchlist is empty. Waiting for SMC Engine generation...")
-                
-                # 2. Monitor each symbol in the watchlist on a 15-minute basis
-                for symbol, smc_data in watchlist.items():
-                    await execute_smc_trade_if_confirmed(db, symbol, smc_data, is_enabled)
-                    await asyncio.sleep(1) # Prevent rate limiting
+            # 1. Get the pre-calculated Daily Watchlist POIs
+            watchlist = smc_engine.get_watchlist()
+            
+            if not watchlist:
+                logger.debug("[AutoTrader] Watchlist is empty. Waiting for SMC Engine generation...")
+            
+            # 2. Monitor each symbol in the watchlist on a 15-minute basis (0 DB connections held)
+            for symbol, smc_data in watchlist.items():
+                await execute_smc_trade_if_confirmed(symbol=symbol, smc_data=smc_data, is_enabled=is_enabled)
+                await asyncio.sleep(1) # Prevent rate limiting
                     
             logger.info("🤖 [AutoTrader] 15m Scan complete. Sleeping until next candle...")
             

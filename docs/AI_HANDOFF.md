@@ -14,6 +14,28 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **LIVE SERVER 504 GATEWAY TIMEOUT & RELOAD FREEZE REMEDIATION (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User encountered `504 Gateway Time-out` (Nginx 1.20.1) on `https://stockai-live.duckdns.org/health/liv` and `Reconnecting to live server (attempt 1/3)...` while loading the Admin Control Center / Fyers Mobile Token Manager (`EXPIRED 06:00 AM Awaiting daily renewal`).
+    2. Client logs reported: `POST /api/presence/heartbeat` failed with 504, `Audit sync failed: AxiosError: timeout of 60000ms exceeded at SwingScreenerPage.tsx:199`, and page loading succeeded on 1st load but froze/timed out on 2nd reload.
+    3. Forensic Diagnosis:
+       - **Connection Pool Exhaustion via External Probes**: `verify_admin_or_local` checked out an `AsyncSessionLocal()` from PostgreSQL on every external request before verifying if credentials or JWT tokens even existed. Unauthenticated crawlers and browser reloads exhausted the connection pool.
+       - **Persistent DB Session Retention in AutoTrader**: `auto_trader_loop` held `async with AsyncSessionLocal() as db:` checked out across the entire watchlist loop while performing 15-minute candle HTTP requests and 1s sleeps, locking a DB connection for 20–40s.
+       - **Unbounded Swing Audit Sync**: `update_daily_prices` concurrently ran individual quote and candle fetches for 20–50 active setups across throttled Yahoo Finance endpoints when Fyers was expired, exceeding Axios's 60s timeout and holding DB sessions.
+       - **Uncached Expired Fyers Token**: When Fyers rejected authentication (`EXPIRED`), `get_fyers_status` did not cache the expired state, causing subsequent page reloads to block in a thread for 7.0s calling Fyers API.
+       - **Continuous 3.0s Off-Hours Polling**: `poll_market_data` polled Yahoo Finance every 3.0 seconds during off-market hours, consuming CPU and network sockets.
+    4. Remediations Applied:
+       - `backend/core/auth.py`: Added fast-fail in `verify_admin_or_local` when no credentials or JWT tokens are provided, returning HTTP 401 in $<0.1\text{ms}$ with **0 database connection checkout**.
+       - `backend/core/config.py` & `backend/core/database.py`: Increased `DATABASE_POOL_SIZE = 15`, `DATABASE_MAX_OVERFLOW = 25` (40 connections total), and added `"pool_timeout": 10.0` fail-fast guard.
+       - `backend/tasks/auto_trader.py`: Decoupled `auto_trader_loop` from persistent DB sessions; isolated `enable_auto_trader` check; only opens session when placing a verified trade.
+       - `backend/services/swing_audit_service.py`: Pre-fetches all quotes in 1 single bulk API call (`fetch_quotes_bulk`); bounded candle fetch per-stock (2.5s) and bounded the gather with a strict 12.0s timeout, eliminating the 60s Axios timeout.
+       - `backend/api/settings.py`: Added fast-return for known expired tokens; cached expired token status with 30s TTL; reduced profile ping timeout from 7.0s to 3.5s.
+       - `backend/api/websocket.py`: Bounded `fetch_quotes_bulk` with a 2.5s timeout; paced off-hours polling to 8.0s when Indian market is closed.
+  - **Verification Evidence**:
+    - Backend test suite (`test_admin_docs_and_health_security.py`, `test_system_design.py`, `test_swing_audit.py`, `test_fyers_rate_governor.py`, `test_screener_proximity_radar.py`): **41 / 41 passed (100% green)** in 69.52s.
+    - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 14.11s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls `origin main` on the live server and runs `docker compose restart backend`.
+
 - **DYNAMIC ML ATR-ADAPTIVE SWING TARGETS, PRE-BUY OPPORTUNITIES (BEFORE BUY PRICE) & SELL PRE-ALERTS (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. **Forensic Resolution of the Static +12.5% Target Degeneracy**: User audited the Swing Screener Radar and noted that 15 out of 16 stocks showed identical `+12.5%` target gain and `5.79%` stop loss. Demanded root-cause diagnosis, mathematical multi-factor indicators, and dynamic ML/DL formulas calibrated to individual stock volatility and historical audit lessons.

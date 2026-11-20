@@ -428,23 +428,38 @@ class SwingAuditService:
                 if not (a.status in ("TARGET_ACHIEVED", "TARGET_2_ACHIEVED", "STOPLOSS_HIT", "DAY_11_EXIT") and a.exit_price is not None)
             ]
 
-            sem = asyncio.Semaphore(12)
+            active_symbols = list({a.symbol for a in active_audits if a.symbol})
+            quotes_bulk_map = {}
+            if active_symbols:
+                try:
+                    quotes_bulk_map = await market_data_service.fetch_quotes_bulk(active_symbols, use_fallback=True)
+                except Exception as q_err:
+                    logger.debug(f"Audit sync bulk quote prefetch failed: {q_err}")
+
+            sem = asyncio.Semaphore(6)
 
             async def _fetch_single_audit_data(aud):
                 async with sem:
-                    q = None
-                    try:
-                        q = await market_data_service.fetch_quote(aud.symbol)
-                    except Exception as q_err:
-                        logger.debug(f"Quote fetch fallback failed for {aud.symbol}: {q_err}")
+                    q = quotes_bulk_map.get(aud.symbol)
+                    if not q:
+                        try:
+                            q = await asyncio.wait_for(market_data_service.fetch_quote(aud.symbol), timeout=1.5)
+                        except Exception:
+                            q = None
 
                     c = None
                     try:
-                        c = await market_data_service.fetch_candles(aud.symbol, "1d", limit=30)
+                        c = await asyncio.wait_for(
+                            market_data_service.fetch_candles(aud.symbol, "1d", limit=30),
+                            timeout=2.5
+                        )
                         if not c or not isinstance(c, list):
                             clean = aud.symbol.replace(".NS", "").replace(".BO", "").strip().upper()
                             alt = f"{clean}.BO" if aud.symbol.endswith(".NS") else f"{clean}.NS"
-                            c = await market_data_service.fetch_candles(alt, "1d", limit=30)
+                            c = await asyncio.wait_for(
+                                market_data_service.fetch_candles(alt, "1d", limit=30),
+                                timeout=2.0
+                            )
                     except Exception as c_err:
                         logger.debug(f"Candle fetch fallback failed for {aud.symbol}: {c_err}")
                     return aud.id, c, q
@@ -452,10 +467,18 @@ class SwingAuditService:
             prefetched_map = {}
             if active_audits:
                 logger.info(f"Concurrently pre-fetching candles and quotes for {len(active_audits)} active audit stocks...")
-                prefetch_results = await asyncio.gather(*[_fetch_single_audit_data(a) for a in active_audits], return_exceptions=True)
-                for res in prefetch_results:
-                    if isinstance(res, tuple) and len(res) == 3:
-                        prefetched_map[res[0]] = (res[1], res[2])
+                try:
+                    prefetch_results = await asyncio.wait_for(
+                        asyncio.gather(*[_fetch_single_audit_data(a) for a in active_audits], return_exceptions=True),
+                        timeout=12.0
+                    )
+                    for res in prefetch_results:
+                        if isinstance(res, tuple) and len(res) == 3:
+                            prefetched_map[res[0]] = (res[1], res[2])
+                except asyncio.TimeoutError:
+                    logger.warning("Audit stock candle pre-fetching timed out (12s bound), continuing with quotes.")
+                    for a in active_audits:
+                        prefetched_map[a.id] = (None, quotes_bulk_map.get(a.symbol))
 
             updated_count = 0
 

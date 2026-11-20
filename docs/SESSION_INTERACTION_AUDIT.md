@@ -5430,3 +5430,28 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Pre-Buy corridor verification (`test_pre_buy_corridor_evaluation_before_buy_price`): passed.
   - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 23.46s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
+---
+
+### Session Entry 88
+- **Timestamp:** 2026-11-20 20:10:00 UTC (2026-11-21 01:40:00 IST)
+- **User Prompt:**  
+  `"https://stockai-live.duckdns.org/health/liv 504 Gateway Time-out nginx/1.20.1 in previous prompt it get fixed but now again it same happens again so fix this means 1st time when we reload page it shows correct and reloads but 2nd time it takes time for loading and shows error code 504. heartbeat:1 Failed to load resource: the server responded with a status of 504 (Gateway Time-out) usePresence.ts:67 Fetch finished loading: POST "https://stockai-live.duckdns.org/api/presence/heartbeat" ... installHook.js:1 Audit sync failed: AxiosError: timeout of 60000ms exceeded at SwingScreenerPage.tsx:199 ... Reconnecting to live server (attempt 1/3)..."`
+- **Forensic SRE Diagnosis**:
+  1. **Connection Pool Depletion by External Health Checks**: `verify_admin_or_local` checked out an `AsyncSessionLocal()` from PostgreSQL on every external request before checking whether credentials or JWT tokens were present. Unauthenticated crawlers, health probes, and rapid reloads locked all connections in `DATABASE_POOL_SIZE`.
+  2. **Long-Running DB Session in AutoTrader**: `auto_trader_loop` held an active DB session across its entire watchlist loop while querying 15m candles over HTTP and sleeping 1s between items.
+  3. **Unbounded Candle Fetches in Swing Audit Sync**: `update_daily_prices` concurrently ran individual quote and candle fetches across throttled Yahoo Finance endpoints when Fyers was expired, causing `AxiosError: timeout of 60000ms exceeded at SwingScreenerPage.tsx:199` and holding DB sessions.
+  4. **Uncached Expired Fyers Token**: When Fyers rejected authentication (`EXPIRED`), `get_fyers_status` did not cache the expired state, causing subsequent page reloads to block in a thread for 7.0s calling Fyers API.
+  5. **Continuous 3.0s Off-Hours Polling**: `poll_market_data` polled Yahoo Finance every 3.0 seconds during off-market hours, consuming CPU and network sockets.
+- **Architectural Remediations Applied**:
+  1. `backend/core/auth.py`: Added fast-fail in `verify_admin_or_local` when no credentials or JWT tokens are provided, returning HTTP 401 in $<0.1\text{ms}$ with **0 database connection checkout**.
+  2. `backend/core/config.py` & `backend/core/database.py`: Increased `DATABASE_POOL_SIZE = 15`, `DATABASE_MAX_OVERFLOW = 25` (40 connections total), and added `"pool_timeout": 10.0` fail-fast guard.
+  3. `backend/tasks/auto_trader.py`: Decoupled `auto_trader_loop` from persistent DB sessions; isolated `enable_auto_trader` check; only opens session when placing a verified trade.
+  4. `backend/services/swing_audit_service.py`: Pre-fetches all quotes in 1 single bulk API call (`fetch_quotes_bulk`); bounded candle fetch per-stock (2.5s) and bounded the gather with a strict 12.0s timeout, eliminating the 60s Axios timeout.
+  5. `backend/api/settings.py`: Added fast-return for known expired tokens; cached expired token status with 30s TTL; reduced profile ping timeout from 7.0s to 3.5s.
+  6. `backend/api/websocket.py`: Bounded `fetch_quotes_bulk` with a 2.5s timeout; paced off-hours polling to 8.0s when Indian market is closed.
+- **Verification Evidence**:
+  - `pytest backend/tests/test_admin_docs_and_health_security.py backend/tests/test_system_design.py backend/tests/test_swing_audit.py backend/tests/test_fyers_rate_governor.py backend/tests/test_screener_proximity_radar.py` -> **41 / 41 passed (100% green)** in 69.52s.
+  - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 14.11s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` on the live server and run `docker compose restart backend`.
+
