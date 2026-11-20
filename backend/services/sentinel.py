@@ -177,8 +177,8 @@ class SentinelService:
             # Check Redis broker connection for Celery
             from backend.core.cache import get_redis
             redis = await get_redis()
-            keys = await redis.keys("celery*")
-            return {"status": "HEALTHY", "active_workers": 1, "queue_keys": len(keys), "error": None}
+            await redis.ping()
+            return {"status": "HEALTHY", "active_workers": 1, "error": None}
         except Exception as e:
             await self._record_incident(
                 subsystem="CELERY",

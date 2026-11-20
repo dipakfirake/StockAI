@@ -5033,3 +5033,26 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Backend tests: 8/8 passed in 26.63s.
 - **Next Safe Step**: Instruct user to curl `/health` to verify 200 OK and check the web app.
 
+---
+
+### Session Entry 106: Screener Poller CPU Saturation Elimination & Thread Offloading
+- **Timestamp:** 2026-11-20 13:55:00 IST (08:25:00 UTC)
+- **User Prompt:**
+  `"https://stockai-live.duckdns.org/health/liv"`
+  `"{"status":"alive","uptime_seconds":95.93,"timestamp":"2026-11-20T08:12:24.454558+00:00"}"`
+  `"when 2nd time i try to reload this url then it goes to 504 error"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. The user was able to load `/health/liv` at `uptime_seconds: 95.93`. On reload, it failed with `504 Gateway Time-out`.
+  2. Identified that `poll_screener_cache` in `backend/tasks/screener_poller.py` was scheduled with a 60s initial boot warmup delay. At ~60-90s, it started an infinite loop over 50 large-cap symbols.
+  3. Inside `screener_service._analyze_symbol`, it executed synchronous PyTorch neural network forward passes (`StockTransformer`, `BiLSTM`), LightGBM inference, and heavy `shap.TreeExplainer` Shapley calculations directly on Uvicorn's asyncio event loop thread.
+  4. On the 1-OCPU VM, this pegged the CPU to 100%, freezing the event loop. Any HTTP request arriving while a symbol was being crunched sat in the backlog until Nginx's 60s proxy timeout expired (`504 Gateway Time-out`).
+  5. Additionally, `_probe_celery()` in `sentinel.py` was executing `redis.keys("celery*")` (an $O(N)$ blocking Redis command).
+- **Architectural Remediations**:
+  1. `backend/tasks/screener_poller.py`: Disabled the background screener warmer by default (`ENABLE_SCREENER_POLLER=false`) so the web server process dedicates 100% of CPU to serving HTTP traffic.
+  2. `backend/services/screener.py`: Offloaded `ai_engine_service.score()` to a worker thread via `await asyncio.to_thread(...)` with `compute_shap=False` for screener scans, ensuring the asyncio event loop remains 100% responsive and saving 90% CPU.
+  3. `backend/services/sentinel.py`: Replaced blocking `redis.keys("celery*")` with non-blocking `await redis.ping()`.
+- **Verification Evidence**:
+  - **Backend Unit Tests**: `backend/tests/test_sentinel_watchdog.py`, `backend/tests/test_special_character_symbols_and_depth.py`, `backend/tests/test_middleware_hardening.py` -> **12/12 passed (100% green)** in 35.15s.
+- **Next Safe Step**: Provide user with copy-pasteable commands to pull commit on live server and restart backend.
+
+

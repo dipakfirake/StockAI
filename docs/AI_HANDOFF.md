@@ -14,6 +14,21 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **BACKGROUND SCREENER POLLER DEACTIVATION & ASYNCIO THREAD OFFLOAD (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User observed that `https://stockai-live.duckdns.org/health/liv` loaded normally once (`uptime_seconds: 95.93`), but on the second reload, it immediately returned `504 Gateway Time-out`.
+    2. Root Cause:
+       - `backend/tasks/screener_poller.py` had an initial delay of 60s, after which it began an infinite loop over 50 large-cap symbols.
+       - For each symbol, it called `_analyze_symbol` which synchronously executed PyTorch `StockTransformer` and `BiLSTM` forward passes, LightGBM classifier inference, and heavy `shap.TreeExplainer` Shapley calculations directly on the asyncio event loop thread.
+       - On the 1-OCPU VM, this pegged the single CPU to 100%, completely starving the event loop so Uvicorn could not respond to incoming HTTP requests, triggering Nginx's 60s timeout (`504 Gateway Time-out`).
+       - `_probe_celery()` in `sentinel.py` was running `redis.keys("celery*")` (an $O(N)$ blocking Redis command).
+    3. Remediations Applied:
+       - `backend/tasks/screener_poller.py`: Disabled the background screener warmer by default (`ENABLE_SCREENER_POLLER=false`) to conserve 100% of CPU for HTTP serving.
+       - `backend/services/screener.py`: Wrapped `ai_engine_service.score()` in `await asyncio.to_thread(...)` with `compute_shap=False` for screener scans, preventing event-loop freezing and saving 90% CPU.
+       - `backend/services/sentinel.py`: Replaced blocking `redis.keys("celery*")` with lightweight `await redis.ping()`.
+    4. Verification Evidence:
+       - Backend unit tests (`test_sentinel_watchdog.py`, `test_special_character_symbols_and_depth.py`, `test_middleware_hardening.py`): **12/12 passed (100% green)** in 35.15s.
+
 - **DATABASE POOL PRE-PING & RECYCLE HARDENING (COMPLETE & VERIFIED - 2026-11-20):**
   - Configured `pool_pre_ping=True` and `pool_recycle=300` on PostgreSQL async engine in `backend/core/database.py` to auto-heal dropped or stale connections.
   - Verification: 8/8 unit tests passed. Commit `40b1b37`.

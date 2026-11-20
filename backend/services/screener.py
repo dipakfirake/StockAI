@@ -290,10 +290,12 @@ class ScreenerService:
             tech_raw = sig.get("composite_rating", 50)
             
             # 3. AI ML Score (Tri-Model Ensemble: LightGBM + BiLSTM + Transformer)
-            ai_res = ai_engine_service.score(
+            # Offload heavy neural network and tree inference to a background thread to prevent event-loop freezing
+            ai_res = await asyncio.to_thread(
+                ai_engine_service.score,
                 indicators if indicators else {},
                 symbol=symbol,
-                compute_shap=True,
+                compute_shap=False,
                 candles=candles if isinstance(candles, list) else None,
             )
             
