@@ -1,0 +1,7 @@
+# robots.txt for StockAI
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+
+Sitemap: https://stockai-live.duckdns.org/sitemap.xml

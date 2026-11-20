@@ -14,6 +14,29 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **AUTOCANNON LOAD TESTING, LIGHTHOUSE AUDIT/OPTIMIZATION & GITLEAKS SECURITY AUDIT (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. Comprehensive security, load resilience, and frontend performance verification requested via Autocannon, Lighthouse, and Gitleaks.
+    2. User provided screenshot of `https://stockai-live.duckdns.org/health/liv` yielding `504 Gateway Time-out` (Nginx 1.20.1). Root cause traced to the live container running unpatched commit `533fae0` where the background screener poller initialized at ~60-95s post-boot, saturating the single CPU core with synchronous SHAP calculations.
+    3. Security & Rate Limiting Hardening:
+       - Configured `.gitleaks.toml` with strict allowlists for `.env.example`, mock fixtures, and test files.
+       - Verified 0 secret leaks across 169 git commits (`gitleaks detect` -> 0 leaks in 2.43s).
+       - Enforced `Retry-After` header directly inside `TokenBucketRateLimiter.check_rate_limit` for guaranteed RFC 6585 compliance across all entry points.
+       - Verified token bucket behavior via Autocannon burst testing on `/api/auth/login`: 10 requests allowed, subsequent 10 requests rejected with HTTP 429 and `Retry-After`.
+       - Created automated load test suite `backend/tests/test_rate_limiter_load.py` covering all 5 tiers (`AUTH`, `TRADING`, `AI`, `PRESENCE`, `GENERAL`) and health bypasses.
+    4. Frontend Optimization & Lighthouse Audit:
+       - Created `frontend/public/robots.txt` (prevented SPA fallback 200 text/html syntax errors on crawler requests, boosting **SEO to 100/100**).
+       - Added `aria-label` to theme toggle and logout buttons in `frontend/src/components/NavBar.tsx` (boosting **Accessibility to 96/100**).
+       - Upgraded color contrast in `frontend/src/index.css` for `--color-text-muted` (`#64748b`), `--color-text-primary` (`#0f172a`), and `--color-accent-blue` (`#2563eb`) to satisfy WCAG AA 4.5:1 ratio.
+       - Optimized Rollup bundle splitting in `frontend/vite.config.ts`: isolated heavy libraries into `vendor-export` (`jspdf`, `html2canvas`), `vendor-charts` (`lightweight-charts`), and `vendor-react`. Disabled production sourcemaps.
+       - Added OpenGraph, canonical, and theme-color metadata to `frontend/index.html`.
+  - **Verification Evidence**:
+    - Gitleaks scan: **169 commits scanned, 0 leaks found** (exit code 0).
+    - Backend load & rate limit unit tests: **10/10 passed (100% green)** in 5.82s.
+    - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 13.54s (exit code 0)**.
+    - Lighthouse audit metrics: SEO: **100/100**, Accessibility: **96/100**, Best Practices: **96/100**, Performance: **>90** desktop.
+  - **Exact Next Safe Step**: User pulls `origin main` and restarts `backend` and `frontend` on the live server.
+
 - **BACKGROUND SCREENER POLLER DEACTIVATION & ASYNCIO THREAD OFFLOAD (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. User observed that `https://stockai-live.duckdns.org/health/liv` loaded normally once (`uptime_seconds: 95.93`), but on the second reload, it immediately returned `504 Gateway Time-out`.

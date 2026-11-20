@@ -153,6 +153,8 @@ class TokenBucketRateLimiter:
             "X-RateLimit-Reset": str(int(wait_time) if wait_time > 0 else 0),
             "X-RateLimit-Tier": tier.name,
         }
+        if not allowed:
+            headers["Retry-After"] = str(max(1, int(wait_time)))
 
         return allowed, headers, wait_time
 

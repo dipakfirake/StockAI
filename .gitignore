@@ -48,6 +48,8 @@ backend/logs/
 fyersApi.log
 generate_fyers_token.bat
 scratch/
+tools/
+audits/lighthouse*
 .agents/teamwork/
 audits/**/*.xlsx
 !audits/**/.gitkeep

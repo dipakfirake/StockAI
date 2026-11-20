@@ -120,6 +120,7 @@ export default function NavBar() {
             
             <button 
               onClick={toggleTheme}
+              aria-label="Toggle Theme"
               title="Toggle Theme"
               style={{
                 flexShrink: 0,
@@ -132,6 +133,7 @@ export default function NavBar() {
             
             <button 
               onClick={() => setWatchlistOpen(true)}
+              aria-label="Open Watchlist"
               title="Open Watchlist"
               style={{
                 flexShrink: 0,
@@ -148,6 +150,7 @@ export default function NavBar() {
 
             <button 
               onClick={() => { logout(); navigate('/login'); }} 
+              aria-label="Logout"
               title="Logout" 
               style={{ 
                 flexShrink: 0,
@@ -166,6 +169,7 @@ export default function NavBar() {
           <div className="nav-actions" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button 
               onClick={toggleTheme}
+              aria-label="Toggle Theme"
               title="Toggle Theme"
               style={{
                 flexShrink: 0,
@@ -248,15 +252,15 @@ export default function NavBar() {
           </button>
 
           <NavLink to="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none', color: 'inherit' }}>
-            <TrendingUp size={20} color="#3b82f6" />
-            <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>AI<span style={{ color: '#3b82f6' }}>Stock</span></span>
+            <TrendingUp size={20} color="var(--color-accent-blue)" />
+            <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>AI<span style={{ color: 'var(--color-accent-blue)' }}>Stock</span></span>
           </NavLink>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {user && !isPro && (
             <NavLink to="/pricing" style={{
-              background: '#3b82f6',
+              background: 'var(--color-accent-blue)',
               color: 'white',
               padding: '4px 8px',
               borderRadius: '12px',
@@ -286,6 +290,8 @@ export default function NavBar() {
 
           <button 
             onClick={toggleTheme}
+            aria-label="Toggle theme (dark/light)"
+            title="Toggle theme"
             style={{
               background: 'transparent',
               border: 'none',
@@ -301,6 +307,8 @@ export default function NavBar() {
           {user && (
             <button 
               onClick={() => setWatchlistOpen(true)}
+              aria-label="Open Watchlist"
+              title="Open Watchlist"
               style={{
                 background: 'rgba(255,255,255,0.06)',
                 border: '1px solid var(--border-color)',

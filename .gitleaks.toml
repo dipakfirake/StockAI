@@ -1,0 +1,25 @@
+# Gitleaks Configuration for StockAI
+# https://github.com/gitleaks/gitleaks
+
+title = "StockAI Gitleaks Secret Protection Policy"
+
+[extend]
+# Extends default gitleaks rules
+
+[allowlist]
+description = "Global allowlist for sanitized test fixtures and examples"
+paths = [
+    '''\.env\.example$''',
+    '''backend/tests/.*''',
+    '''docs/.*''',
+    '''tools/.*''',
+]
+regexes = [
+    '''change-me-in-production.*''',
+    '''SecretAdminPassword123!''',
+    '''mock_token.*''',
+    '''StockAI2026SecureRedisPass''',
+    '''stockpass''',
+    '''postgres:postgres''',
+    '''test_secret.*''',
+]

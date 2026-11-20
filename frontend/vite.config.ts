@@ -32,6 +32,17 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false, // Omit large sourcemaps in production bundle for optimal performance
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom', 'zustand'],
+          'vendor-charts': ['lightweight-charts'],
+          'vendor-export': ['jspdf', 'html2canvas'],
+          'vendor-icons': ['lucide-react'],
+        },
+      },
+    },
   },
 })
