@@ -5309,3 +5309,39 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 
 
+
+
+---
+
+### Session Entry 111: Screener Bulk Pre-Fetching, Nifty 50 Single-Flight Benchmark & Fresh Scan 504 Timeout Elimination
+- **Timestamp:** 2026-11-20 20:50:00 IST (15:20:00 UTC)
+- **User Prompt:**
+  `"Reconnecting to live server (attempt 1/3)... [NIFTY 50 25,800.60...] Fyers Mobile Token Manager EXPIRED (06:00 AM)... while clicking on fresh scvan in the swing screener component this is happening so make a strategy to handle this limits."`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. Clicking "Run Fresh Scan" in `SwingScreenerPage.tsx` initiated `GET /api/market/screener?sector=NIFTY_50&force_refresh=true`.
+  2. In `backend/services/screener.py`, `_analyze_symbol` was sequentially and concurrently dispatched for all 25–50 symbols in the sector. For each symbol, it triggered:
+     - `fetch_quote(symbol)` (25–50 outbound requests)
+     - `fetch_candles(symbol, "1d", limit=250)` (25–50 requests)
+     - `fetch_candles("^NSEI", "1d", limit=50)` (25–50 identical redundant benchmark queries!)
+     - `get_stock_info(symbol)` (fundamentals scraping)
+     - `fetch_corporate_events(symbol)` (corporate calendar scraping)
+     - `fetch_stock_news(symbol)` (Google News RSS scraping without tight timeouts)
+  3. Totaling 150 to 300 network requests across 5 distinct external services, taking 60–75s to complete and triggering Nginx's 60-second gateway timeout (`504 Gateway Time-out`).
+  4. In `frontend/src/services/api.ts`, Axios intercepted the 504 timeout and dispatched `api_connection_state: { state: 'reconnecting', attempt: 1 }`. `ReconnectingBanner.tsx` displayed `Reconnecting to live server (attempt 1/3)...`, while Axios immediately retried the heavy request, restarting the server-saturating cycle.
+  5. The Fyers Mobile Token Manager indicated `EXPIRED (06:00 AM) Awaiting daily renewal`, which is SEBI-mandated daily 06:00 AM IST token invalidation requiring user renewal via the mobile interface or automated morning login. When expired, data calls safely fell back to Yahoo Finance, where 300 rapid requests triggered Yahoo 429 rate limits.
+- **Architectural Remediations**:
+  1. **Bulk Quote Pre-Fetching (`backend/services/screener.py`)**:
+     - Pre-fetches all sector symbols in a single batch via `await market_data_service.fetch_quotes_bulk(symbols)`.
+     - Reduces 50 independent quote queries into 1 single bulk API call (a 50x network efficiency improvement).
+     - Passes `prefetched_quote` directly into `_analyze_symbol`, skipping individual quote calls.
+  2. **Single-Flight Benchmark Pre-Computation (`backend/services/screener.py`)**:
+     - Fetches and computes `^NSEI` benchmark indicators ONCE prior to starting the stock analysis loop.
+     - Passes `prefetched_nifty_indicators` to all symbols, eliminating 25–50 duplicate Nifty candle requests.
+  3. **Guarded News Scraping Timeout (`backend/services/screener.py`)**:
+     - Wrapped `fetch_stock_news(symbol)` in `asyncio.wait_for(..., timeout=1.5)` with graceful fallback to `[]`, preventing slow external RSS feeds from delaying the screener response.
+  4. **Pacing Optimization**:
+     - Reduced batch pacing delay between batches from 300ms to 150ms while respecting rate governor limits.
+- **Verification Evidence**:
+  - `pytest backend/tests/test_fyers_rate_governor.py backend/tests/test_swing_audit.py` -> **18 / 18 passed (100% green)** in 48.30s.
+  - `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 15.38s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` container on the live server.

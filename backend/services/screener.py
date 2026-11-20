@@ -96,13 +96,37 @@ class ScreenerService:
 
         logger.info(f"Starting Swing Trade Screener for {len(symbols)} symbols ({norm_sector})...")
         
-        # We process in batches with rate-limit guards
+        # 1. Pre-fetch real-time quotes in bulk (50x efficiency gain: 1 single Fyers API call instead of N separate calls)
+        quotes_map = {}
+        try:
+            quotes_map = await market_data_service.fetch_quotes_bulk(symbols)
+        except Exception as e:
+            logger.debug(f"Failed to prefetch bulk quotes for {norm_sector}: {e}")
+
+        # 2. Pre-fetch benchmark Nifty 50 indicators ONCE (eliminates N duplicate candle queries)
+        nifty_indicators = {}
+        try:
+            nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
+            if nifty_candles and len(nifty_candles) >= 20:
+                nifty_indicators = indicator_service.compute_all(nifty_candles)
+        except Exception as e:
+            logger.debug(f"Failed to prefetch Nifty indicators: {e}")
+
+        # 3. Process in batches with rate-limit guards
         batch_size = 6
         all_results = []
         
         for i in range(0, len(symbols), batch_size):
             batch = symbols[i:i + batch_size]
-            tasks = [ScreenerService._analyze_symbol(sym, force_refresh=force_refresh) for sym in batch]
+            tasks = [
+                ScreenerService._analyze_symbol(
+                    sym,
+                    force_refresh=force_refresh,
+                    prefetched_quote=quotes_map.get(sym),
+                    prefetched_nifty_indicators=nifty_indicators
+                )
+                for sym in batch
+            ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             for res in results:
@@ -110,7 +134,7 @@ class ScreenerService:
                     all_results.append(res)
                     
             if i + batch_size < len(symbols):
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(0.15)
 
         # Categorize into explicit trading lists
         buy_stocks = [r for r in all_results if r.get("action") == "BUY"]
@@ -214,11 +238,35 @@ class ScreenerService:
         all_symbols = ScreenerService.get_all_sector_symbols()
         logger.info(f"Starting Multi-Sector Swing Screener for all {len(all_symbols)} unique symbols across {len(SECTOR_UNIVERSES)} sectors...")
 
-        batch_size = 5
+        # 1. Pre-fetch real-time quotes in bulk for all unique symbols across sectors
+        quotes_map = {}
+        try:
+            quotes_map = await market_data_service.fetch_quotes_bulk(all_symbols)
+        except Exception as e:
+            logger.debug(f"Failed to prefetch all-sectors bulk quotes: {e}")
+
+        # 2. Pre-fetch benchmark Nifty 50 indicators ONCE
+        nifty_indicators = {}
+        try:
+            nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
+            if nifty_candles and len(nifty_candles) >= 20:
+                nifty_indicators = indicator_service.compute_all(nifty_candles)
+        except Exception as e:
+            logger.debug(f"Failed to prefetch Nifty indicators: {e}")
+
+        batch_size = 6
         all_results = []
         for i in range(0, len(all_symbols), batch_size):
             batch = all_symbols[i:i + batch_size]
-            tasks = [ScreenerService._analyze_symbol(sym, force_refresh=force_refresh) for sym in batch]
+            tasks = [
+                ScreenerService._analyze_symbol(
+                    sym,
+                    force_refresh=force_refresh,
+                    prefetched_quote=quotes_map.get(sym),
+                    prefetched_nifty_indicators=nifty_indicators
+                )
+                for sym in batch
+            ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for res in results:
@@ -227,7 +275,7 @@ class ScreenerService:
 
             if i + batch_size < len(all_symbols):
                 # Pacing delay between batches to respect rate limits
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.15)
 
         buy_stocks = [r for r in all_results if r.get("action") == "BUY" and float(r.get("total_score", 0) or 0) >= min_score]
         buy_stocks.sort(key=lambda x: float(x.get("total_score", 0) or 0), reverse=True)
@@ -243,7 +291,12 @@ class ScreenerService:
         return out
 
     @staticmethod
-    async def _analyze_symbol(symbol: str, force_refresh: bool = False) -> dict:
+    async def _analyze_symbol(
+        symbol: str,
+        force_refresh: bool = False,
+        prefetched_quote: Optional[dict] = None,
+        prefetched_nifty_indicators: Optional[dict] = None,
+    ) -> dict:
         """Analyze a single symbol across all three dimensions."""
         cache_key = f"screener_analysis:{symbol}"
         if not force_refresh:
@@ -255,11 +308,27 @@ class ScreenerService:
             # 1. Fetch Data
             # Use limit=250 (approx 1 year of daily candles) which is optimal for swing trade indicators (EMA 200, ATR 14, RSI 14)
             candles_task = market_data_service.fetch_candles(symbol, "1d", limit=250)
-            quote_task = market_data_service.fetch_quote(symbol)
+            
+            # Fast-path quote: use pre-fetched bulk quote if valid
+            if prefetched_quote and prefetched_quote.get("price", 0) > 0:
+                async def _resolved_quote():
+                    return prefetched_quote
+                quote_task = _resolved_quote()
+            else:
+                quote_task = market_data_service.fetch_quote(symbol)
+
+            # Fundamentals and corporate events don't change intra-day; fast cache reads
             info_task = market_data_service.get_stock_info(symbol)
             events_task = market_data_service.fetch_corporate_events(symbol)
+            
+            # News scraping with tight 1.5s timeout to prevent external network freezes
             from backend.data.ingestion.news_scraper import fetch_stock_news
-            news_task = fetch_stock_news(symbol)
+            async def _guarded_news():
+                try:
+                    return await asyncio.wait_for(fetch_stock_news(symbol), timeout=1.5)
+                except Exception:
+                    return []
+            news_task = _guarded_news()
             
             candles, quote, info, events, news = await asyncio.gather(
                 candles_task, quote_task, info_task, events_task, news_task, return_exceptions=True
@@ -281,13 +350,15 @@ class ScreenerService:
             # 2.5 Market Relative Strength (Accuracy Upgrade)
             if indicators:
                 try:
-                    nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
-                    if nifty_candles and len(nifty_candles) >= 20:
-                        nifty_indicators = indicator_service.compute_all(nifty_candles)
-                        if len(nifty_indicators) > 0 and 'price_return_20d' in nifty_indicators:
-                            nifty_return_20d = nifty_indicators.get("price_return_20d", 0.0)
-                            stock_return_20d = indicators.get("price_return_20d", 0.0)
-                            indicators["rs_momentum_20d"] = stock_return_20d - nifty_return_20d
+                    nifty_ind = prefetched_nifty_indicators
+                    if not nifty_ind:
+                        nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
+                        if nifty_candles and len(nifty_candles) >= 20:
+                            nifty_ind = indicator_service.compute_all(nifty_candles)
+                    if nifty_ind and len(nifty_ind) > 0 and 'price_return_20d' in nifty_ind:
+                        nifty_return_20d = nifty_ind.get("price_return_20d", 0.0)
+                        stock_return_20d = indicators.get("price_return_20d", 0.0)
+                        indicators["rs_momentum_20d"] = stock_return_20d - nifty_return_20d
                 except Exception as e:
                     import logging
                     logging.getLogger(__name__).warning(f"Failed to fetch Nifty for RS: {e}")

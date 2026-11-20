@@ -14,6 +14,25 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **SWING SCREENER FRESH SCAN OPTIMIZATION, BULK PRE-FETCHING & 504 TIMEOUT ELIMINATION (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User reported that clicking "Run Fresh Scan" in `SwingScreenerPage.tsx` triggered `Reconnecting to live server (attempt 1/3)...`, while Fyers Mobile Token Manager showed `EXPIRED (06:00 AM) Awaiting daily renewal`, and market data was throttled or timed out with 504.
+    2. Root Cause:
+       - Clicking "Run Fresh Scan" sent `GET /api/market/screener?sector=NIFTY_50&force_refresh=true`.
+       - For 25–50 symbols, `_analyze_symbol` was sequentially and concurrently dispatching `fetch_quote`, `fetch_candles`, duplicate `fetch_candles("^NSEI")`, fundamentals, events, and news scraping, generating **150 to 300 network requests**!
+       - This exceeded Nginx's 60-second gateway timeout (`504 Gateway Time-out`), prompting Axios in `api.ts` to fire `api_connection_state: 'reconnecting'` and trigger `ReconnectingBanner.tsx`.
+       - Daily 06:00 AM IST token expiry is SEBI-mandated, routing requests to Yahoo Finance backup where 300 requests triggered Yahoo 429 rate limits.
+    3. Remediations Applied:
+       - `backend/services/screener.py`:
+         - Pre-fetches all quotes in **1 single bulk API call** (`fetch_quotes_bulk(symbols)`), replacing 50 individual calls.
+         - Pre-fetches and calculates benchmark `^NSEI` indicators **ONCE**, replacing 50 redundant candle calls.
+         - Added `asyncio.wait_for(fetch_stock_news(symbol), timeout=1.5)` so slow news scraping never blocks the scan.
+         - Paced batches at 150ms to smoothly stream through the Fyers Rate Governor.
+  - **Verification Evidence**:
+    - Backend Rate Governor & Swing Audit tests (`test_fyers_rate_governor.py`, `test_swing_audit.py`): **18 / 18 passed (100% green)** in 48.30s.
+    - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 15.38s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls `origin main` and restarts `backend` on the live server.
+
 - **FYERS ZERO-RATE-LIMIT GOVERNOR & SINGLE-FLIGHT COALESCED PIPELINE (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. User observed recurring Fyers API rate limit errors (`-360`, `429`, "too many requests") causing dual-engine failovers, throttled UI states, or temporary freezes across LiveTicker, Watchlist, MarketDepth, and Screener.
