@@ -53,7 +53,7 @@ export default function SettingsPage() {
   const handleSyncAudit = async () => {
     setSyncingAudit(true)
     try {
-      const res = await swingAuditApi.sync(true)
+      const res = await swingAuditApi.sync(false)
       const cataloged = res.data.cataloged_count || 0
       const updated = res.data.updated_count || 0
       if (res.data.status === 'partial_success' || (updated === 0 && (res.data.total_trades || 0) > 0)) {

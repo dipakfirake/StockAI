@@ -204,6 +204,13 @@ class ScreenerService:
         with inter-batch pauses to strictly protect Fyers API budget (< 4 req/sec).
         Returns aggregated buy candidates and top setups.
         """
+        cache_key = "screener_all_sectors_aggregated"
+        if not force_refresh:
+            cached = await cache_get(cache_key)
+            if cached and isinstance(cached, dict) and "buy_stocks" in cached:
+                logger.info("Returning cached multi-sector screener results")
+                return cached
+
         all_symbols = ScreenerService.get_all_sector_symbols()
         logger.info(f"Starting Multi-Sector Swing Screener for all {len(all_symbols)} unique symbols across {len(SECTOR_UNIVERSES)} sectors...")
 
@@ -225,13 +232,15 @@ class ScreenerService:
         buy_stocks = [r for r in all_results if r.get("action") == "BUY" and float(r.get("total_score", 0) or 0) >= min_score]
         buy_stocks.sort(key=lambda x: float(x.get("total_score", 0) or 0), reverse=True)
 
-        return {
+        out = {
             "total_scanned": len(all_symbols),
             "sectors_scanned": list(SECTOR_UNIVERSES.keys()),
             "buy_stocks": buy_stocks,
             "all_results": all_results,
             "setups_found": len(buy_stocks)
         }
+        await cache_set(cache_key, out, ttl=300)
+        return out
 
     @staticmethod
     async def _analyze_symbol(symbol: str, force_refresh: bool = False) -> dict:

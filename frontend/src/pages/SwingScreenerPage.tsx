@@ -192,7 +192,7 @@ export default function SwingScreenerPage() {
         )
       }
       // Refresh screener, cycle summary, and archives to display latest state
-      fetchScreener(true)
+      fetchScreener(false)
       fetchCurrentCycle()
       fetchArchiveFiles()
     } catch (err: any) {

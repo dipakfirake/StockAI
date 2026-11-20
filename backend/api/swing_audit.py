@@ -118,14 +118,26 @@ async def sync_audit_prices(
         if run_scan:
             try:
                 from backend.services.screener import ScreenerService
-                # Use cached screener results (force_refresh=False) to prevent 60+ second blocking HTTP freezes
+                # Use cached multi-sector screener results (force_refresh=False) to prevent blocking HTTP freezes
                 screener_data = await ScreenerService.run_all_sectors_screener(force_refresh=False, min_score=70.0)
                 buy_candidates = screener_data.get("buy_stocks", []) if isinstance(screener_data, dict) else []
+
+                # Fallback to individual sector caches if aggregated cache is empty
+                if not buy_candidates:
+                    from backend.core.cache import cache_get
+                    from backend.services.screener import SECTOR_UNIVERSES
+                    for sec in SECTOR_UNIVERSES.keys():
+                        cached_sec = await cache_get(f"screener_results_{sec}")
+                        if cached_sec and isinstance(cached_sec, dict):
+                            buy_candidates.extend(cached_sec.get("buy_stocks", []))
+
+                seen_syms = set()
                 for item in buy_candidates:
                     score = float(item.get("total_score", 0.0) or 0.0)
                     plan = item.get("trade_plan")
                     sym = item.get("symbol")
-                    if score >= 70.0 and plan and sym:
+                    if sym and sym not in seen_syms and score >= 70.0 and plan:
+                        seen_syms.add(sym)
                         try:
                             await swing_audit_service.track_swing_trade(
                                 db=db,
@@ -138,7 +150,7 @@ async def sync_audit_prices(
                         except Exception:
                             pass
             except Exception as scan_err:
-                logger.warning(f"Multi-sector screener scan step in manual sync encountered error: {scan_err}")
+                logger.warning(f"Error cataloging cached screener buys in sync: {scan_err}")
 
         res = await swing_audit_service.update_daily_prices(db)
         if isinstance(res, dict):

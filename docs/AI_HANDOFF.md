@@ -20,14 +20,18 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
     2. Root Cause:
        - Clicking "Sync 11-Day Prices" triggered `swingAuditApi.sync(true)`, executing `ScreenerService.run_all_sectors_screener(force_refresh=True)` across 100+ stocks synchronously (60–70s), followed by sequential candle and quote network fetches for 100 audited stocks in `update_daily_prices` (40–50s), totaling 110+ seconds.
        - Axios and Nginx timed out at 60s. While Uvicorn remained pegged finishing the ongoing 110s task, subsequent browser requests on reload queued up and hit the 60s timeout, causing the cascading 504 error.
+       - Database connection pool exhaustion: In `verify_admin_or_local`, `db: AsyncSession = Depends(get_db)` checked out a connection from SQLAlchemy pool for every health check and probe, queuing behind long transactions.
     3. Remediations Applied:
        - `backend/services/swing_audit_service.py`: Introduced `_fetch_single_audit_data` using `asyncio.Semaphore(12)` + `asyncio.gather` to pre-fetch live quotes and candles concurrently across all active audits in ~1.5–2.5 seconds (down from 50s). Database audit evaluations execute in-memory in under 20ms.
-       - `backend/api/swing_audit.py`: Set `force_refresh=False` in `sync_audit_prices` to catalog setups from existing cache in < 20ms instead of running a blocking 100-stock refresh.
-       - `frontend/src/pages/SwingScreenerPage.tsx`: Defaulted `swingAuditApi.sync(false)` on "Sync 11-Day Prices" so it strictly updates the price progression of tracked trades.
+       - `backend/core/auth.py`: Removed `db` parameter from `verify_admin_or_local`. Internal/local probes (`/health/live`, `/health/liv`, Prometheus) now complete with **zero database connection checkouts**. External admin access uses isolated session context manager.
+       - `backend/services/screener.py`: Added Redis caching (`screener_all_sectors_aggregated`) with a 300s TTL in `run_all_sectors_screener(force_refresh=False)`.
+       - `backend/api/swing_audit.py`: Supported both cached multi-sector screener results (`force_refresh=False`) and sector caches in `sync_audit_prices` with fallback and deduplication.
+       - `frontend/src/pages/SwingScreenerPage.tsx`: Defaulted `swingAuditApi.sync(false)` on "Sync 11-Day Prices" and changed post-sync refresh to `fetchScreener(false)` to prevent freezing the server.
+       - `frontend/src/pages/AdminPage.tsx` & `SettingsPage.tsx`: Updated to `swingAuditApi.sync(false)`.
   - **Verification Evidence**:
-    - Backend swing audit unit tests: **14 / 14 passed (100% green)** in 41.13s.
-    - Rate limiter & middleware load tests: **10 / 10 passed (100% green)** in 7.96s.
-    - Frontend production build: **1,995 modules transformed, 0 TypeScript errors, built cleanly in 24.05s (exit code 0)**.
+    - Backend swing audit unit tests: **14 / 14 passed (100% green)** in 45.80s (`test_sync_audit_prices_endpoint_with_run_scan` passed).
+    - Admin, security & rate limit load tests: **18 / 18 passed (100% green)** in 25.92s.
+    - Frontend production build: **1,995 modules transformed, 0 TypeScript errors, built cleanly in 17.52s (exit code 0)**.
   - **Exact Next Safe Step**: User pulls `origin main` and restarts `backend` and `frontend` on the live server.
 
 - **AUTOCANNON LOAD TESTING, LIGHTHOUSE AUDIT/OPTIMIZATION & GITLEAKS SECURITY AUDIT (COMPLETE & VERIFIED - 2026-11-20):**

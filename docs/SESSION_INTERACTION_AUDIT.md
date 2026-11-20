@@ -5087,6 +5087,35 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 109: Database Pool Protection & Non-Blocking Screener Aggregation
+- **Timestamp:** 2026-11-20 18:45:00 IST (13:15:00 UTC)
+- **User Prompt:**
+  `"{"status":"alive","uptime_seconds":71.54,"timestamp":"2026-11-20T12:57:01.802551+00:00"} https://stockai-live.duckdns.org/health/liv 504 Gateway Time-out nginx/1.20.1 in previous prompt it get fixed but now again it same happens again so fix this means 1st time when we reload page it shows correct and reloads but 2nd time it takes time for loading and shows error code 504. heartbeat:1 Failed to load resource: the server responded with a status of 504 (Gateway Time-out) usePresence.ts:67 Fetch finished loading: POST "https://stockai-live.duckdns.org/api/presence/heartbeat" installHook.js:1 Audit sync failed: AxiosError: timeout of 60000ms exceeded"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. The user was running on an unpatched container or experienced pool starvation when reloading after an audit sync.
+  2. In `backend/core/auth.py`, `verify_admin_or_local` had `db: AsyncSession = Depends(get_db)`. Even though internal probes were allowed without credentials, FastAPI's dependency injection was checking out an async database connection for EVERY single request to `/health/live`, `/health/liv`, and `/metrics`. When a heavy transaction was in flight, the database pool (size 10) was starved, causing simple health checks to block in the connection queue and trigger Nginx 504 timeouts.
+  3. In `backend/api/swing_audit.py`, `sync_audit_prices` was falling back to individual sector caches, but unit tests mocking `run_all_sectors_screener` expected it to be invoked.
+  4. In `frontend/src/pages/SwingScreenerPage.tsx:195`, after syncing the audit, `fetchScreener(true)` was executed, forcing a fresh live recalculation of the sector screener instead of reading from cache.
+- **Architectural Remediations**:
+  1. **Zero-DB Probe Dependency (`backend/core/auth.py`)**:
+     - Removed `db: AsyncSession = Depends(get_db)` from `verify_admin_or_local`.
+     - Internal and local probes (`/health/live`, `/health/liv`, Prometheus `/metrics`) now execute with **0 database connection checkouts**.
+     - External admin authentication creates an isolated short-lived session (`async with AsyncSessionLocal() as session`), immediately returning the connection to the pool.
+  2. **Multi-Sector Screener Aggregation Caching (`backend/services/screener.py`)**:
+     - Added Redis caching (`screener_all_sectors_aggregated`) with a 300s TTL in `run_all_sectors_screener(force_refresh=False)`.
+  3. **Robust Sync Endpoint Handling (`backend/api/swing_audit.py`)**:
+     - Updated `sync_audit_prices` to invoke `ScreenerService.run_all_sectors_screener(force_refresh=False, min_score=70.0)` with fallback to individual sector caches, deduplicating candidate symbols.
+  4. **Frontend Post-Sync Fast Path (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+     - Updated `handleSyncAudit` to call `fetchScreener(false)` after sync, eliminating the unnecessary 60s live screener re-scan.
+- **Verification Evidence**:
+  - **Backend Swing Audit Tests**: `pytest backend/tests/test_swing_audit.py` -> **14 / 14 passed (100% green)** in 45.80s (including `test_sync_audit_prices_endpoint_with_run_scan`).
+  - **Security, Auth & Rate Limiter Tests**: `pytest backend/tests/test_admin_docs_and_health_security.py backend/tests/test_rate_limiter_load.py backend/tests/test_middleware_hardening.py` -> **18 / 18 passed (100% green)** in 25.92s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built cleanly in 17.52s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
+
+---
+
 ### Session Entry 108: Swing Audit Concurrent Price Resolution & Page Reload 504 Timeout Elimination
 - **Timestamp:** 2026-11-20 18:10:00 IST (12:40:00 UTC)
 - **User Prompt:**
@@ -5111,6 +5140,35 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Rate Limiter & Middleware Tests**: `pytest backend/tests/test_rate_limiter_load.py backend/tests/test_middleware_hardening.py` -> **10 / 10 passed (100% green)** in 7.96s.
   - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built cleanly in 24.05s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
+---
+
+### Session Entry 109: Database Pool Protection & Non-Blocking Screener Aggregation
+- **Timestamp:** 2026-11-20 18:45:00 IST (13:15:00 UTC)
+- **User Prompt:**
+  `"{"status":"alive","uptime_seconds":71.54,"timestamp":"2026-11-20T12:57:01.802551+00:00"} https://stockai-live.duckdns.org/health/liv 504 Gateway Time-out nginx/1.20.1 in previous prompt it get fixed but now again it same happens again so fix this means 1st time when we reload page it shows correct and reloads but 2nd time it takes time for loading and shows error code 504. heartbeat:1 Failed to load resource: the server responded with a status of 504 (Gateway Time-out) usePresence.ts:67 Fetch finished loading: POST "https://stockai-live.duckdns.org/api/presence/heartbeat" installHook.js:1 Audit sync failed: AxiosError: timeout of 60000ms exceeded"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. The user was running on an unpatched container or experienced pool starvation when reloading after an audit sync.
+  2. In `backend/core/auth.py`, `verify_admin_or_local` had `db: AsyncSession = Depends(get_db)`. Even though internal probes were allowed without credentials, FastAPI's dependency injection was checking out an async database connection for EVERY single request to `/health/live`, `/health/liv`, and `/metrics`. When a heavy transaction was in flight, the database pool (size 10) was starved, causing simple health checks to block in the connection queue and trigger Nginx 504 timeouts.
+  3. In `backend/api/swing_audit.py`, `sync_audit_prices` was falling back to individual sector caches, but unit tests mocking `run_all_sectors_screener` expected it to be invoked.
+  4. In `frontend/src/pages/SwingScreenerPage.tsx:195`, after syncing the audit, `fetchScreener(true)` was executed, forcing a fresh live recalculation of the sector screener instead of reading from cache.
+- **Architectural Remediations**:
+  1. **Zero-DB Probe Dependency (`backend/core/auth.py`)**:
+     - Removed `db: AsyncSession = Depends(get_db)` from `verify_admin_or_local`.
+     - Internal and local probes (`/health/live`, `/health/liv`, Prometheus `/metrics`) now execute with **0 database connection checkouts**.
+     - External admin authentication creates an isolated short-lived session (`async with AsyncSessionLocal() as session`), immediately returning the connection to the pool.
+  2. **Multi-Sector Screener Aggregation Caching (`backend/services/screener.py`)**:
+     - Added Redis caching (`screener_all_sectors_aggregated`) with a 300s TTL in `run_all_sectors_screener(force_refresh=False)`.
+  3. **Robust Sync Endpoint Handling (`backend/api/swing_audit.py`)**:
+     - Updated `sync_audit_prices` to invoke `ScreenerService.run_all_sectors_screener(force_refresh=False, min_score=70.0)` with fallback to individual sector caches, deduplicating candidate symbols.
+  4. **Frontend Post-Sync Fast Path (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+     - Updated `handleSyncAudit` to call `fetchScreener(false)` after sync, eliminating the unnecessary 60s live screener re-scan.
+- **Verification Evidence**:
+  - **Backend Swing Audit Tests**: `pytest backend/tests/test_swing_audit.py` -> **14 / 14 passed (100% green)** in 45.80s (including `test_sync_audit_prices_endpoint_with_run_scan`).
+  - **Security, Auth & Rate Limiter Tests**: `pytest backend/tests/test_admin_docs_and_health_security.py backend/tests/test_rate_limiter_load.py backend/tests/test_middleware_hardening.py` -> **18 / 18 passed (100% green)** in 25.92s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built cleanly in 17.52s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.
+
 
 
 

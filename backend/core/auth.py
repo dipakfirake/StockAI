@@ -185,11 +185,11 @@ async def verify_admin_or_local(
     request: Request,
     credentials: Optional[HTTPBasicCredentials] = Depends(security_basic_optional),
     token: Optional[str] = Depends(oauth2_scheme_optional),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Allows internal system probes (from localhost or container network without external proxy headers).
     For external requests over the internet, requires Admin credentials (Basic Auth or JWT).
+    Zero DB connection checkout for local/internal probes.
     """
     client_ip = request.client.host if request.client else ""
     x_forwarded_for = request.headers.get("x-forwarded-for")
@@ -200,7 +200,9 @@ async def verify_admin_or_local(
     is_local_ip = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
 
     if is_local_ip and not is_external:
-        return None  # Local probe allowed
+        return None  # Local probe allowed with zero DB overhead
 
-    # External access: require Admin credentials
-    return await verify_admin_docs_access(request, credentials, token, db)
+    # External access: require Admin credentials with isolated session
+    from backend.core.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        return await verify_admin_docs_access(request, credentials, token, session)
