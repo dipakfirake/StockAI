@@ -75,6 +75,19 @@ async def _evaluate_alerts_async():
         )
         alerts = result.scalars().all()
 
+        PRICE_CONDITIONS = {
+            "PRICE_ABOVE", "PRICE_BELOW",
+            "BUY_PROXIMITY", "TARGET_PROXIMITY", "TARGET_HIT",
+            "STOP_LOSS_PROXIMITY", "STOP_LOSS_HIT"
+        }
+        price_symbols = list({a.symbol for a in alerts if a.condition_type in PRICE_CONDITIONS})
+        quotes_map = {}
+        if price_symbols:
+            try:
+                quotes_map = await market_data_service.fetch_quotes_bulk(price_symbols)
+            except Exception as e:
+                logger.debug(f"Failed to prefetch bulk quotes in evaluate_all_alerts: {e}")
+
         for alert in alerts:
             # Deduplication check
             if alert.triggered_at:
@@ -88,12 +101,10 @@ async def _evaluate_alerts_async():
                 extra_msg = ""
 
                 # 1. Price and Proximity based conditions
-                if alert.condition_type in (
-                    "PRICE_ABOVE", "PRICE_BELOW",
-                    "BUY_PROXIMITY", "TARGET_PROXIMITY", "TARGET_HIT",
-                    "STOP_LOSS_PROXIMITY", "STOP_LOSS_HIT"
-                ):
-                    quote = await market_data_service.fetch_quote(alert.symbol)
+                if alert.condition_type in PRICE_CONDITIONS:
+                    quote = quotes_map.get(alert.symbol)
+                    if not quote or quote.get("price", 0) <= 0:
+                        quote = await market_data_service.fetch_quote(alert.symbol)
                     if quote:
                         current_value = quote["price"]
                         cond_val = float(alert.condition_value)

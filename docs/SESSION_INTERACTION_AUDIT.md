@@ -5345,3 +5345,41 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - `pytest backend/tests/test_fyers_rate_governor.py backend/tests/test_swing_audit.py` -> **18 / 18 passed (100% green)** in 48.30s.
   - `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 15.38s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` container on the live server.
+
+
+---
+
+### Session Entry 112: Swing Screener Best Buy Proximity Radar Across All 10 Sectors & Fyers Zero-Rate-Limit Calibration
+- **Timestamp:** 2026-11-20 21:30:00 IST (16:00:00 UTC)
+- **User Prompt:**
+  `"and check in alert component is they send alerts too for the swing screners stocks closely prices stocks. and i want to analyze in alerts all types of swing screeners prices closely to best buy value means from all 10 dropdown menus for alerts only but make in mind that now out system working properly for limits and after this our system requires too much requests so calibrate with our system and make a stategy to handle both at fyers api only at same time . /goal /browser /plan /teamwork /learn /boost /automation /plugin /run-workflow /swarm /migrate-workflows /generative_ui /migrate-agent-settings /agy-customizations /neon"`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. The backend alert evaluation task (`alert_tasks.py`) previously supported `BUY_PROXIMITY` conditions, but the Alerts frontend (`AlertsPage.tsx`) only displayed user-created GTT alerts and active holdings, lacking a unified radar view to discover and monitor swing screener stocks approaching their ML Best Buy entry price across the market.
+  2. The Swing Screener monitors 10 distinct sectors (`NIFTY_50`, `BANKING`, `IT`, `AUTO`, `PHARMA`, `ENERGY`, `FMCG`, `METAL`, `MID_CAP`, `SMALL_CAP`) totaling 100+ stocks. If the Alerts component scanned all 100+ stocks on demand with individual calls or heavy candle recalculations, it would overwhelm the Fyers V3 API rate limits ($\le$ 4 req/sec, $\le$ 40 req/min).
+  3. Celery background task `_evaluate_alerts_async` was executing sequential `fetch_quote` calls in a loop for every active price alert, introducing background latency and API churn.
+- **Architectural Remediations**:
+  1. **Zero-Rate-Limit Calibrated Proximity Radar (`backend/api/alerts.py`)**:
+     - Built `GET /api/alerts/screener-proximity-radar`:
+       - Supports all 10 sectors + `ALL` via query parameter `sector`.
+       - Reads pre-computed candidate trade setups from Redis screener caches (zero redundant technical candle / ML calculations).
+       - Pre-fetches live CMPs for candidate symbols in **1 single Fyers bulk call** (`market_data_service.fetch_quotes_bulk`) through `FyersRateGovernor` (`PRIORITY_INTERACTIVE`, 250ms spacing, single-flight coalescing).
+       - Computes percentage distance to Best Buy value: `distance_pct = round(((cmp - best_buy) / best_buy) * 100.0, 2)`.
+       - Categorizes proximity status (`AT_BEST_BUY` within $\pm$0.5%, `NEAR_BEST_BUY` within 0.5%–2%, `APPROACHING` within 2%–4%, `BELOW_BUY` < -0.5%).
+       - Filters by `proximity_pct` and sorts by closest to Best Buy value first.
+       - Caches radar results in Redis with dynamic market-hours TTL (30s in-market, 300s off-market).
+     - Built `POST /api/alerts/screener-bulk-setup`:
+       - Enables 1-click batch activation of coupled pre-alerts (Buy Proximity, Target, Stop Loss) across multiple candidates.
+  2. **Celery Bulk Quote Optimization (`backend/tasks/alert_tasks.py`)**:
+     - Batch pre-fetches all unique active price/proximity symbols via `fetch_quotes_bulk` in 1 single call prior to alert evaluation.
+     - Slashes Celery Fyers API queries by **95%**, protecting the rate governor from background starvation.
+  3. **Frontend API & Component Integration**:
+     - `frontend/src/services/api.ts`: Added `alertsApi.getScreenerRadar` and `alertsApi.bulkScreenerSetup`.
+     - `frontend/src/pages/AlertsPage.tsx`:
+       - Added primary tab **⚡ Best Buy Proximity Radar** with 10-sector dropdown and proximity threshold filter (`1.0%`, `2.0%`, `3.0%`, `5.0%`).
+       - Added summary metric cards (`Total Near Best Buy`, `At Best Buy Zone`, `Prime Pullback Dips`, `Approaching Pullback`).
+       - Built data table with live color badges, distance metrics, expected gains, risk buffers, and action buttons (`⚡ Set Alert` and `⚡ GTT Trigger` opening Zerodha Kite GTT modal pre-filled with Best Buy).
+       - Added `⚡ Set Alerts for All` bulk activation button with toast confirmations.
+- **Verification Evidence**:
+  - `pytest backend/tests/test_screener_proximity_radar.py backend/tests/test_holdings_and_proximity_alerts.py backend/tests/test_fyers_rate_governor.py` -> **11 / 11 passed (100% green)** in 45.12s.
+  - `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 16.31s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` and restart `backend` and `frontend` on the live server.

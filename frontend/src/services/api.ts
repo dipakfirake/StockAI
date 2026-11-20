@@ -127,6 +127,22 @@ export const alertsApi = {
   }) => api.post('/alerts/screener-setup', data),
   getHoldingsMonitor: () => api.get('/alerts/holdings-monitor'),
   syncHoldings: () => api.post('/alerts/holdings-sync'),
+  getScreenerRadar: (sector?: string, proximityPct?: number, minScore?: number) =>
+    api.get('/alerts/screener-proximity-radar', {
+      params: {
+        ...(sector && { sector }),
+        ...(proximityPct !== undefined && { proximity_pct: proximityPct }),
+        ...(minScore !== undefined && { min_score: minScore }),
+      },
+    }),
+  bulkScreenerSetup: (items: Array<{
+    symbol: string;
+    current_price: number;
+    best_buy_price?: number;
+    target_price?: number;
+    stop_loss?: number;
+    proximity_pct?: number;
+  }>) => api.post('/alerts/screener-bulk-setup', { items }),
   delete: (alertId: string) => api.delete(`/alerts/${alertId}`),
   deactivate: (alertId: string) => api.put(`/alerts/${alertId}/deactivate`),
 }

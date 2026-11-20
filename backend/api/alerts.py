@@ -45,6 +45,19 @@ class ScreenerAlertSetupRequest(BaseModel):
     proximity_pct: float = 1.0
 
 
+class BulkScreenerAlertItem(BaseModel):
+    symbol: str
+    current_price: float
+    best_buy_price: float | None = None
+    target_price: float | None = None
+    stop_loss: float | None = None
+    proximity_pct: float = 1.0
+
+
+class BulkScreenerAlertRequest(BaseModel):
+    items: list[BulkScreenerAlertItem]
+
+
 def _format_cond_value(val: Any) -> Union[float, str]:
     if val is None:
         return 0.0
@@ -236,6 +249,293 @@ async def setup_screener_coupled_alerts(
         "symbol": symbol,
         "created_count": len(created_alerts),
         "alerts": created_alerts
+    }
+
+
+@router.get("/screener-proximity-radar")
+async def get_screener_proximity_radar(
+    sector: str = "ALL",
+    proximity_pct: float = 3.0,
+    min_score: float = 60.0,
+    current_user=Depends(get_current_user),
+):
+    """
+    Zero-Rate-Limit Calibrated Swing Screener Best Buy Proximity Radar:
+    Scans swing setups across the requested sector (or ALL 10 sectors)
+    and identifies stocks whose current market price is closely tracking
+    their ML Best Buy value.
+
+    Calibration & Rate Limit Guarantees:
+    - Reads candidate setups from pre-computed Redis screener caches (zero technical re-calculation)
+    - Pre-fetches all current market prices in 1 single bulk call via FyersRateGovernor
+    - Cached in Redis with 30s TTL to prevent spam requests from hitting Fyers
+    """
+    from backend.services.screener import ScreenerService, SECTOR_UNIVERSES
+    from backend.core.cache import cache_get, cache_set
+    from backend.core.market_hours import get_dynamic_screener_ttl
+
+    norm_sector = sector.upper().replace(" ", "_") if sector else "ALL"
+    cache_key = f"alerts_screener_radar:{norm_sector}:{proximity_pct}:{min_score}"
+    cached = await cache_get(cache_key)
+    if cached and isinstance(cached, dict) and "candidates" in cached:
+        return cached
+
+    # Collect candidate stocks from screener cache or lightweight run
+    candidates_raw: list[dict] = []
+
+    if norm_sector == "ALL":
+        # 1. Try aggregated screener cache
+        cached_agg = await cache_get("screener_all_sectors_aggregated")
+        if cached_agg and isinstance(cached_agg, dict) and "buy_stocks" in cached_agg:
+            candidates_raw = cached_agg["buy_stocks"]
+        else:
+            # Check individual sector caches
+            for sec_name in SECTOR_UNIVERSES.keys():
+                sec_cached = await cache_get(f"screener_results_{sec_name}")
+                if sec_cached and isinstance(sec_cached, dict) and "buy_stocks" in sec_cached:
+                    for s in sec_cached["buy_stocks"]:
+                        s_copy = dict(s)
+                        s_copy.setdefault("sector", sec_name)
+                        candidates_raw.append(s_copy)
+
+            # If all caches cold, run screener for NIFTY_50 as fast fallback
+            if not candidates_raw:
+                try:
+                    res = await ScreenerService.run_screener(sector="NIFTY_50", force_refresh=False)
+                    if res and "buy_stocks" in res:
+                        candidates_raw.extend(res["buy_stocks"])
+                except Exception:
+                    pass
+    else:
+        # Specific sector requested
+        sec_cached = await cache_get(f"screener_results_{norm_sector}")
+        if sec_cached and isinstance(sec_cached, dict) and "buy_stocks" in sec_cached:
+            candidates_raw = sec_cached["buy_stocks"]
+        else:
+            # Run or read sector screener
+            try:
+                res = await ScreenerService.run_screener(sector=norm_sector, force_refresh=False)
+                if res and "buy_stocks" in res:
+                    candidates_raw = res["buy_stocks"]
+            except Exception:
+                candidates_raw = []
+
+    # Filter candidates with valid trade plans and scores
+    valid_candidates = []
+    seen_symbols = set()
+    for s in candidates_raw:
+        sym = s.get("symbol")
+        if not sym or sym in seen_symbols:
+            continue
+        plan = s.get("trade_plan") or {}
+        best_buy = plan.get("best_buy_price") or plan.get("optimal_entry_price") or plan.get("entry_price")
+        score = float(s.get("total_score") or 0.0)
+        if best_buy and best_buy > 0 and score >= min_score:
+            seen_symbols.add(sym)
+            valid_candidates.append(s)
+
+    if not valid_candidates:
+        empty_res = {
+            "sector": norm_sector,
+            "proximity_threshold_pct": proximity_pct,
+            "total_candidates": 0,
+            "summary": {"at_best_buy": 0, "near_best_buy": 0, "approaching": 0},
+            "candidates": [],
+        }
+        await cache_set(cache_key, empty_res, ttl=get_dynamic_screener_ttl())
+        return empty_res
+
+    # Pre-fetch live quotes in ONE SINGLE BULK CALL via FyersRateGovernor
+    symbols_to_quote = list(seen_symbols)
+    quotes_map = {}
+    try:
+        quotes_map = await market_data_service.fetch_quotes_bulk(symbols_to_quote)
+    except Exception:
+        quotes_map = {}
+
+    radar_items = []
+    at_best_buy_count = 0
+    near_best_buy_count = 0
+    approaching_count = 0
+
+    for s in valid_candidates:
+        sym = s.get("symbol")
+        plan = s.get("trade_plan") or {}
+        best_buy = float(plan.get("best_buy_price") or plan.get("optimal_entry_price") or plan.get("entry_price") or 0.0)
+        target = float(plan.get("target_price") or 0.0)
+        sl = float(plan.get("stop_loss") or 0.0)
+
+        quote = quotes_map.get(sym) or {}
+        cmp = float(quote.get("price") or plan.get("current_price") or plan.get("cmp") or best_buy)
+        if cmp <= 0:
+            cmp = best_buy
+
+        distance_pct = round(((cmp - best_buy) / best_buy) * 100.0, 2) if best_buy > 0 else 0.0
+        abs_dist = abs(distance_pct)
+
+        # Proximity status categorization
+        if abs_dist <= 0.5:
+            status = "AT_BEST_BUY"
+            status_label = "🎯 At Best Buy (Immediate Entry)"
+            at_best_buy_count += 1
+        elif 0.5 < distance_pct <= 2.0:
+            status = "NEAR_BEST_BUY"
+            status_label = "⚡ Near Best Buy (Pullback Zone)"
+            near_best_buy_count += 1
+        elif 2.0 < distance_pct <= 4.0:
+            status = "APPROACHING"
+            status_label = "⏳ Approaching Buy Zone"
+            approaching_count += 1
+        elif distance_pct < -0.5:
+            status = "BELOW_BUY"
+            status_label = "🏷️ Below Best Buy (Deep Discount)"
+        else:
+            status = "EXTENDED"
+            status_label = "🚀 Extended from Best Buy"
+
+        # Filter by requested proximity threshold (include anything within proximity_pct or below)
+        if distance_pct <= proximity_pct:
+            radar_items.append({
+                "symbol": sym,
+                "name": s.get("name") or sym,
+                "sector": s.get("sector") or norm_sector,
+                "action": s.get("action", "BUY"),
+                "total_score": round(float(s.get("total_score") or 0.0), 1),
+                "cmp": cmp,
+                "best_buy_price": best_buy,
+                "entry_type": plan.get("entry_type", "PULLBACK_DIP"),
+                "distance_pct": distance_pct,
+                "abs_distance_pct": abs_dist,
+                "proximity_status": status,
+                "proximity_label": status_label,
+                "target_price": target,
+                "stop_loss": sl,
+                "expected_gain_pct": round(float(plan.get("expected_gain_pct") or 0.0), 1),
+                "risk_reward_ratio": round(float(plan.get("risk_reward_ratio") or 0.0), 2),
+                "risk_buffer_pct": round(((cmp - sl) / cmp) * 100.0, 2) if sl > 0 and cmp > 0 else 0.0,
+            })
+
+    # Sort closest to Best Buy first
+    radar_items.sort(key=lambda x: (x["abs_distance_pct"], -x["total_score"]))
+
+    response_payload = {
+        "sector": norm_sector,
+        "proximity_threshold_pct": proximity_pct,
+        "total_candidates": len(radar_items),
+        "summary": {
+            "at_best_buy": at_best_buy_count,
+            "near_best_buy": near_best_buy_count,
+            "approaching": approaching_count,
+        },
+        "candidates": radar_items,
+    }
+
+    await cache_set(cache_key, response_payload, ttl=get_dynamic_screener_ttl())
+    return response_payload
+
+
+@router.post("/screener-bulk-setup")
+async def setup_screener_bulk_alerts(
+    request: BulkScreenerAlertRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk setup coupled pre-alerts for multiple swing screener stocks in 1 transaction."""
+    if not request.items:
+        raise HTTPException(status_code=400, detail="No items provided for bulk alert setup")
+
+    created_total = 0
+    symbols_setup = []
+
+    for item in request.items:
+        symbol = item.symbol.upper()
+        prox_pct = max(0.2, min(5.0, item.proximity_pct))
+
+        # 1. Buy Proximity Pre-Alert
+        if item.best_buy_price and item.best_buy_price > 0:
+            buy_prox = round(item.best_buy_price * (1.0 + prox_pct / 100.0), 2)
+            db.add(Alert(
+                user_id=current_user.id,
+                symbol=symbol,
+                condition_type="BUY_PROXIMITY",
+                condition_value=buy_prox,
+                message=f"{symbol}: Approaching Best Buy Zone! Price near ₹{buy_prox:.2f} (Target Entry: ₹{item.best_buy_price:.2f})",
+                priority="MEDIUM",
+                delivery_method="IN_APP",
+                is_active=True,
+            ))
+            created_total += 1
+
+        # 2. Target Proximity Pre-Alert & Hit
+        if item.target_price and item.target_price > 0:
+            tgt_prox = round(item.target_price * (1.0 - prox_pct / 100.0), 2)
+            db.add(Alert(
+                user_id=current_user.id,
+                symbol=symbol,
+                condition_type="TARGET_PROXIMITY",
+                condition_value=tgt_prox,
+                message=f"{symbol}: Approaching Target! Price near ₹{tgt_prox:.2f} — Prepare to sell.",
+                priority="HIGH",
+                delivery_method="IN_APP",
+                is_active=True,
+            ))
+            db.add(Alert(
+                user_id=current_user.id,
+                symbol=symbol,
+                condition_type="TARGET_HIT",
+                condition_value=round(item.target_price, 2),
+                message=f"{symbol}: 🎯 Target Reached at ₹{item.target_price:.2f}!",
+                priority="HIGH",
+                delivery_method="IN_APP",
+                is_active=True,
+            ))
+            created_total += 2
+
+        # 3. Stop Loss Pre-Alert & Hit
+        if item.stop_loss and item.stop_loss > 0:
+            sl_prox = round(item.stop_loss * (1.0 + prox_pct / 100.0), 2)
+            db.add(Alert(
+                user_id=current_user.id,
+                symbol=symbol,
+                condition_type="STOP_LOSS_PROXIMITY",
+                condition_value=sl_prox,
+                message=f"{symbol}: ⚠️ Approaching Stop Loss! Price near ₹{sl_prox:.2f}",
+                priority="HIGH",
+                delivery_method="IN_APP",
+                is_active=True,
+            ))
+            db.add(Alert(
+                user_id=current_user.id,
+                symbol=symbol,
+                condition_type="STOP_LOSS_HIT",
+                condition_value=round(item.stop_loss, 2),
+                message=f"{symbol}: 🛑 Stop Loss Breached at ₹{item.stop_loss:.2f}! Cut losses.",
+                priority="HIGH",
+                delivery_method="IN_APP",
+                is_active=True,
+            ))
+            created_total += 2
+
+        symbols_setup.append(symbol)
+
+    await db.flush()
+
+    try:
+        await broadcast_alert({
+            "type": "alert_toast",
+            "data": {
+                "title": f"🎯 Bulk Radar Alerts Set ({len(symbols_setup)} stocks)",
+                "message": f"Activated {created_total} coupled alerts across {', '.join(symbols_setup[:4])}{'...' if len(symbols_setup) > 4 else ''}",
+                "type": "success"
+            }
+        }, user_id=str(current_user.id))
+    except Exception:
+        pass
+
+    return {
+        "symbols_count": len(symbols_setup),
+        "alerts_created_count": created_total,
+        "symbols": symbols_setup,
     }
 
 

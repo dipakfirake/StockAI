@@ -4,11 +4,32 @@ import {
   Bell, PlusCircle, Trash2, BellOff, ShieldAlert, ShieldCheck, 
   Target, TrendingUp, TrendingDown, RefreshCw, AlertTriangle, 
   ExternalLink, ArrowUpRight, ArrowDownRight, CheckCircle2, DollarSign,
-  Briefcase, Sparkles, X
+  Briefcase, Sparkles, X, Layers, Filter, Zap
 } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
 import ZerodhaOrderModal from '../components/ZerodhaOrderModal'
 import { toast } from '../components/Toast'
+
+const SECTORS = [
+  { value: 'ALL', label: '🌐 All Sectors (100+ Stocks)' },
+  { value: 'NIFTY_50', label: '🏛️ Nifty 50 Large Cap' },
+  { value: 'BANKING', label: '🏦 Banking & Financials' },
+  { value: 'IT', label: '💻 IT & Technology' },
+  { value: 'AUTO', label: '🚗 Automobiles & OEMs' },
+  { value: 'PHARMA', label: '💊 Healthcare & Pharma' },
+  { value: 'ENERGY', label: '⚡ Energy, Oil & Power' },
+  { value: 'FMCG', label: '🛒 FMCG & Consumer Goods' },
+  { value: 'METAL', label: '🏗️ Metal & Mining' },
+  { value: 'MID_CAP', label: '📈 Mid Cap Growth' },
+  { value: 'SMALL_CAP', label: '🚀 Small Cap High Alpha' },
+]
+
+const PROXIMITY_FILTERS = [
+  { value: 1.0, label: '🎯 Within 1.0% (Immediate Entry Zone)' },
+  { value: 2.0, label: '⚡ Within 2.0% (Prime Pullback Setup)' },
+  { value: 3.0, label: '⏳ Within 3.0% (Approaching Watchlist)' },
+  { value: 5.0, label: '🔭 Within 5.0% (Broad Proximity)' },
+]
 
 const CONDITION_TYPES = [
   { value: 'PRICE_ABOVE', label: 'Price Above' },
@@ -33,8 +54,16 @@ const PATTERN_TYPES = [
 ]
 
 export default function AlertsPage() {
-  const [activeTab, setActiveTab] = useState<'HOLDINGS' | 'RADAR' | 'CUSTOM'>('HOLDINGS')
+  const [activeTab, setActiveTab] = useState<'SCREENER_RADAR' | 'HOLDINGS' | 'RADAR' | 'CUSTOM'>('SCREENER_RADAR')
   
+  // Screener Best Buy Radar State (all 10 sectors + ALL)
+  const [radarSector, setRadarSector] = useState<string>('ALL')
+  const [radarProximityPct, setRadarProximityPct] = useState<number>(3.0)
+  const [radarData, setRadarData] = useState<any>({ candidates: [], summary: { at_best_buy: 0, near_best_buy: 0, approaching: 0 }, total_candidates: 0 })
+  const [loadingRadar, setLoadingRadar] = useState<boolean>(true)
+  const [settingBulkAlerts, setSettingBulkAlerts] = useState<boolean>(false)
+  const [settingSingleAlertSym, setSettingSingleAlertSym] = useState<string | null>(null)
+
   // Custom / General Alerts
   const [alerts, setAlerts] = useState<any[]>([])
   const [loadingAlerts, setLoadingAlerts] = useState(true)
@@ -66,6 +95,78 @@ export default function AlertsPage() {
   const [gttOrderModalOpen, setGttOrderModalOpen] = useState(false)
   const [fetchingGttQuote, setFetchingGttQuote] = useState(false)
 
+  const handleOpenRadarGtt = (candidate: any) => {
+    setGttOrderData({
+      symbol: candidate.symbol,
+      name: candidate.name || candidate.symbol,
+      currentPrice: candidate.cmp,
+      bestBuyPrice: candidate.best_buy_price,
+      targetPrice: candidate.target_price,
+      stopLoss: candidate.stop_loss,
+    })
+    setGttOrderModalOpen(true)
+  }
+
+  const handleSetRadarAlert = async (candidate: any) => {
+    setSettingSingleAlertSym(candidate.symbol)
+    try {
+      await alertsApi.screenerSetup({
+        symbol: candidate.symbol,
+        current_price: candidate.cmp,
+        best_buy_price: candidate.best_buy_price,
+        target_price: candidate.target_price,
+        stop_loss: candidate.stop_loss,
+        proximity_pct: 1.0,
+      })
+      toast.success(
+        `Coupled Alerts Set: ${candidate.symbol}`,
+        `Buy Pre-Alert at ₹${(candidate.best_buy_price * 1.01).toFixed(2)}, Target at ₹${candidate.target_price?.toFixed(2)}, and SL!`
+      )
+      await loadAlerts()
+    } catch (err: any) {
+      toast.error('Failed to set alert', err?.response?.data?.detail || err.message)
+    } finally {
+      setSettingSingleAlertSym(null)
+    }
+  }
+
+  const handleBulkSetRadarAlerts = async () => {
+    if (!radarData?.candidates?.length) return
+    setSettingBulkAlerts(true)
+    try {
+      const items = radarData.candidates.map((c: any) => ({
+        symbol: c.symbol,
+        current_price: c.cmp,
+        best_buy_price: c.best_buy_price,
+        target_price: c.target_price,
+        stop_loss: c.stop_loss,
+        proximity_pct: 1.0,
+      }))
+      const res = await alertsApi.bulkScreenerSetup(items)
+      toast.success(
+        'Bulk Radar Alerts Activated!',
+        `${res.data.alerts_created_count} coupled alerts created across ${res.data.symbols_count} stocks near Best Buy.`
+      )
+      await loadAlerts()
+    } catch (err: any) {
+      toast.error('Bulk alert setup failed', err?.response?.data?.detail || err.message)
+    } finally {
+      setSettingBulkAlerts(false)
+    }
+  }
+
+  const loadRadar = async (sec = radarSector, prox = radarProximityPct, silent = false) => {
+    if (!silent) setLoadingRadar(true)
+    try {
+      const res = await alertsApi.getScreenerRadar(sec, prox)
+      setRadarData(res.data || { candidates: [], summary: { at_best_buy: 0, near_best_buy: 0, approaching: 0 }, total_candidates: 0 })
+    } catch (err: any) {
+      console.error('Failed to load screener proximity radar:', err)
+    } finally {
+      if (!silent) setLoadingRadar(false)
+    }
+  }
+
   async function handleLaunchGttForSymbol(sym: string) {
     if (!sym) return
     setFetchingGttQuote(true)
@@ -89,6 +190,10 @@ export default function AlertsPage() {
       setFetchingGttQuote(false)
     }
   }
+
+  useEffect(() => {
+    loadRadar(radarSector, radarProximityPct)
+  }, [radarSector, radarProximityPct])
 
   useEffect(() => {
     loadAlerts()
@@ -249,7 +354,40 @@ export default function AlertsPage() {
         borderBottom: '1px solid var(--color-border, #2d3343)',
         marginBottom: 20,
         paddingBottom: 2,
+        overflowX: 'auto',
       }}>
+        <button
+          onClick={() => setActiveTab('SCREENER_RADAR')}
+          style={{
+            padding: '10px 18px',
+            fontSize: 14,
+            fontWeight: 700,
+            border: 'none',
+            borderBottom: activeTab === 'SCREENER_RADAR' ? '3px solid #38bdf8' : '3px solid transparent',
+            background: 'transparent',
+            color: activeTab === 'SCREENER_RADAR' ? 'var(--color-text-primary, #ffffff)' : 'var(--color-text-muted, #8a92a6)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            transition: 'all 0.15s ease',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Zap size={16} style={{ color: activeTab === 'SCREENER_RADAR' ? '#38bdf8' : 'inherit' }} />
+          <span>⚡ Best Buy Proximity Radar ({radarData.total_candidates || 0})</span>
+          {radarData.summary?.at_best_buy > 0 && (
+            <span style={{ background: '#10b981', color: '#000', fontSize: 11, padding: '1px 6px', borderRadius: 10, fontWeight: 800 }}>
+              {radarData.summary.at_best_buy} At Best Buy
+            </span>
+          )}
+          {radarData.summary?.near_best_buy > 0 && (
+            <span style={{ background: '#38bdf8', color: '#000', fontSize: 11, padding: '1px 6px', borderRadius: 10, fontWeight: 800 }}>
+              {radarData.summary.near_best_buy} Pullback
+            </span>
+          )}
+        </button>
+
         <button
           onClick={() => setActiveTab('HOLDINGS')}
           style={{
@@ -265,6 +403,7 @@ export default function AlertsPage() {
             alignItems: 'center',
             gap: 8,
             transition: 'all 0.15s ease',
+            whiteSpace: 'nowrap',
           }}
         >
           <Briefcase size={16} style={{ color: activeTab === 'HOLDINGS' ? '#387ed1' : 'inherit' }} />
@@ -296,6 +435,7 @@ export default function AlertsPage() {
             alignItems: 'center',
             gap: 8,
             transition: 'all 0.15s ease',
+            whiteSpace: 'nowrap',
           }}
         >
           <Target size={16} style={{ color: activeTab === 'RADAR' ? '#38bdf8' : 'inherit' }} />
@@ -317,6 +457,7 @@ export default function AlertsPage() {
             alignItems: 'center',
             gap: 8,
             transition: 'all 0.15s ease',
+            whiteSpace: 'nowrap',
           }}
         >
           <Bell size={16} style={{ color: activeTab === 'CUSTOM' ? '#387ed1' : 'inherit' }} />
@@ -381,6 +522,323 @@ export default function AlertsPage() {
               <button type="button" className="btn btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* TAB 0: SWING SCREENER BEST BUY PROXIMITY RADAR */}
+      {activeTab === 'SCREENER_RADAR' && (
+        <div>
+          {/* Top Control & Zero-Rate-Limit Banner */}
+          <div className="card" style={{
+            background: 'linear-gradient(90deg, rgba(56, 189, 248, 0.08), rgba(16, 185, 129, 0.08))',
+            border: '1px solid rgba(56, 189, 248, 0.25)',
+            marginBottom: 20,
+            padding: '16px 20px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 700, color: '#38bdf8' }}>
+                  <Zap size={20} />
+                  <span>Swing Screener Best Buy Proximity Radar</span>
+                  <span style={{ fontSize: 11, background: 'rgba(56, 189, 248, 0.2)', padding: '2px 8px', borderRadius: 12, border: '1px solid #38bdf8', color: '#e0f2fe' }}>
+                    Fyers Single-Flight Calibrated
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4, maxWidth: 750 }}>
+                  Real-time monitoring of swing setups trading closely to their ML optimal Best Buy price across all 10 market sectors.
+                  Live quotes are pre-fetched in 1 single bulk request via Fyers Rate Governor to guarantee zero rate limit exceedance.
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => loadRadar(radarSector, radarProximityPct)}
+                  disabled={loadingRadar}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <RefreshCw size={14} className={loadingRadar ? 'spin' : ''} />
+                  {loadingRadar ? 'Updating...' : 'Refresh Radar'}
+                </button>
+
+                <button
+                  className="btn btn-primary"
+                  onClick={handleBulkSetRadarAlerts}
+                  disabled={settingBulkAlerts || !radarData?.candidates?.length}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#10b981', borderColor: '#10b981' }}
+                  title="Activate coupled Buy Proximity, Target, and Stop Loss alerts for all stocks listed below"
+                >
+                  <CheckCircle2 size={15} />
+                  {settingBulkAlerts ? 'Activating...' : `Set Alerts for All (${radarData?.total_candidates || 0})`}
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Controls Row */}
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Layers size={14} /> Sector Universe:
+                </span>
+                <select
+                  className="input"
+                  style={{ padding: '6px 12px', fontSize: 13, minWidth: 230 }}
+                  value={radarSector}
+                  onChange={(e) => setRadarSector(e.target.value)}
+                >
+                  {SECTORS.map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Filter size={14} /> Proximity Filter:
+                </span>
+                <select
+                  className="input"
+                  style={{ padding: '6px 12px', fontSize: 13, minWidth: 220 }}
+                  value={radarProximityPct}
+                  onChange={(e) => setRadarProximityPct(parseFloat(e.target.value))}
+                >
+                  {PROXIMITY_FILTERS.map(p => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
+                Showing <strong>{radarData?.total_candidates || 0}</strong> candidates within <strong>{radarProximityPct}%</strong> of Best Buy
+              </div>
+            </div>
+          </div>
+
+          {/* Metric Summary Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 20 }}>
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #38bdf8' }}>
+              <div style={{ fontSize: 11, color: '#38bdf8', textTransform: 'uppercase', fontWeight: 600 }}>
+                Total Near Best Buy
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4 }}>
+                {radarData?.total_candidates || 0}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                Within {radarProximityPct}% entry zone
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #10b981' }}>
+              <div style={{ fontSize: 11, color: '#10b981', textTransform: 'uppercase', fontWeight: 600 }}>
+                At Best Buy Zone
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, color: '#10b981' }}>
+                {radarData?.summary?.at_best_buy || 0}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                Within ±0.5% — Immediate execution
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #f59e0b' }}>
+              <div style={{ fontSize: 11, color: '#f59e0b', textTransform: 'uppercase', fontWeight: 600 }}>
+                Prime Pullback Dips
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, color: '#f59e0b' }}>
+                {radarData?.summary?.near_best_buy || 0}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                0.5% to 2.0% above Best Buy dip
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #8b5cf6' }}>
+              <div style={{ fontSize: 11, color: '#8b5cf6', textTransform: 'uppercase', fontWeight: 600 }}>
+                Approaching Pullback
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, color: '#8b5cf6' }}>
+                {radarData?.summary?.approaching || 0}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                2.0% to 4.0% away — Watch closely
+              </div>
+            </div>
+          </div>
+
+          {/* Radar Table */}
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Target size={18} style={{ color: '#38bdf8' }} />
+                <span>Closely Priced Stocks to Best Buy Value ({radarData?.candidates?.length || 0})</span>
+              </div>
+            </div>
+
+            {loadingRadar && (!radarData?.candidates || radarData.candidates.length === 0) && (
+              <div className="loading" style={{ padding: '40px 20px', textAlign: 'center' }}>
+                <RefreshCw size={24} className="spin" style={{ marginBottom: 10, opacity: 0.5 }} />
+                <div>Scanning sector setups and pre-fetching bulk live prices...</div>
+              </div>
+            )}
+
+            {!loadingRadar && (!radarData?.candidates || radarData.candidates.length === 0) && (
+              <div className="empty-state" style={{ padding: '40px 20px', textAlign: 'center' }}>
+                <Target size={36} style={{ marginBottom: 10, opacity: 0.3 }} />
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>No Stocks Within {radarProximityPct}% of Best Buy in {radarSector}</div>
+                <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+                  Try broadening the proximity filter to 5.0% or selecting "All Sectors" to discover stocks approaching high-conviction entry zones.
+                </div>
+              </div>
+            )}
+
+            {radarData?.candidates && radarData.candidates.length > 0 && (
+              <div className="table-container">
+                <table className="table" style={{ minWidth: '950px' }}>
+                  <thead>
+                    <tr>
+                      <th>Stock & Sector</th>
+                      <th>CMP</th>
+                      <th>Best Buy Value</th>
+                      <th>Distance to Best Buy</th>
+                      <th>Proximity Status</th>
+                      <th>Target & Gain</th>
+                      <th>Stop Loss</th>
+                      <th style={{ textAlign: 'right' }}>Action Controls</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {radarData.candidates.map((c: any) => {
+                      const isAtBuy = c.proximity_status === 'AT_BEST_BUY'
+                      const isNearBuy = c.proximity_status === 'NEAR_BEST_BUY'
+                      const isBelowBuy = c.proximity_status === 'BELOW_BUY'
+                      const isSetting = settingSingleAlertSym === c.symbol
+
+                      let badgeStyle: React.CSSProperties = { background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid #38bdf8' }
+                      if (isAtBuy) {
+                        badgeStyle = { background: 'rgba(16, 185, 129, 0.25)', color: '#10b981', border: '1px solid #10b981' }
+                      } else if (isBelowBuy) {
+                        badgeStyle = { background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid #a855f7' }
+                      } else if (c.proximity_status === 'APPROACHING') {
+                        badgeStyle = { background: 'rgba(245, 158, 11, 0.18)', color: '#fbbf24', border: '1px solid #f59e0b' }
+                      }
+
+                      return (
+                        <tr key={c.symbol} style={{ background: isAtBuy ? 'rgba(16, 185, 129, 0.04)' : isNearBuy ? 'rgba(56, 189, 248, 0.03)' : 'transparent' }}>
+                          <td>
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>{c.symbol}</div>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3 }}>
+                              <span style={{ fontSize: 10, background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: 3, color: 'var(--color-text-muted)' }}>
+                                {c.sector}
+                              </span>
+                              <span style={{ fontSize: 10, background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', padding: '1px 5px', borderRadius: 3 }}>
+                                {c.entry_type.replace('_', ' ')}
+                              </span>
+                              <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                                Score: {c.total_score}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td>
+                            <div className="mono" style={{ fontWeight: 700, fontSize: 14 }}>
+                              ₹{c.cmp.toFixed(2)}
+                            </div>
+                          </td>
+
+                          <td>
+                            <div className="mono" style={{ fontWeight: 700, color: '#38bdf8', fontSize: 14 }}>
+                              ₹{c.best_buy_price.toFixed(2)}
+                            </div>
+                          </td>
+
+                          <td>
+                            <div className="mono" style={{ fontWeight: 700, color: isAtBuy ? '#10b981' : isBelowBuy ? '#c084fc' : '#38bdf8' }}>
+                              {c.distance_pct > 0 ? '+' : ''}{c.distance_pct.toFixed(2)}%
+                            </div>
+                            <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                              ₹{(c.cmp - c.best_buy_price).toFixed(2)} diff
+                            </div>
+                          </td>
+
+                          <td>
+                            <span style={{
+                              ...badgeStyle,
+                              padding: '3px 8px',
+                              borderRadius: 6,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              display: 'inline-block',
+                            }}>
+                              {c.proximity_label}
+                            </span>
+                          </td>
+
+                          <td>
+                            <div className="mono" style={{ fontWeight: 700, color: '#10b981' }}>
+                              ₹{c.target_price.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#10b981' }}>
+                              +{c.expected_gain_pct}% gain
+                            </div>
+                          </td>
+
+                          <td>
+                            <div className="mono" style={{ fontWeight: 700, color: '#ef4444' }}>
+                              ₹{c.stop_loss.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                              {c.risk_buffer_pct}% buffer
+                            </div>
+                          </td>
+
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'inline-flex', gap: 6 }}>
+                              <button
+                                onClick={() => handleSetRadarAlert(c)}
+                                disabled={isSetting}
+                                className="btn btn-secondary"
+                                style={{
+                                  padding: '4px 10px',
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  borderColor: 'rgba(56, 189, 248, 0.4)',
+                                  color: '#38bdf8',
+                                }}
+                                title="Activate coupled Buy Proximity, Target, and Stop Loss alerts"
+                              >
+                                <Bell size={12} />
+                                {isSetting ? '...' : 'Set Alert'}
+                              </button>
+
+                              <button
+                                onClick={() => handleOpenRadarGtt(c)}
+                                className="btn btn-primary"
+                                style={{
+                                  padding: '4px 10px',
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                }}
+                                title="Open Zerodha Kite GTT order modal pre-filled with Best Buy Price"
+                              >
+                                <Target size={12} />
+                                GTT
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

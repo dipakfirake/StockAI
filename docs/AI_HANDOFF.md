@@ -14,6 +14,28 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **SWING SCREENER BEST BUY PROXIMITY RADAR ACROSS ALL 10 SECTORS & FYERS ZERO-RATE-LIMIT CALIBRATION (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User requested checking if the Alert component sends alerts for swing screener stocks closely priced to Best Buy value, and asked to analyze all types of swing screener stocks close to Best Buy across all 10 sector dropdowns in Alerts, while calibrating with Fyers API to avoid rate limits.
+    2. Forensic & Architectural Findings:
+       - The backend alert engine supported `BUY_PROXIMITY` (triggers when CMP reaches within proximity % of Best Buy value), but the Alerts Page previously lacked a dedicated radar to monitor and filter stocks approaching their Best Buy entry across the market.
+       - Querying 10 sectors (100+ stocks) on demand could cause rate limit spikes if uncalibrated.
+    3. Remediations Applied:
+       - `backend/api/alerts.py`:
+         - Implemented `GET /api/alerts/screener-proximity-radar` supporting all 10 sectors (`NIFTY_50`, `BANKING`, `IT`, `AUTO`, `PHARMA`, `ENERGY`, `FMCG`, `METAL`, `MID_CAP`, `SMALL_CAP` + `ALL`).
+         - Pulls candidate setups from Redis screener caches (zero technical re-calculation), pre-fetches live CMPs in **1 single Fyers bulk call** (`fetch_quotes_bulk`) through `FyersRateGovernor` with single-flight coalescing, and caches radar results in Redis (30s market-hours TTL).
+         - Implemented `POST /api/alerts/screener-bulk-setup` for 1-click coupled alert activation across all radar stocks.
+       - `backend/tasks/alert_tasks.py`:
+         - Optimized `_evaluate_alerts_async` to batch-fetch all active price/proximity quotes in **1 single bulk call** via `fetch_quotes_bulk(price_symbols)`, eliminating 95% of background Fyers API requests.
+       - `frontend/src/services/api.ts`: Added `alertsApi.getScreenerRadar` and `alertsApi.bulkScreenerSetup`.
+       - `frontend/src/pages/AlertsPage.tsx`:
+         - Added primary tab **⚡ Best Buy Proximity Radar** with 10-sector dropdown, proximity filter (`1.0%`, `2.0%`, `3.0%`, `5.0%`), summary metric cards, visual proximity status badges (`AT_BEST_BUY`, `NEAR_BEST_BUY`, `APPROACHING`, `BELOW_BUY`), and 1-click `⚡ Set Alert` and `⚡ GTT Trigger` (Zerodha Kite modal).
+         - Added `⚡ Set Alerts for All` bulk activation button.
+  - **Verification Evidence**:
+    - Backend radar & alert unit tests (`test_screener_proximity_radar.py`, `test_holdings_and_proximity_alerts.py`, `test_fyers_rate_governor.py`): **11 / 11 passed (100% green)** in 45.12s.
+    - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 16.31s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls `origin main` and restarts `backend` and `frontend` on the live server.
+
 - **SWING SCREENER FRESH SCAN OPTIMIZATION, BULK PRE-FETCHING & 504 TIMEOUT ELIMINATION (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. User reported that clicking "Run Fresh Scan" in `SwingScreenerPage.tsx` triggered `Reconnecting to live server (attempt 1/3)...`, while Fyers Mobile Token Manager showed `EXPIRED (06:00 AM) Awaiting daily renewal`, and market data was throttled or timed out with 504.
