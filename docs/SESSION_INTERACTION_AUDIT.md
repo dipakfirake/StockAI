@@ -4928,3 +4928,38 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   3. **Rate Limiter Health Probe Bypass (`backend/core/rate_limiter.py`)**:
      - Explicitly bypassed all `/health` and `/api/health` prefixes from rate limiting locks.
 - **Next Safe Step**: User runs lightweight `sudo docker compose restart backend` on live server to free Uvicorn workers.
+
+
+---
+
+### Session Entry 102: Middleware Hardening, Disconnect Safety & Asyncio Lock Deadlock Elimination
+- **Timestamp:** 2026-11-20 12:15:00 IST (06:45:00 UTC)
+- **User Prompt:**
+  `"[opc@stockai-server StockAI]$ docker compose up -d backend"`
+  `"docker compose logs --tail=30 backend"`
+  `"RuntimeError: No response returned."`
+  *(Log output showing Starlette BaseHTTPMiddleware call_next RuntimeError and 504 Gateway Time-out screenshot)*
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. **`RuntimeError: No response returned.` in Starlette `BaseHTTPMiddleware`**:
+     - When client connections abort or disconnect early (such as `navigator.sendBeacon` firing on `/api/presence/leave` during browser tab navigation/close), Starlette's `BaseHTTPMiddleware` raises `RuntimeError("No response returned.")`.
+     - In `RateLimitMiddleware.dispatch` and `SecurityHeadersMiddleware.dispatch`, `call_next(request)` was unhandled for this exception, causing requests to crash and log stacktraces.
+  2. **`asyncio.Lock()` Deadlock on Uvicorn Startup**:
+     - `rate_limiter = TokenBucketRateLimiter()` instantiated at top-level module import created an `asyncio.Lock()` before Uvicorn initialized its event loop.
+     - Acquiring an import-time lock inside Uvicorn requests caused loop-binding deadlocks, freezing workers and causing incoming HTTP requests to stall until Nginx timed out at 60s (`504 Gateway Time-out`).
+  3. **`ClientDisconnect` on `/api/presence/leave`**:
+     - `await request.body()` did not catch `ClientDisconnect` from `starlette.requests`.
+- **Architectural Remediations**:
+  1. **Thread-Safe Lock Replacement (`backend/core/rate_limiter.py`)**:
+     - Replaced `asyncio.Lock()` with `threading.Lock()` for atomic, sub-microsecond in-memory dictionary operations with zero asyncio event loop dependencies.
+     - Added fail-open protection in `RateLimitMiddleware.dispatch`: if `check_rate_limit` fails for any reason, the request is permitted.
+     - Wrapped `call_next(request)` in `try...except RuntimeError` returning `Response(status_code=204)` on client disconnect.
+  2. **Security Headers Disconnect Safety (`backend/core/security_middleware.py`)**:
+     - Wrapped `call_next(request)` in `try...except RuntimeError` returning `Response(status_code=204)` with security headers attached.
+  3. **Presence Route Hardening (`backend/api/presence.py`)**:
+     - Handled `ClientDisconnect` on `await request.body()`.
+  4. **Automated Unit Testing (`backend/tests/test_middleware_hardening.py`)**:
+     - Created 4 targeted unit tests verifying thread safety, disconnect resilience, and fail-open behavior.
+- **Verification Evidence**:
+  - **Backend Unit Tests**: `backend/tests/test_middleware_hardening.py`, `backend/tests/test_special_character_symbols_and_depth.py`, `backend/tests/test_admin_docs_and_health_security.py` -> **16/16 passed (100% green)** in 20.41s.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 errors, built in 14.93s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull and restart the backend container on the live server, allowing 5 seconds for Uvicorn warmup before curling `/health`.

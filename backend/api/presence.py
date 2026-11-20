@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request, Depends, status
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 import json
+from starlette.requests import ClientDisconnect
 
 from backend.services.presence import presence_service
 from backend.core.logging_config import get_logger
@@ -81,6 +82,9 @@ async def leave(request: Request):
                 session_id = data.get("session_id")
             except Exception:
                 session_id = body.decode("utf-8").strip()
+    except ClientDisconnect:
+        logger.debug("[Presence] Client disconnected during leave beacon")
+        return {"count": await presence_service.get_active_count(), "status": "disconnected"}
     except Exception as exc:
         logger.debug(f"[Presence] Error reading leave payload: {exc}")
 

@@ -14,6 +14,22 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **MIDDLEWARE HARDENING, EVENT LOOP DEADLOCK RESOLUTION & DISCONNECT SAFETY (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User reported `RuntimeError: No response returned.` in `docker compose logs --tail=30 backend` and `504 Gateway Time-out` on `https://stockai-live.duckdns.org/health/liv`.
+    2. Root Cause:
+       - Instantiating `asyncio.Lock()` at module import in `TokenBucketRateLimiter` caused event loop lock deadlocks when Uvicorn started, freezing request workers until Nginx timed out with 504.
+       - Starlette's `BaseHTTPMiddleware` throws `RuntimeError("No response returned.")` when clients disconnect early (e.g. `navigator.sendBeacon` on `/api/presence/leave` during tab close). Unhandled in `RateLimitMiddleware` and `SecurityHeadersMiddleware`, this crashed request handling.
+       - Unhandled `ClientDisconnect` in `backend/api/presence.py`.
+    3. Remediations Applied:
+       - `backend/core/rate_limiter.py`: Replaced `asyncio.Lock()` with instantaneous `threading.Lock()` (eliminating event loop dependencies). Added fail-open error handling in `dispatch`. Caught `RuntimeError("No response returned.")` to return HTTP 204 No Content cleanly.
+       - `backend/core/security_middleware.py`: Caught `RuntimeError("No response returned.")` to return HTTP 204 No Content with security headers attached.
+       - `backend/api/presence.py`: Added `ClientDisconnect` exception handling in `/leave`.
+       - `backend/tests/test_middleware_hardening.py`: Added 4 automated unit tests for thread safety, disconnect handling, and fail-open resilience.
+    4. Verification Evidence:
+       - Backend unit tests (`backend/tests/test_middleware_hardening.py`, `backend/tests/test_special_character_symbols_and_depth.py`, `backend/tests/test_admin_docs_and_health_security.py`): **16/16 passed (100% green)** in 20.41s.
+       - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 errors, built in 14.93s (exit code 0)**.
+
 - **LIVE SERVER 504 GATEWAY TIMEOUT & 1-OCPU EVENT LOOP STARVATION RELIEF (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. User reported:

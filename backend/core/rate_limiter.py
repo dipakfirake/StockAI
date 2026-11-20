@@ -6,12 +6,14 @@ Implements token bucket algorithm with:
 - Dual identification: Per-IP and Per-User (when authenticated)
 - Compliant HTTP 429 responses with standard IETF headers (Retry-After, X-RateLimit-*)
 - Memory-safe periodic garbage collection of idle buckets
+- Thread-safe, non-deadlocking synchronization compatible with single/multi-worker Uvicorn
+- Disconnect-safe middleware handling (catches Starlette BaseHTTPMiddleware client disconnects)
 """
 
 import time
-import asyncio
+import threading
 from typing import Dict, Tuple, Optional
-from fastapi import Request, HTTPException, status
+from fastapi import Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from backend.core.logging_config import get_logger
@@ -73,7 +75,7 @@ class TokenBucketRateLimiter:
     """Central registry and evaluator of token buckets."""
     def __init__(self):
         self._buckets: Dict[str, TokenBucket] = {}
-        self._lock = asyncio.Lock()
+        self._lock = threading.Lock()
         self._last_cleanup = time.time()
         self.cleanup_interval = 600  # Clean idle buckets every 10 min
         self.bucket_ttl = 900        # Expire buckets unused for 15 min
@@ -127,7 +129,7 @@ class TokenBucketRateLimiter:
             token_fingerprint = str(hash(auth_header))
             client_key = f"{tier_key}:user:{token_fingerprint[:16]}"
 
-        async with self._lock:
+        with self._lock:
             # Periodic cleanup of idle buckets to avoid memory leaks
             now_wall = time.time()
             if now_wall - self._last_cleanup > self.cleanup_interval:
@@ -161,7 +163,12 @@ rate_limiter = TokenBucketRateLimiter()
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """FastAPI Middleware to enforce Token Bucket rate limits across all routes."""
     async def dispatch(self, request: Request, call_next):
-        res = await rate_limiter.check_rate_limit(request)
+        try:
+            res = await rate_limiter.check_rate_limit(request)
+        except Exception as exc:
+            logger.error(f"[RateLimit] Fail-open on rate limit check error: {exc}")
+            res = None
+
         if res is not None:
             allowed, headers, wait_time = res
             if not allowed:
@@ -184,9 +191,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 )
 
             # Request allowed; attach headers to response
-            response = await call_next(request)
+            try:
+                response = await call_next(request)
+            except RuntimeError as exc:
+                if "No response returned" in str(exc):
+                    # Client disconnected before response was generated
+                    return Response(status_code=status.HTTP_204_NO_CONTENT)
+                raise
+
             for k, v in headers.items():
                 response.headers[k] = v
             return response
 
-        return await call_next(request)
+        try:
+            return await call_next(request)
+        except RuntimeError as exc:
+            if "No response returned" in str(exc):
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
+            raise

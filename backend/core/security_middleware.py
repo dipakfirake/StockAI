@@ -52,7 +52,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 pass
 
         # Execute downstream handlers
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except RuntimeError as exc:
+            if "No response returned" in str(exc):
+                response = Response(status_code=status.HTTP_204_NO_CONTENT)
+            else:
+                raise
 
         # --- Inject Banking & OWASP Standard Security Headers ---
         headers = response.headers
