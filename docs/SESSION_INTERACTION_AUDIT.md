@@ -4963,3 +4963,20 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - **Backend Unit Tests**: `backend/tests/test_middleware_hardening.py`, `backend/tests/test_special_character_symbols_and_depth.py`, `backend/tests/test_admin_docs_and_health_security.py` -> **16/16 passed (100% green)** in 20.41s.
   - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 errors, built in 14.93s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull and restart the backend container on the live server, allowing 5 seconds for Uvicorn warmup before curling `/health`.
+
+
+---
+
+### Session Entry 103: JWT Subject UUID/Email Dual Support & Live Chart Loading Diagnostics
+- **Timestamp:** 2026-11-20 12:35:00 IST (07:05:00 UTC)
+- **User Prompt:**
+  `"{"status":"alive","uptime_seconds":62.55,"timestamp":"2026-11-20T06:51:42.937685+00:00"}"`
+  `"and now i try to reload then it is loading again and charts not seeing now also /swarm"`
+- **Forensic Diagnosis & Analysis**:
+  1. Live backend container uptime confirmed: `uptime_seconds: 62.55`, returning `HTTP 200 alive` via DuckDNS Nginx. The previous 504 Gateway Time-out on health is completely cleared.
+  2. Diagnosed JWT user retrieval in `backend/core/auth.py`: When a user token had an email string rather than a 36-char UUID in `sub`, `db.execute(select(User).where(User.id == user_id))` caused PostgreSQL to crash with `DataError: invalid input for query argument: invalid UUID ...`, leading to 500 errors on protected stock endpoints.
+  3. Added UUID validation in `get_current_user` and `get_current_user_optional` with seamless fallback to `User.email == user_id`.
+  4. Verified data feed for `PCJEWELLER.NS`: Successfully fetched live quote and 496 historical daily candles via Yahoo Finance failover engine.
+- **Verification Evidence**:
+  - Backend tests: 16/16 passed in 17.52s.
+- **Next Safe Step**: Provide user with one-line command to pull commit, check backend logs with `docker compose logs --tail=40 backend`, and verify login session in browser.

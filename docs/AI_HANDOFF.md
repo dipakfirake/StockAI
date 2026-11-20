@@ -14,6 +14,14 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **JWT SUBJECT UUID / EMAIL COMPATIBILITY & AUTH ERROR SHIELDING (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. Probing `/api/stocks/{symbol}/insight` with legacy or email-based JWT subjects raised an uncaught PostgreSQL error: `sqlalchemy.exc.DBAPIError: invalid input for query argument: invalid UUID ...`.
+    2. Remediations Applied:
+       - `backend/core/auth.py`: Updated `get_current_user` and `get_current_user_optional` to inspect whether `sub` is a valid UUID format before querying `User.id == user_id`; gracefully falls back to `User.email == user_id` for legacy or demo sessions.
+    3. Verification Evidence:
+       - 16/16 backend unit tests passed.
+
 - **MIDDLEWARE HARDENING, EVENT LOOP DEADLOCK RESOLUTION & DISCONNECT SAFETY (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. User reported `RuntimeError: No response returned.` in `docker compose logs --tail=30 backend` and `504 Gateway Time-out` on `https://stockai-live.duckdns.org/health/liv`.

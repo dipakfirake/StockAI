@@ -54,8 +54,20 @@ async def get_current_user(
     # Import here to avoid circular imports
     from backend.models.user import User
     from sqlalchemy import select
+    import uuid as _uuid
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    is_valid_uuid = False
+    try:
+        _uuid.UUID(str(user_id))
+        is_valid_uuid = True
+    except (ValueError, TypeError):
+        is_valid_uuid = False
+
+    if is_valid_uuid:
+        result = await db.execute(select(User).where(User.id == user_id))
+    else:
+        result = await db.execute(select(User).where(User.email == user_id))
+
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise credentials_exception
@@ -79,8 +91,20 @@ async def get_current_user_optional(
 
     from backend.models.user import User
     from sqlalchemy import select
+    import uuid as _uuid
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    is_valid_uuid = False
+    try:
+        _uuid.UUID(str(user_id))
+        is_valid_uuid = True
+    except (ValueError, TypeError):
+        is_valid_uuid = False
+
+    if is_valid_uuid:
+        result = await db.execute(select(User).where(User.id == user_id))
+    else:
+        result = await db.execute(select(User).where(User.email == user_id))
+
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         return None
