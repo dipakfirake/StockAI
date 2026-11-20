@@ -155,7 +155,7 @@ async def setup_screener_coupled_alerts(
     prox_pct = max(0.2, min(5.0, request.proximity_pct))
     created_alerts = []
 
-    # 1. Buy Proximity Pre-Alert
+    # 1. Buy Proximity Pre-Alert (triggers before hitting Best Buy zone from above)
     if request.best_buy_price and request.best_buy_price > 0:
         buy_prox_price = round(request.best_buy_price * (1.0 + prox_pct / 100.0), 2)
         alert_buy = Alert(
@@ -163,7 +163,7 @@ async def setup_screener_coupled_alerts(
             symbol=symbol,
             condition_type="BUY_PROXIMITY",
             condition_value=buy_prox_price,
-            message=f"{symbol}: Approaching Best Buy Zone! Price near ₹{buy_prox_price:.2f} (Target Entry: ₹{request.best_buy_price:.2f})",
+            message=f"{symbol}: ⚡ PRE-BUY ALERT! Price near ₹{buy_prox_price:.2f} is approaching Best Buy ₹{request.best_buy_price:.2f} from above. Prepare entry order!",
             priority="MEDIUM",
             delivery_method="IN_APP",
             is_active=True,
@@ -179,7 +179,7 @@ async def setup_screener_coupled_alerts(
             symbol=symbol,
             condition_type="TARGET_PROXIMITY",
             condition_value=target_prox_price,
-            message=f"{symbol}: Approaching Target! Price near ₹{target_prox_price:.2f} (Target: ₹{request.target_price:.2f}) — Prepare to lock in gains!",
+            message=f"{symbol}: 🎯 SELL PRE-ALERT! Price near ₹{target_prox_price:.2f} is within {prox_pct}% of Target ₹{request.target_price:.2f}. Prepare to lock profit!",
             priority="HIGH",
             delivery_method="IN_APP",
             is_active=True,
@@ -257,6 +257,7 @@ async def get_screener_proximity_radar(
     sector: str = "ALL",
     proximity_pct: float = 3.0,
     min_score: float = 60.0,
+    stage: str = "ALL",
     current_user=Depends(get_current_user),
 ):
     """
@@ -265,17 +266,19 @@ async def get_screener_proximity_radar(
     and identifies stocks whose current market price is closely tracking
     their ML Best Buy value.
 
-    Calibration & Rate Limit Guarantees:
-    - Reads candidate setups from pre-computed Redis screener caches (zero technical re-calculation)
-    - Pre-fetches all current market prices in 1 single bulk call via FyersRateGovernor
-    - Cached in Redis with 30s TTL to prevent spam requests from hitting Fyers
+    Features:
+    - Pre-Buy Opportunities: strictly BEFORE the buy price is reached (descending from above).
+    - Sell Pre-Alerts: detects stocks within proximity of Target to prepare profit-taking.
+    - Top Analyzer Verification: multi-factor constraints (RSI accumulation, asymmetric R:R, ML probability).
+    - Zero Rate Limit Guarantees: 1 single bulk call via FyersRateGovernor, cached in Redis.
     """
     from backend.services.screener import ScreenerService, SECTOR_UNIVERSES
     from backend.core.cache import cache_get, cache_set
     from backend.core.market_hours import get_dynamic_screener_ttl
 
     norm_sector = sector.upper().replace(" ", "_") if sector else "ALL"
-    cache_key = f"alerts_screener_radar:{norm_sector}:{proximity_pct}:{min_score}"
+    norm_stage = stage.upper() if stage else "ALL"
+    cache_key = f"alerts_screener_radar:{norm_sector}:{proximity_pct}:{min_score}:{norm_stage}"
     cached = await cache_get(cache_key)
     if cached and isinstance(cached, dict) and "candidates" in cached:
         return cached
@@ -337,9 +340,10 @@ async def get_screener_proximity_radar(
     if not valid_candidates:
         empty_res = {
             "sector": norm_sector,
+            "stage": norm_stage,
             "proximity_threshold_pct": proximity_pct,
             "total_candidates": 0,
-            "summary": {"at_best_buy": 0, "near_best_buy": 0, "approaching": 0},
+            "summary": {"at_best_buy": 0, "near_best_buy": 0, "pre_buy_prime": 0, "approaching": 0, "sell_pre_alerts": 0, "below_buy": 0},
             "candidates": [],
         }
         await cache_set(cache_key, empty_res, ttl=get_dynamic_screener_ttl())
@@ -357,6 +361,8 @@ async def get_screener_proximity_radar(
     at_best_buy_count = 0
     near_best_buy_count = 0
     approaching_count = 0
+    sell_pre_alert_count = 0
+    below_buy_count = 0
 
     for s in valid_candidates:
         sym = s.get("symbol")
@@ -373,28 +379,86 @@ async def get_screener_proximity_radar(
         distance_pct = round(((cmp - best_buy) / best_buy) * 100.0, 2) if best_buy > 0 else 0.0
         abs_dist = abs(distance_pct)
 
-        # Proximity status categorization
+        # 1. Pre-Buy Determination: Strictly BEFORE hitting Best Buy from above
+        is_pre_buy = (cmp >= best_buy) and (distance_pct <= proximity_pct)
+        pre_buy_diff = round(max(0.0, cmp - best_buy), 2)
+        pre_buy_buffer_pct = max(0.0, distance_pct)
+
+        # 2. Target Proximity & Sell Pre-Alert Determination
+        if target > 0 and cmp > 0:
+            target_distance_pct = round(((target - cmp) / cmp) * 100.0, 2)
+            is_near_target = (0.0 <= target_distance_pct <= 2.5)
+            is_target_hit = (target_distance_pct <= 0.0)
+        else:
+            target_distance_pct = 999.0
+            is_near_target = False
+            is_target_hit = False
+
+        if is_near_target:
+            sell_pre_alert_count += 1
+            sell_pre_alert_label = f"🎯 Near Target (Sell Pre-Alert: +{target_distance_pct}% to T2: ₹{target:.2f})"
+        elif is_target_hit:
+            sell_pre_alert_label = f"🚀 Target Reached (CMP ₹{cmp:.2f} >= Target ₹{target:.2f})"
+        else:
+            sell_pre_alert_label = None
+
+        # 3. Proximity status categorization
         if abs_dist <= 0.5:
             status = "AT_BEST_BUY"
-            status_label = "🎯 At Best Buy (Immediate Entry)"
+            status_label = "🎯 At Best Buy (Optimal Immediate Entry)"
             at_best_buy_count += 1
         elif 0.5 < distance_pct <= 2.0:
             status = "NEAR_BEST_BUY"
-            status_label = "⚡ Near Best Buy (Pullback Zone)"
+            status_label = f"⚡ Pre-Buy Zone (+{distance_pct}% before Best Buy)"
             near_best_buy_count += 1
         elif 2.0 < distance_pct <= 4.0:
             status = "APPROACHING"
-            status_label = "⏳ Approaching Buy Zone"
+            status_label = f"⏳ Approaching Pre-Buy (+{distance_pct}% before Best Buy)"
             approaching_count += 1
         elif distance_pct < -0.5:
             status = "BELOW_BUY"
-            status_label = "🏷️ Below Best Buy (Deep Discount)"
+            status_label = f"🏷️ Slipped Below Buy ({distance_pct}% discount)"
+            below_buy_count += 1
         else:
             status = "EXTENDED"
-            status_label = "🚀 Extended from Best Buy"
+            status_label = f"🚀 Extended from Best Buy (+{distance_pct}%)"
 
-        # Filter by requested proximity threshold (include anything within proximity_pct or below)
-        if distance_pct <= proximity_pct:
+        # 4. Top Analyzers Multi-Factor Constraints Verification
+        indicators = s.get("indicators") or {}
+        rsi = float(indicators.get("rsi_14") or s.get("rsi") or 50.0)
+        ai_res = s.get("ai_analysis") or {}
+        ml_conf = float(ai_res.get("confidence") or s.get("confidence") or (s.get("total_score", 70) / 100.0))
+        ml_prob_buy = float(ai_res.get("probabilities", {}).get("buy", 0.60))
+        rr_ratio = round(float(plan.get("risk_reward_ratio") or 2.0), 2)
+
+        passed_constraints = []
+        if 30.0 <= rsi <= 65.0:
+            passed_constraints.append("RSI Momentum in Accumulation Zone (30-65)")
+        if rr_ratio >= 1.7:
+            passed_constraints.append(f"Favorable Asymmetric R:R ({rr_ratio}:1)")
+        if ml_prob_buy >= 0.50:
+            passed_constraints.append(f"ML Directional Conviction ({int(ml_prob_buy*100)}% Buy Prob)")
+        if float(s.get("total_score") or 0.0) >= 65.0:
+            passed_constraints.append("Multi-Factor Confluence (Score >= 65)")
+        if cmp > sl:
+            passed_constraints.append("Structural Stop Loss Buffer Intact")
+
+        is_verified = len(passed_constraints) >= 3
+        verdict = "TOP_ANALYZER_VERIFIED" if is_verified else "STANDARD_SETUP"
+        verdict_label = "✓ Top Analyzer Verified" if is_verified else "⚡ Standard Setup"
+
+        # 5. Filter by Stage selection
+        matches_stage = True
+        if norm_stage == "PRE_BUY":
+            matches_stage = is_pre_buy and distance_pct <= proximity_pct
+        elif norm_stage == "SELL_PRE_ALERT":
+            matches_stage = is_near_target
+        elif norm_stage == "AT_BEST_BUY":
+            matches_stage = (abs_dist <= 0.5)
+        else: # "ALL"
+            matches_stage = (distance_pct <= proximity_pct) or is_near_target
+
+        if matches_stage:
             radar_items.append({
                 "symbol": sym,
                 "name": s.get("name") or sym,
@@ -406,13 +470,30 @@ async def get_screener_proximity_radar(
                 "entry_type": plan.get("entry_type", "PULLBACK_DIP"),
                 "distance_pct": distance_pct,
                 "abs_distance_pct": abs_dist,
+                "is_pre_buy": is_pre_buy,
+                "pre_buy_diff": pre_buy_diff,
+                "pre_buy_buffer_pct": pre_buy_buffer_pct,
+                "is_near_target": is_near_target,
+                "target_distance_pct": target_distance_pct,
+                "sell_pre_alert_label": sell_pre_alert_label,
                 "proximity_status": status,
                 "proximity_label": status_label,
                 "target_price": target,
                 "stop_loss": sl,
                 "expected_gain_pct": round(float(plan.get("expected_gain_pct") or 0.0), 1),
-                "risk_reward_ratio": round(float(plan.get("risk_reward_ratio") or 0.0), 2),
+                "risk_reward_ratio": rr_ratio,
                 "risk_buffer_pct": round(((cmp - sl) / cmp) * 100.0, 2) if sl > 0 and cmp > 0 else 0.0,
+                "technical_verification": {
+                    "verified": is_verified,
+                    "verdict": verdict,
+                    "verdict_label": verdict_label,
+                    "rsi": round(rsi, 1),
+                    "risk_reward": rr_ratio,
+                    "ml_confidence": round(ml_conf, 2),
+                    "ml_buy_prob": round(ml_prob_buy, 2),
+                    "passed_constraints": passed_constraints,
+                    "total_constraints_passed": len(passed_constraints),
+                }
             })
 
     # Sort closest to Best Buy first
@@ -420,12 +501,16 @@ async def get_screener_proximity_radar(
 
     response_payload = {
         "sector": norm_sector,
+        "stage": norm_stage,
         "proximity_threshold_pct": proximity_pct,
         "total_candidates": len(radar_items),
         "summary": {
             "at_best_buy": at_best_buy_count,
             "near_best_buy": near_best_buy_count,
+            "pre_buy_prime": near_best_buy_count,
             "approaching": approaching_count,
+            "sell_pre_alerts": sell_pre_alert_count,
+            "below_buy": below_buy_count,
         },
         "candidates": radar_items,
     }
@@ -451,7 +536,7 @@ async def setup_screener_bulk_alerts(
         symbol = item.symbol.upper()
         prox_pct = max(0.2, min(5.0, item.proximity_pct))
 
-        # 1. Buy Proximity Pre-Alert
+        # 1. Buy Proximity Pre-Alert (triggers before hitting Best Buy zone from above)
         if item.best_buy_price and item.best_buy_price > 0:
             buy_prox = round(item.best_buy_price * (1.0 + prox_pct / 100.0), 2)
             db.add(Alert(
@@ -459,14 +544,14 @@ async def setup_screener_bulk_alerts(
                 symbol=symbol,
                 condition_type="BUY_PROXIMITY",
                 condition_value=buy_prox,
-                message=f"{symbol}: Approaching Best Buy Zone! Price near ₹{buy_prox:.2f} (Target Entry: ₹{item.best_buy_price:.2f})",
+                message=f"{symbol}: ⚡ PRE-BUY ALERT! Price near ₹{buy_prox:.2f} is approaching Best Buy ₹{item.best_buy_price:.2f} from above. Prepare entry order!",
                 priority="MEDIUM",
                 delivery_method="IN_APP",
                 is_active=True,
             ))
             created_total += 1
 
-        # 2. Target Proximity Pre-Alert & Hit
+        # 2. Target Proximity Pre-Alert & Hit (Sell Pre-Alert before hitting target)
         if item.target_price and item.target_price > 0:
             tgt_prox = round(item.target_price * (1.0 - prox_pct / 100.0), 2)
             db.add(Alert(
@@ -474,7 +559,7 @@ async def setup_screener_bulk_alerts(
                 symbol=symbol,
                 condition_type="TARGET_PROXIMITY",
                 condition_value=tgt_prox,
-                message=f"{symbol}: Approaching Target! Price near ₹{tgt_prox:.2f} — Prepare to sell.",
+                message=f"{symbol}: 🎯 SELL PRE-ALERT! Price near ₹{tgt_prox:.2f} is within {prox_pct}% of Target ₹{item.target_price:.2f}. Prepare to lock profit!",
                 priority="HIGH",
                 delivery_method="IN_APP",
                 is_active=True,

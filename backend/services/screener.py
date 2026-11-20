@@ -523,25 +523,79 @@ class ScreenerService:
                     entry_zone = f"₹{current_price - 0.15*atr:.2f} – ₹{current_price + 0.15*atr:.2f} (Support Base Level)"
                     entry_advice = "Price is at the optimal accumulation zone near support base. Suitable for immediate entry."
 
-                # STRUCTURAL RULE-BASED STOP LOSS
-                # Anchored strictly below recent swing low / support base with ATR buffer (NOT a naive flat %)
-                structural_sl = swing_low - (0.6 * atr)
-                max_risk_dist = optimal_entry_price * 0.050  # Cap risk at 5.0% maximum
-                min_risk_dist = optimal_entry_price * 0.015  # Enforce minimum 1.5% breathing room
+                # ── ML-DRIVEN & ATR-ADAPTIVE DYNAMIC SETUP (ELIMINATES THE 12.5% CONSTANT TRAP) ──
+                # 1. Structural Stop Loss: Anchored strictly below recent swing low with ATR buffer
+                structural_sl = swing_low - (0.5 * atr)
+                
+                # Adaptive risk boundaries based on stock-specific volatility (ATR%) and cap segment
+                if cap_segment == "LARGE_CAP":
+                    min_risk_dist = max(optimal_entry_price * 0.015, 1.2 * atr)
+                    max_risk_dist = min(optimal_entry_price * 0.065, 2.5 * atr)
+                else:
+                    min_risk_dist = max(optimal_entry_price * 0.020, 1.5 * atr)
+                    max_risk_dist = min(optimal_entry_price * 0.085, 3.2 * atr)
 
-                if (optimal_entry_price - structural_sl) > max_risk_dist:
+                risk_distance = optimal_entry_price - structural_sl
+                if risk_distance > max_risk_dist:
                     stop_loss = max(0.05, round(optimal_entry_price - max_risk_dist, 2))
-                elif (optimal_entry_price - structural_sl) < min_risk_dist:
+                elif risk_distance < min_risk_dist:
                     stop_loss = max(0.05, round(optimal_entry_price - min_risk_dist, 2))
                 else:
                     stop_loss = max(0.05, round(structural_sl, 2))
 
-                # ASYMMETRIC HIGH-REWARD TARGETS FROM BEST BUY PRICE
                 risk_amount = max(0.01, optimal_entry_price - stop_loss)
-                t1 = round(optimal_entry_price + (1.5 * risk_amount), 2)   # 1.5R - Coupled Ratchet Trigger
-                t2 = round(optimal_entry_price + (2.5 * risk_amount), 2)   # 2.5R - Primary Profit Target
-                t3 = round(optimal_entry_price + (4.0 * risk_amount), 2)   # 4.0R - Extended Trend Runner
-                target = t2
+
+                # 2. Structural Technical Resistance Levels (R1, R2, R3)
+                r1 = max(swing_high, optimal_entry_price + (1.2 * atr))
+                
+                bb_dict = indicators.get("bb") or {}
+                bb_upper = float(bb_dict.get("upper") or 0.0)
+                swing_range = max(atr, swing_high - swing_low)
+                fib_1272 = swing_high + (0.272 * swing_range)
+                r2_candidates = [fib_1272, optimal_entry_price + (2.0 * atr)]
+                if bb_upper > optimal_entry_price:
+                    r2_candidates.append(bb_upper)
+                r2 = max(r2_candidates)
+
+                fib_1618 = swing_high + (0.618 * swing_range)
+                r3 = max(fib_1618, r2 + (1.5 * atr))
+
+                # 3. Machine Learning & NLP Sentiment Modulation
+                ml_probs = ai_res.get("probabilities") or {} if isinstance(ai_res, dict) else {}
+                ml_p_buy = float(ml_probs.get("buy", 0.5))
+                ml_conf = float(ai_res.get("confidence", 0.5)) if isinstance(ai_res, dict) else 0.5
+                nlp_compound = float(nlp_result.get("compound_score", 0.0)) if isinstance(nlp_result, dict) else 0.0
+
+                if ml_conf >= 0.70 and ml_p_buy >= 0.55 and nlp_compound >= 0.0:
+                    expansion_factor = min(1.0, (ml_conf - 0.70) / 0.30)
+                    raw_target = r2 + (0.4 * (r3 - r2) * expansion_factor)
+                elif ml_conf < 0.60 or market_regime == "UNDERPERFORMING_MARKET":
+                    raw_target = min(r1, r2)
+                else:
+                    raw_target = r2
+
+                # 4. Realistic 11-Day Holding Horizon Feasibility Constraint
+                min_rr_target = optimal_entry_price + (2.0 * risk_amount)
+                raw_target = max(raw_target, min_rr_target)
+
+                max_11d_gain = max(optimal_entry_price * 0.040, min(optimal_entry_price * 0.18, 4.5 * atr))
+                min_11d_gain = max(optimal_entry_price * 0.025, 1.8 * atr)
+
+                target_gain_dist = raw_target - optimal_entry_price
+                if target_gain_dist > max_11d_gain:
+                    target = round(optimal_entry_price + max_11d_gain, 2)
+                elif target_gain_dist < min_11d_gain:
+                    target = round(optimal_entry_price + min_11d_gain, 2)
+                else:
+                    target = round(raw_target, 2)
+
+                # Maintain asymmetric risk:reward threshold >= 2.0:1
+                if (target - optimal_entry_price) < (2.0 * risk_amount):
+                    target = round(optimal_entry_price + (2.0 * risk_amount), 2)
+
+                t2 = target
+                t1 = round(optimal_entry_price + 0.55 * (t2 - optimal_entry_price), 2)
+                t3 = round(max(r3, t2 + (1.5 * atr)), 2)
 
             elif total_score <= 40:
                 action = "SELL"
@@ -563,21 +617,51 @@ class ScreenerService:
                     entry_zone = f"₹{current_price - 0.15*atr:.2f} – ₹{current_price + 0.15*atr:.2f} (Current Market Level)"
                     entry_advice = "Breakdown momentum active. Sell/Exit at current market price."
 
-                structural_sl = swing_high + (0.6 * atr)
-                max_risk_dist = optimal_entry_price * 0.050
-                min_risk_dist = optimal_entry_price * 0.015
-                if (structural_sl - optimal_entry_price) > max_risk_dist:
+                structural_sl = swing_high + (0.5 * atr)
+                if cap_segment == "LARGE_CAP":
+                    min_risk_dist = max(optimal_entry_price * 0.015, 1.2 * atr)
+                    max_risk_dist = min(optimal_entry_price * 0.065, 2.5 * atr)
+                else:
+                    min_risk_dist = max(optimal_entry_price * 0.020, 1.5 * atr)
+                    max_risk_dist = min(optimal_entry_price * 0.085, 3.2 * atr)
+
+                risk_distance = structural_sl - optimal_entry_price
+                if risk_distance > max_risk_dist:
                     stop_loss = round(optimal_entry_price + max_risk_dist, 2)
-                elif (structural_sl - optimal_entry_price) < min_risk_dist:
+                elif risk_distance < min_risk_dist:
                     stop_loss = round(optimal_entry_price + min_risk_dist, 2)
                 else:
                     stop_loss = round(structural_sl, 2)
 
                 risk_amount = max(0.01, stop_loss - optimal_entry_price)
-                t1 = round(optimal_entry_price - (1.5 * risk_amount), 2)
-                t2 = round(optimal_entry_price - (2.5 * risk_amount), 2)
-                t3 = round(optimal_entry_price - (4.0 * risk_amount), 2)
-                target = t2
+                
+                s1 = min(swing_low, optimal_entry_price - (1.2 * atr))
+                bb_dict = indicators.get("bb") or {}
+                bb_lower = float(bb_dict.get("lower") or 0.0)
+                s2_candidates = [optimal_entry_price - (2.0 * atr)]
+                if bb_lower > 0 and bb_lower < optimal_entry_price:
+                    s2_candidates.append(bb_lower)
+                s2 = min(s2_candidates)
+                s3 = s2 - (1.5 * atr)
+
+                max_11d_drop = max(optimal_entry_price * 0.035, min(optimal_entry_price * 0.16, 4.2 * atr))
+                min_11d_drop = max(optimal_entry_price * 0.025, 1.4 * atr)
+
+                drop_dist = optimal_entry_price - s2
+                if drop_dist > max_11d_drop:
+                    target = round(optimal_entry_price - max_11d_drop, 2)
+                elif drop_dist < min_11d_drop:
+                    target = round(optimal_entry_price - min_11d_drop, 2)
+                else:
+                    target = round(s2, 2)
+
+                # Maintain asymmetric risk:reward threshold >= 2.0:1
+                if (optimal_entry_price - target) < (2.0 * risk_amount):
+                    target = round(optimal_entry_price - (2.0 * risk_amount), 2)
+
+                t2 = target
+                t1 = round(optimal_entry_price - 0.55 * (optimal_entry_price - t2), 2)
+                t3 = round(min(s3, t2 - (1.5 * atr)), 2)
 
             else:
                 action = "HOLD"
@@ -599,7 +683,7 @@ class ScreenerService:
                 # Targets derived strictly from calculated resistance and channel expansion
                 t2 = round(res - (0.15 * atr), 2)  # Primary ceiling target
                 if t2 <= optimal_entry_price:
-                    t2 = round(optimal_entry_price + (2.0 * risk_amount), 2)
+                    t2 = round(optimal_entry_price + (1.8 * risk_amount), 2)
                 t1 = round(optimal_entry_price + 0.5 * (t2 - optimal_entry_price), 2)  # Midpoint of range
                 t3 = round(res + (1.0 * atr), 2)  # Channel breakout runner
                 target = t2

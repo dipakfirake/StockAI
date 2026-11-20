@@ -39,11 +39,22 @@ export default function App() {
         else if (type === 'error') toast.error(title, message)
         else toast.info(title, message)
       } else if (payload.type === 'ALERT_TRIGGERED') {
-        const isTarget = payload.condition_type?.includes('TARGET')
+        const isPreBuy = payload.condition_type === 'BUY_PROXIMITY' || payload.condition_type?.includes('BUY')
+        const isTargetHit = payload.condition_type === 'TARGET_HIT'
+        const isSellPreAlert = payload.condition_type === 'TARGET_PROXIMITY'
         const isSL = payload.condition_type?.includes('STOP_LOSS')
-        if (isTarget) toast.success(`🎯 ${payload.symbol} Target Alert`, payload.message)
-        else if (isSL) toast.error(`🛑 ${payload.symbol} Stop Loss Alert`, payload.message)
-        else toast.info(`🔔 ${payload.symbol} Alert Triggered`, payload.message)
+
+        if (isPreBuy) {
+          toast.info(`⚡ Pre-Buy Alert: ${payload.symbol}`, payload.message)
+        } else if (isSellPreAlert) {
+          toast.warning(`🎯 Sell Pre-Alert (Near Target): ${payload.symbol}`, payload.message)
+        } else if (isTargetHit) {
+          toast.success(`🎯 Target Achieved: ${payload.symbol}`, payload.message)
+        } else if (isSL) {
+          toast.error(`🛑 Stop Loss Alert: ${payload.symbol}`, payload.message)
+        } else {
+          toast.info(`🔔 ${payload.symbol} Alert Triggered`, payload.message)
+        }
       } else if (payload.type === 'ALERT_CREATED') {
         toast.info(`🔔 Alert Active: ${payload.symbol}`, payload.message)
       }

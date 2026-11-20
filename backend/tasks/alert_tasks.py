@@ -1,6 +1,7 @@
 """Alert evaluation Celery task — periodic alert condition checking."""
 
 import asyncio
+import re
 import smtplib
 from email.message import EmailMessage
 from backend.celery_app import celery_app
@@ -108,9 +109,46 @@ async def _evaluate_alerts_async():
                     if quote:
                         current_value = quote["price"]
                         cond_val = float(alert.condition_value)
-                        if alert.condition_type in ("PRICE_ABOVE", "TARGET_PROXIMITY", "TARGET_HIT") and current_value >= cond_val:
+                        msg_str = alert.message or ""
+
+                        if alert.condition_type == "BUY_PROXIMITY":
+                            # Pre-Buy Alert: triggers strictly BEFORE the stock hits Best Buy from above
+                            best_buy_bound = None
+                            match = re.search(r"(?:Best Buy|Target Entry):?\s*₹\s*([\d\.]+)", msg_str, re.IGNORECASE)
+                            if match:
+                                try:
+                                    best_buy_bound = float(match.group(1))
+                                except Exception:
+                                    pass
+
+                            if best_buy_bound is not None:
+                                # Pre-Buy corridor: price descending from above into [best_buy, buy_prox]
+                                if best_buy_bound <= current_value <= cond_val:
+                                    triggered = True
+                            else:
+                                if current_value <= cond_val:
+                                    triggered = True
+
+                        elif alert.condition_type == "TARGET_PROXIMITY":
+                            # Sell Pre-Alert: triggers when price approaches Target from below before hitting it
+                            target_bound = None
+                            tgt_match = re.search(r"Target:?\s*₹\s*([\d\.]+)", msg_str, re.IGNORECASE)
+                            if tgt_match:
+                                try:
+                                    target_bound = float(tgt_match.group(1))
+                                except Exception:
+                                    pass
+
+                            if target_bound is not None:
+                                if cond_val <= current_value < target_bound:
+                                    triggered = True
+                            else:
+                                if current_value >= cond_val:
+                                    triggered = True
+
+                        elif alert.condition_type in ("PRICE_ABOVE", "TARGET_HIT") and current_value >= cond_val:
                             triggered = True
-                        elif alert.condition_type in ("PRICE_BELOW", "BUY_PROXIMITY", "STOP_LOSS_PROXIMITY", "STOP_LOSS_HIT") and current_value <= cond_val:
+                        elif alert.condition_type in ("PRICE_BELOW", "STOP_LOSS_PROXIMITY", "STOP_LOSS_HIT") and current_value <= cond_val:
                             triggered = True
 
                 # 2. Indicator based conditions requiring candles
@@ -228,16 +266,22 @@ async def _evaluate_alerts_async():
                             message=user_msg,
                             priority=alert.priority
                         )
-                        db.add(notif)
+                        res = db.add(notif)
+                        if asyncio.iscoroutine(res):
+                            await res
                     
                     # 2. WebSockets & Instant Global Toast
                     await broadcast_alert(payload, user_id=str(alert.user_id))
 
                     toast_type = "info"
-                    if alert.condition_type in ("TARGET_HIT", "TARGET_PROXIMITY"):
+                    if alert.condition_type == "TARGET_PROXIMITY":
+                        toast_type = "warning"
+                    elif alert.condition_type == "TARGET_HIT":
                         toast_type = "success"
                     elif alert.condition_type in ("STOP_LOSS_HIT", "STOP_LOSS_PROXIMITY"):
                         toast_type = "error"
+                    elif alert.condition_type == "BUY_PROXIMITY":
+                        toast_type = "info"
                     elif alert.priority == "HIGH":
                         toast_type = "warning"
 

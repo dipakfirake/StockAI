@@ -16,7 +16,7 @@ class TestSwingScreenerCategorization:
     async def test_run_screener_categorization_and_metrics(self):
         """Test screener correctly partitions setups into BUY, SELL, and HOLD lists."""
         
-        async def fake_analyze(symbol: str, force_refresh: bool = False):
+        async def fake_analyze(symbol: str, force_refresh: bool = False, **kwargs):
             if "BUY" in symbol:
                 return {
                     "symbol": symbol,

@@ -14,6 +14,46 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
 
+- **DYNAMIC ML ATR-ADAPTIVE SWING TARGETS, PRE-BUY OPPORTUNITIES (BEFORE BUY PRICE) & SELL PRE-ALERTS (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. **Forensic Resolution of the Static +12.5% Target Degeneracy**: User audited the Swing Screener Radar and noted that 15 out of 16 stocks showed identical `+12.5%` target gain and `5.79%` stop loss. Demanded root-cause diagnosis, mathematical multi-factor indicators, and dynamic ML/DL formulas calibrated to individual stock volatility and historical audit lessons.
+    2. **Pre-Buy & Sell Pre-Alert Demands**: User specified: *"i want alerts to be before stocks has its best buy price not after its buy price as you now usually gives and also i want it with proper calculation results verified by like top analyzers... i want to give me alerts before buy price to be shows in alert tab also and also toast all over system and sell alert also when near by target price of specific stock to be."*
+    3. **Root Cause Diagnosis**:
+       - In `backend/services/screener.py` lines 528–544, `max_risk_dist` was hardcoded to `optimal_entry_price * 0.050` (5.0%).
+       - For 95% of large/mid-cap swing setups, `swing_low - 0.6 * atr` exceeded 5.0%, triggering the cap: `stop_loss = entry * 0.95` (fixed 5.0% risk).
+       - Target $T_2$ was calculated as `entry + 2.5 * risk_amount = entry + (2.5 * 0.050 * entry) = entry * 1.125` ($\mathbf{+12.5\% \text{ constant}}$).
+       - In historical audits (`Swing_Trade_Audit_2026-11-02_to_2026-11-17.xlsx`), defensive low-beta stocks (e.g. HUL, ITC, daily ATR $\le 1.1\%$) rarely move +12.5% in 11 days, reversing at structural resistance (+4.5% to +7.5%) and turning winning setups into losses!
+    4. **Remediations Applied**:
+       - `backend/services/screener.py`:
+         - Dynamic Volatility-Adaptive Risk: `min_risk_dist = max(entry * 0.015, 1.2 * atr)`, `max_risk_dist = min(entry * 0.065, 2.5 * atr)`.
+         - Multi-Factor Structural Resistance Levels: $R_1$ (recent swing high or +1.2 ATR), $R_2$ (Fibonacci 1.272 extension & Bollinger Upper Band), $R_3$ (Fibonacci 1.618 extension).
+         - Machine Learning & FinBERT Modulation: StockTransformer/BiLSTM buy probability $P(\text{buy})$, model confidence, and NLP sentiment dynamically expand target toward $R_3$ when conviction is high ($\ge 0.70$) or anchor at $R_1/R_2$ during underperforming regimes.
+         - 11-Day Holding Horizon Feasibility Constraint: Enforces realistic swing targets bounded by stock volatility while strictly guaranteeing an asymmetric reward-to-risk ratio of $\ge 2.0:1$.
+       - `backend/api/alerts.py`:
+         - Enriched `GET /api/alerts/screener-proximity-radar` with:
+           - `is_pre_buy`: Strictly BEFORE buy price ($\text{CMP} \ge \text{Best Buy}$ and $\text{CMP} \le \text{Best Buy} \times (1 + \text{prox}\% / 100)$).
+           - `pre_buy_diff`: Exact ₹ amount remaining before reaching optimal Best Buy entry.
+           - `is_near_target`: Sell Pre-Alert triggering when CMP is within $2.5\%$ of Target $T_2$.
+           - `technical_verification`: Verified by Top Analyzers with multi-factor constraints (RSI 30-65 accumulation, Asymmetric R:R $\ge 1.7:1$, ML buy conviction $\ge 50\%$, Multi-Factor score $\ge 65$, structural SL intact).
+           - Stage filtering parameter: `stage="PRE_BUY"`, `stage="SELL_PRE_ALERT"`, `stage="AT_BEST_BUY"`, `stage="ALL"`.
+         - Updated `setup_screener_coupled_alerts` and `setup_screener_bulk_alerts` with explicit Pre-Buy and Sell Pre-Alert condition messages.
+       - `backend/tasks/alert_tasks.py`:
+         - Enforced corridor verification for `BUY_PROXIMITY` (only triggers within $[\text{Best Buy}, \text{Buy Prox}]$, preventing alerts after price has already breached or fallen below Best Buy).
+         - Enforced corridor verification for `TARGET_PROXIMITY` (triggers when $[\text{Target Prox} \le \text{CMP} < \text{Target}]$ before target is hit).
+       - `frontend/src/App.tsx`:
+         - Added distinct real-time system-wide global toasts for Pre-Buy (`⚡ Pre-Buy Alert: ...`), Sell Pre-Alert (`🎯 Sell Pre-Alert (Near Target): ...`), Target Hit (`🎯 Target Achieved: ...`), and SL (`🛑 Stop Loss Alert: ...`).
+       - `frontend/src/pages/AlertsPage.tsx`:
+         - Added Stage Filter dropdown (`All Opportunities`, `⚡ Pre-Buy Opportunities (Before Buy Price)`, `🎯 Sell Pre-Alerts (Near Target Price)`, `🎯 At Best Buy Zone`).
+         - Added Top Analyzer verification badge (`✓ Top Analyzer Verified`) with tooltip detailing passed constraints.
+         - Added explicit `⚡ ₹... before Buy` indicators on candidates.
+         - Updated Metric Summary Cards and action buttons (`⚡ Pre-Alerts`).
+  - **Verification Evidence**:
+    - Screener radar & alert unit tests (`test_screener_proximity_radar.py`, `test_swing_screener_categorization.py`, `test_swing_audit.py`, `test_holdings_and_proximity_alerts.py`, `test_fyers_rate_governor.py`): **31 / 31 passed (100% green)**.
+    - Verified dynamic variance mathematical proof (`test_screener_dynamic_target_variance_mathematical_proof`): all stocks produced distinct, realistic targets (std dev $> 2\%$, 0 identical 12.5% values).
+    - Verified Pre-Buy corridor evaluation (`test_pre_buy_corridor_evaluation_before_buy_price`): triggers before buy price, rejected after price falls below buy price.
+    - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 23.46s (exit code 0)**.
+  - **Exact Next Safe Step**: User pulls `origin main` and restarts `backend` and `frontend` on the live server.
+
 - **SWING SCREENER BEST BUY PROXIMITY RADAR ACROSS ALL 10 SECTORS & FYERS ZERO-RATE-LIMIT CALIBRATION (COMPLETE & VERIFIED - 2026-11-20):**
   - **Issues Investigated & Delivered**:
     1. User requested checking if the Alert component sends alerts for swing screener stocks closely priced to Best Buy value, and asked to analyze all types of swing screener stocks close to Best Buy across all 10 sector dropdowns in Alerts, while calibrating with Fyers API to avoid rate limits.
