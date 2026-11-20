@@ -12,7 +12,29 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-11-18 / 2026-11-19)
+## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20)
+
+- **SPECIAL CHARACTER STOCKS (`M&M.NS`, `M&MFIN.NS`, `L&TFH.NS`) 400 BAD REQUEST RESOLUTION (COMPLETE & VERIFIED - 2026-11-20):**
+  - **Issues Investigated & Delivered**:
+    1. User reported:
+       - `GET /api/stocks/M&M.NS/depth?simulate=false -> 400 (Bad Request)`
+       - `GET /api/stocks/M&M.NS/insight?timeframe=1d -> 400 (Bad Request)`
+       - `GET /api/stocks/M&M.NS/info -> 400 (Bad Request)`
+       - *"why this check but some other stocks shows data but this not but check for all also and all flaws for it."*
+    2. Root Cause:
+       - `SYMBOL_REGEX = re.compile(r"^[A-Za-z0-9\.\-\:\^]{1,30}$")` in `backend/core/param_validator.py` did not allow ampersands (`&`) or underscores (`_`), rejecting `M&M.NS` and raising `HTTPException(400)`.
+       - Frontend `api.ts` constructed raw `/stocks/${symbol}/...` URLs without encoding.
+       - RAG service entity extraction regex was splitting tokens on `&` (e.g. `M&MFIN` -> `MFIN.NS`).
+       - `MarketDepthWidget` lacked exponential polling backoff on repeated errors.
+    3. Remediations Applied:
+       - `backend/core/param_validator.py`: Updated `SYMBOL_REGEX` to `^[A-Za-z0-9\.\-\:\^\&_]{1,30}$` and added `unquote(raw_symbol.strip()).upper()` to support both literal and percent-encoded paths.
+       - `backend/services/rag_service.py`: Added explicit multi-cap ticker mappings for `m&mfin`, `l&tfh`, `j&kbank` and lookaround boundary matching `(?<![a-zA-Z0-9])([A-Z0-9&.-]{2,15})(?![a-zA-Z0-9])`.
+       - `frontend/src/services/api.ts`: Added `encodeSymbol` wrapper using `encodeURIComponent` across all stock, market, and AI endpoints.
+       - `frontend/src/components/MarketDepthWidget.tsx`: Added error count tracking with backoff to 15s to eliminate console flooding.
+    4. Verification Evidence:
+       - Backend unit tests (`backend/tests/test_special_character_symbols_and_depth.py`): **4/4 passed (100% green)** in 15.48s.
+       - Regression suite (`backend/tests/test_alert_tasks.py`): **1/1 passed**.
+       - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 errors, built in 14.83s (exit code 0)**.
 
 - **SWING SCREENER PROXIMITY PRE-ALERTS, ACTIVE HOLDINGS RISK GUARD & ZERODHA KITE-STYLE ORDER MODAL (COMPLETE & VERIFIED - 2026-11-19):**
   - **Issues Investigated & Delivered**:

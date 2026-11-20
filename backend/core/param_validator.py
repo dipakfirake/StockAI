@@ -9,12 +9,14 @@ Defends against:
 """
 
 import re
+from urllib.parse import unquote
 from fastapi import HTTPException, status
 
 # Whitelist regex for stock symbols:
-# Allows uppercase/lowercase letters, digits, '.', '-', ':', and '^' (e.g. RELIANCE.NS, ^NSEI, TATAMOTORS, 500325.BO)
+# Allows uppercase/lowercase letters, digits, '.', '-', ':', '^', '&', and '_'
+# (e.g. RELIANCE.NS, ^NSEI, M&M.NS, M&MFIN.NS, L&TFH.NS, J&KBANK.NS, BAJAJ-AUTO.NS, 500325.BO)
 # Length between 1 and 30 characters.
-SYMBOL_REGEX = re.compile(r"^[A-Za-z0-9\.\-\:\^]{1,30}$")
+SYMBOL_REGEX = re.compile(r"^[A-Za-z0-9\.\-\:\^\&_]{1,30}$")
 
 # Friendly aliases for major indices to enable clean URLs (e.g. /chart/NIFTY50 -> ^NSEI)
 INDEX_ALIASES = {
@@ -45,8 +47,8 @@ def sanitize_symbol(raw_symbol: str) -> str:
             detail="Stock symbol must be a non-empty string.",
         )
 
-    # Strip whitespace and URL-decode artifacts
-    cleaned = raw_symbol.strip().upper()
+    # Strip whitespace, decode URL percent-encoding (e.g. %26 -> &), and uppercase
+    cleaned = unquote(raw_symbol.strip()).upper()
 
     # Map friendly index aliases if used
     if cleaned in INDEX_ALIASES:
@@ -59,7 +61,7 @@ def sanitize_symbol(raw_symbol: str) -> str:
             detail=(
                 f"Invalid symbol format: '{raw_symbol}'. "
                 "Symbols must be between 1 and 30 characters and only contain "
-                "letters, numbers, dots, hyphens, colons, or carets."
+                "letters, numbers, dots, hyphens, colons, carets, ampersands, or underscores."
             ),
         )
 

@@ -4856,3 +4856,47 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   3. **Verification**:
      - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 33.43s (exit code 0)**.
 - **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `frontend`.
+
+
+---
+
+### Session Entry 100: Root Cause Remediation for HTTP 400 Bad Request on Ampersand Tickers (`M&M.NS`, `M&MFIN.NS`, `L&TFH.NS`) Across Market Depth, Insights & Info Endpoints
+- **Timestamp:** 2026-11-20 11:10:00 IST (05:40:00 UTC)
+- **User Prompt:**
+  `"depth?simulate=false:1 Failed to load resource: the server responded with a status of 400 (Bad Request)"`
+  `"api/stocks/M&M.NS/insight?timeframe=1d:1 Failed to load resource: the server responded with a status of 400 (Bad Request)"`
+  `"api/stocks/M&M.NS/info:1 Failed to load resource: the server responded with a status of 400 (Bad Request)"`
+  `"why this check but some other stocks shows data but this not but check for all also and all flaws for it."`
+- **Forensic Diagnosis & Root Cause Analysis**:
+  1. **Strict Symbol Whitelist Regex Exclusion**:
+     - In `backend/core/param_validator.py`, `SYMBOL_REGEX` was strictly defined as `^[A-Za-z0-9\.\-\:\^]{1,30}$`.
+     - It allowed letters, numbers, dots, hyphens, colons, and carets, but completely omitted the ampersand (`&`) and underscore (`_`).
+     - Major Indian equities with ampersands (e.g. `M&M.NS` Mahindra & Mahindra, `M&MFIN.NS`, `L&TFH.NS`, `J&KBANK.NS`) failed `SYMBOL_REGEX.match(cleaned)`.
+     - `sanitize_symbol` explicitly raised `HTTPException(status_code=400, detail="Invalid symbol format: ...")` across EVERY single stock endpoint (`/depth`, `/insight`, `/info`, `/quote`, `/candles`, `/indicators`, `/signals`, `/ai-score`, `/patterns`, `/volume-profile`).
+  2. **URL Parameter Encoding**:
+     - In `frontend/src/services/api.ts`, endpoints formed paths using raw string interpolation (`/stocks/${symbol}/depth`). While browsers send `/stocks/M&M.NS/depth`, in HTTP URI path segments unencoded `&` can be misinterpreted by certain proxies as query parameter separators.
+  3. **RAG Entity Extraction Token Truncation**:
+     - In `backend/services/rag_service.py`, regex `\b[A-Z0-9-]{2,12}(?:\.NS)?\b` split on `&`, causing queries like `"should i buy M&MFIN"` to extract `MFIN.NS` and `"L&TFH"` to extract `TFH.NS`.
+  4. **Rapid Polling UI Churn in Market Depth Widget**:
+     - In `frontend/src/components/MarketDepthWidget.tsx`, repeated 400 errors caused an unbacked 2.0s polling interval to spam the browser console.
+- **Architectural Remediations**:
+  1. **Param Validator Whitelist Expansion (`backend/core/param_validator.py`)**:
+     - Updated `SYMBOL_REGEX` to `^[A-Za-z0-9\.\-\:\^\&_]{1,30}$` to officially support all Indian equities with ampersands and underscores.
+     - Added `unquote(raw_symbol.strip()).upper()` to safely decode both raw (`M&M.NS`) and percent-encoded (`M%26M.NS`) URLs.
+  2. **Frontend URI Encoding Hardening (`frontend/src/services/api.ts`)**:
+     - Exported and integrated `encodeSymbol = (symbol: string) => encodeURIComponent((symbol || '').trim())` across all `stocksApi`, `marketApi`, `aiApi`, and `watchlistApi` path constructors.
+  3. **Market Depth Widget Exponential Error Backoff (`frontend/src/components/MarketDepthWidget.tsx`)**:
+     - Added `consecutiveErrorsRef`. If an endpoint error occurs 2 or more times consecutively, the polling interval backs off from 2s to 15s to eliminate console flooding.
+  4. **RAG Knowledge Base & Standalone Symbol Resolution (`backend/services/rag_service.py`)**:
+     - Added explicit multi-cap ticker mappings for `"m&mfin"`, `"m&m fin"`, `"mahindra finance"`, `"l&tfh"`, `"l&t finance"`, `"j&kbank"`, `"j&k bank"`.
+     - Upgraded entity matching to lookaround boundaries `(?<![a-zA-Z0-9])` and regex `(?<![a-zA-Z0-9])([A-Z0-9&.-]{2,15})(?![a-zA-Z0-9])` to keep tickers with ampersands intact.
+- **Proportionate Verification Evidence**:
+  - **Automated Unit Tests (`backend/tests/test_special_character_symbols_and_depth.py`)**:
+    - `test_sanitize_symbol_ampersand_and_special_chars`: **PASSED** (M&M.NS, M%26M.NS, M&MFIN.NS, L&TFH.NS, J&KBANK.NS, BAJAJ-AUTO.NS all 200 OK).
+    - `test_sanitize_symbol_rejects_malicious_inputs`: **PASSED** (path traversal, SQL injection fragments rejected with 400).
+    - `test_rag_entity_extraction_for_ampersand_tickers`: **PASSED** (M&M, M&MFIN, L&TFH, J&KBANK accurately identified).
+    - `test_market_depth_synthetic_generation_for_mm`: **PASSED** (5 bids, 5 asks, circuit limits, zero math crash).
+    - Result: **4/4 passed (100% green)** in 15.48s.
+  - **Regression Suite**: `backend/tests/test_alert_tasks.py` -> **1/1 passed**.
+  - **Frontend Production Build**: `npm --prefix frontend run build` -> **1,995 modules transformed, 0 TypeScript errors, built in 14.83s (exit code 0)**.
+- **Next Safe Step**: User pulls latest commit on cloud server and rebuilds `backend` and `frontend`.

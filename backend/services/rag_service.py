@@ -76,6 +76,13 @@ COMMON_TICKER_MAP = {
     "coalindia": "COALINDIA.NS",
     "m&m": "M&M.NS",
     "mahindra": "M&M.NS",
+    "m&mfin": "M&MFIN.NS",
+    "m&m fin": "M&MFIN.NS",
+    "mahindra finance": "M&MFIN.NS",
+    "l&tfh": "L&TFH.NS",
+    "l&t finance": "L&TFH.NS",
+    "j&kbank": "J&KBANK.NS",
+    "j&k bank": "J&KBANK.NS",
     "ultratech": "ULTRACEMCO.NS",
     "ultracemco": "ULTRACEMCO.NS",
     "adani ent": "ADANIENT.NS",
@@ -330,16 +337,16 @@ class FinancialRAGService:
                 resolved_sym = norm if ("." in norm or norm.startswith("^")) else f"{norm}.NS"
 
         if not resolved_sym:
-            # Match known ticker map
-            for alias, ticker in COMMON_TICKER_MAP.items():
-                pattern = r'\b' + re.escape(alias) + r'\b'
+            # Match known ticker map (sorted by length descending for greedy match)
+            for alias, ticker in sorted(COMMON_TICKER_MAP.items(), key=lambda x: -len(x[0])):
+                pattern = r'(?<![a-zA-Z0-9])' + re.escape(alias) + r'(?![a-zA-Z0-9])'
                 if re.search(pattern, q_lower):
                     resolved_sym = ticker
                     break
 
-            # Fallback regex for standalone uppercase NSE symbols (e.g. TATAPOWER.NS or TATAPOWER)
+            # Fallback regex for standalone uppercase NSE symbols (e.g. TATAPOWER.NS or M&M.NS or TATAPOWER)
             if not resolved_sym:
-                matches = re.findall(r'\b[A-Z0-9-]{2,12}(?:\.NS)?\b', query)
+                matches = re.findall(r'(?<![a-zA-Z0-9])([A-Z0-9&.-]{2,15})(?![a-zA-Z0-9])', query)
                 for m in matches:
                     token = m.upper().replace(".NS", "")
                     if token not in common_stop_words and not token.isdigit():

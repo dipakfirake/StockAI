@@ -57,6 +57,7 @@ export default function MarketDepthWidget({
   const [error, setError] = useState<string | null>(null);
   const [previewPracticeDepth, setPreviewPracticeDepth] = useState<boolean>(false);
   const timerRef = useRef<number | null>(null);
+  const consecutiveErrorsRef = useRef<number>(0);
 
   const cleanSymbol = (s: string) =>
     s.replace('.NS', '').replace('.BO', '').replace('^', '').toUpperCase();
@@ -72,9 +73,18 @@ export default function MarketDepthWidget({
       const res = await stocksApi.getDepth(symbol);
       setDepth(res.data);
       setError(null);
+      consecutiveErrorsRef.current = 0;
     } catch (err: any) {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+      consecutiveErrorsRef.current += 1;
       setError(err?.response?.data?.detail || 'Failed to load market depth');
+      // Exponential backoff if repeated errors occur to prevent UI console churn
+      if (consecutiveErrorsRef.current >= 2 && timerRef.current !== null) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = window.setInterval(() => {
+          fetchDepth();
+        }, 15000);
+      }
     } finally {
       setLoading(false);
       if (isManual) setTimeout(() => setRefreshing(false), 300);

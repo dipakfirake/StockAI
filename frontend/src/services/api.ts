@@ -78,26 +78,29 @@ api.interceptors.response.use(
   }
 )
 
+// Helper for safely encoding stock symbols with special characters (e.g. M&M.NS -> M%26M.NS)
+export const encodeSymbol = (symbol: string) => encodeURIComponent((symbol || '').trim())
+
 // ===== Stock endpoints =====
 export const stocksApi = {
   search: (q: string) => api.get('/stocks/search', { params: { q } }),
-  getQuote: (symbol: string) => api.get(`/stocks/${symbol}/quote`),
+  getQuote: (symbol: string) => api.get(`/stocks/${encodeSymbol(symbol)}/quote`),
   getCandles: (symbol: string, timeframe = '1d', limit = 750) =>
-    api.get(`/stocks/${symbol}/candles`, { params: { timeframe, limit } }),
+    api.get(`/stocks/${encodeSymbol(symbol)}/candles`, { params: { timeframe, limit } }),
   getIndicators: (symbol: string, timeframe = '1d') =>
-    api.get(`/stocks/${symbol}/indicators`, { params: { timeframe } }),
+    api.get(`/stocks/${encodeSymbol(symbol)}/indicators`, { params: { timeframe } }),
   getSignals: (symbol: string, timeframe = '1d') =>
-    api.get(`/stocks/${symbol}/signals`, { params: { timeframe } }),
+    api.get(`/stocks/${encodeSymbol(symbol)}/signals`, { params: { timeframe } }),
   getAIScore: (symbol: string, timeframe = '1d', mode = 'SWING', segment = 'AUTO') =>
-    api.get(`/stocks/${symbol}/ai-score`, { params: { timeframe, mode, segment } }),
-  getInfo: (symbol: string) => api.get(`/stocks/${symbol}/info`),
+    api.get(`/stocks/${encodeSymbol(symbol)}/ai-score`, { params: { timeframe, mode, segment } }),
+  getInfo: (symbol: string) => api.get(`/stocks/${encodeSymbol(symbol)}/info`),
   getPatterns: (symbol: string, timeframe = '1d', limit = 250) =>
-    api.get(`/stocks/${symbol}/patterns`, { params: { timeframe, limit } }),
+    api.get(`/stocks/${encodeSymbol(symbol)}/patterns`, { params: { timeframe, limit } }),
   getInsight: (symbol: string, timeframe = '1d', anchorDate?: string | null) =>
-    api.get(`/stocks/${symbol}/insight`, { params: { timeframe, ...(anchorDate && { anchor_date: anchorDate }) } }),
+    api.get(`/stocks/${encodeSymbol(symbol)}/insight`, { params: { timeframe, ...(anchorDate && { anchor_date: anchorDate }) } }),
   getVolumeProfile: (symbol: string, timeframe = '1d') =>
-    api.get(`/stocks/${symbol}/volume-profile`, { params: { timeframe } }),
-  getDepth: (symbol: string, simulate = false) => api.get(`/stocks/${symbol}/depth`, { params: { simulate } }),
+    api.get(`/stocks/${encodeSymbol(symbol)}/volume-profile`, { params: { timeframe } }),
+  getDepth: (symbol: string, simulate = false) => api.get(`/stocks/${encodeSymbol(symbol)}/depth`, { params: { simulate } }),
   scanMarket: (rule: string) => api.get(`/scanner/nifty50`, { params: { rule } }),
   customScan: (data: { universe: string; timeframe?: string; conditions: Array<{ indicator: string; operator: string; value: number | string }> }) => api.post(`/scanner/custom`, data),
 }
@@ -106,7 +109,7 @@ export const stocksApi = {
 export const watchlistApi = {
   get: () => api.get('/watchlist'),
   add: (symbol: string) => api.post('/watchlist', { symbol }),
-  remove: (symbol: string) => api.delete(`/watchlist/${symbol}`),
+  remove: (symbol: string) => api.delete(`/watchlist/${encodeSymbol(symbol)}`),
 }
 
 // ===== Alert endpoints =====
@@ -225,7 +228,7 @@ export const marketApi = {
   getEvents: () => api.get('/market/events'),
   getSectors: () => api.get('/market/sectors'),
   getHeatmap: () => api.get('/market/heatmap'),
-  getOptions: (symbol: string) => api.get(`/market/options/${symbol}`),
+  getOptions: (symbol: string) => api.get(`/market/options/${encodeSymbol(symbol)}`),
   getScreener: (sector?: string, forceRefresh = false) =>
     api.get('/market/screener', { params: { ...(sector && { sector }), force_refresh: forceRefresh } }),
   getBulkScreener: () => api.get('/market/bulk-screener'),
@@ -234,10 +237,10 @@ export const marketApi = {
 // ===== AI endpoints =====
 export const aiApi = {
   score: (symbol: string, timeframe = '1d') =>
-    api.get(`/ai/score/${symbol}`, { params: { timeframe } }),
+    api.get(`/ai/score/${encodeSymbol(symbol)}`, { params: { timeframe } }),
   scan: (symbols: string[], timeframe = '1d') =>
     api.get('/ai/scan', { params: { symbols: symbols.join(','), timeframe } }),
-  sentiment: (symbol: string) => api.get(`/ml/sentiment/${symbol}`),
+  sentiment: (symbol: string) => api.get(`/ml/sentiment/${encodeSymbol(symbol)}`),
   chat: (message: string, symbol?: string) => api.post('/ai/chat', { message, symbol }),
 }
 
