@@ -5492,3 +5492,22 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 32.00s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull `origin main` on the live server, run `docker compose restart backend`, and trigger `POST /api/swing-audit/recalculate` to rebuild the active cycle ledger.
 
+---
+
+### Session Entry 90
+- **Timestamp:** 2026-11-22 15:15:00 UTC (2026-11-22 20:45:00 IST)
+- **User Prompt:**  
+  `"[opc@stockai-server StockAI]$ curl -X POST "http://localhost:8000/api/swing-audit/recalculate?reset_exited=true" {"status":"error","message":"Recalculation error: greenlet_spawn has not been called; can't call await_() here. Was IO attempted in an unexpected place? (Background on this error at: https://sqlalche.me/e/21/xd2s)}" [opc@stockai-server StockAI]$"`
+- **Forensic Diagnosis**:
+  1. `Schema check for swing audit skipped/deferred: name 'text' is not defined`: In `backend/services/swing_audit_service.py`, `text` was missing from `sqlalchemy` imports, causing `ensure_swing_audit_schema` to skip adding `dynamic_stop_loss`, `tranche_2_active`, and ratchet columns to PostgreSQL.
+  2. `NotNullViolationError`: Resetting `profit_loss_pct` and `realized_pnl_rupees` to `None` violated PostgreSQL's `NOT NULL` constraints.
+  3. `MissingGreenlet`: When the reset query rolled back, `cycle` expired in the session. Accessing `cycle.id` subsequently triggered synchronous scalar lazy-loading on an async session, raising `MissingGreenlet: greenlet_spawn has not been called`.
+- **Architectural Remediations Applied**:
+  1. Imported `text` and `update` directly from `sqlalchemy`.
+  2. `recalculate_active_cycle`: Captured `cycle_id = cycle.id` and `cycle_number` upfront before session commits/rollbacks; defaulted reset `profit_loss_pct` and `realized_pnl_rupees` to `Decimal("0.00")`.
+  3. `generate_excel_workbook`: Added `options(selectinload(SwingTradeAudit.daily_prices))` and eliminated `getattr(a, "daily_prices")` lazy-load descriptor triggers.
+- **Verification Evidence**:
+  - Live execution of `recalculate_active_cycle(db, reset_exited=True)` completed with code 0 (`{'status': 'success', ...}`).
+  - `pytest backend/tests/test_swing_audit.py`: **17 / 17 passed (100% green)** in 71.31s.
+- **Next Safe Step**: Instruct user to `git pull origin main`, `docker compose restart backend`, and re-run the recalculation curl command on the live server.
+

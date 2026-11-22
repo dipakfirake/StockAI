@@ -31,7 +31,7 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
          - **Chronological State Isolation**: Every trade evaluation strictly begins at Day 1 with `current_sl = initial_sl`, `highest_p = buy_val`, `tranche_2_active = False`, `tranche_2_buy = 0.0`, `ratchet_stage = "INITIAL"`.
          - **Strict Accounting Invariant**: If `exit_price_val >= buy_val or combined_pnl_rs >= 0`, the trade is **strictly marked as `STOPPED_IN_PROFIT`** with non-negative realized P&L.
          - **Anti-Duplication Guard**: In `track_swing_trade` and `track_batch_swing_trades`, skips adding duplicate trades if an active `IN_PROGRESS` position already exists for that symbol in the active cycle.
-         - **1-Click Recalculation Engine**: Added `recalculate_active_cycle(db, reset_exited=True)` to rebuild corrupted historical cycle ledgers with full chronological isolation.
+         - **1-Click Recalculation Engine**: Added `recalculate_active_cycle(db, reset_exited=True)` to rebuild corrupted historical cycle ledgers with full chronological isolation. Resolved `MissingGreenlet` / `NotNullViolationError` by importing `text` for PostgreSQL schema updates, defaulting reset P&L to `0.00`, capturing `cycle_id` before session commits, and eagerly loading `daily_prices` to eliminate async lazy loading.
        - `backend/api/swing_audit.py`:
          - Exposed `POST /api/swing-audit/recalculate` with `reset_exited=True` query param.
        - `backend/services/screener.py`:
@@ -42,7 +42,9 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
        - `backend/api/stocks.py`:
          - Removed `_auto_track_task()` so casual chart viewing is strictly read-only.
     4. **Verification Evidence**:
+       - Local end-to-end `recalculate_active_cycle(db, reset_exited=True)` execution: completed with code 0 (`{'status': 'success', ...}`).
        - `pytest backend/tests/test_swing_audit.py backend/tests/test_swing_screener_categorization.py`: **20 / 20 passed (100% green)** in 82.78s.
+       - Pytest `test_swing_audit.py` full regression suite: **17 / 17 passed (100% green)** in 71.31s.
        - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 32.00s (exit code 0)**.
   - **Exact Next Safe Step**: User pulls `origin main` on the live server, runs `docker compose restart backend`, and triggers `POST /api/swing-audit/recalculate` to rebuild the active cycle ledger.
 
