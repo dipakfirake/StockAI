@@ -165,6 +165,27 @@ async def sync_audit_prices(
         }
 
 
+@router.post("/recalculate")
+async def recalculate_audit_ledger(
+    reset_exited: bool = Query(True, description="If True, resets prematurely stopped trades to re-evaluate with chronological isolation"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional)
+):
+    """
+    Recalculates the active audit ledger from scratch using chronological state isolation.
+    Eliminates phantom losses and lookahead bias stopouts.
+    """
+    try:
+        res = await swing_audit_service.recalculate_active_cycle(db, reset_exited=reset_exited)
+        return res
+    except Exception as e:
+        logger.error(f"Failed to recalculate audit cycle: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Recalculation error: {str(e)}"
+        }
+
+
 @router.api_route("/download-latest", methods=["GET", "HEAD"])
 async def download_latest_audit_excel(
     request: Request,

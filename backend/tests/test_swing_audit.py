@@ -59,14 +59,14 @@ async def test_track_swing_trade_and_idempotency(mock_db):
         status="ACTIVE"
     )
 
-    # Mock cycle query returning active cycle, existing audit query returning None
+    # Mock cycle query returning active cycle, existing active query returning None, existing same-day query returning None
     mock_cycle_res = MagicMock()
     mock_cycle_res.scalars.return_value.first.return_value = cycle
     
     mock_existing_res = MagicMock()
     mock_existing_res.scalars.return_value.first.return_value = None
     
-    mock_db.execute.side_effect = [mock_cycle_res, mock_existing_res]
+    mock_db.execute.side_effect = [mock_cycle_res, mock_existing_res, mock_existing_res]
 
     trade_plan = {
         "entry_price": 260.25,
@@ -723,3 +723,172 @@ def test_screener_service_get_all_sector_symbols():
     # Midcap Growth
     assert "POLYCAB.NS" in symbols
     assert "DIXON.NS" in symbols
+
+
+@pytest.mark.asyncio
+async def test_stopped_in_profit_accounting_invariant(mock_db, tmp_path):
+    """
+    Verifies the mathematical invariant: if an exit price >= entry price,
+    it is strictly classified as STOPPED_IN_PROFIT with non-negative realized PnL.
+    Prevents phantom loss anomalies (e.g., M&M exited at +1.0% labeled as STOPLOSS_HIT).
+    """
+    today = date(2026, 11, 11)
+    cycle = SwingTradeAuditCycle(
+        id="c3333333-3333-3333-3333-333333333333",
+        cycle_number=1,
+        from_date=today,
+        to_date=add_trading_days(today, 11),
+        status="ACTIVE",
+        excel_file_path=str(tmp_path / "test_invariant.xlsx")
+    )
+
+    audit = SwingTradeAudit(
+        id="a2222222-2222-2222-2222-222222222222",
+        cycle_id=cycle.id,
+        symbol="M&M.NS",
+        company_name="Mahindra & Mahindra",
+        recommendation_date=today,
+        buy_price=Decimal("3333.00"),
+        target_price=Decimal("3750.00"),
+        stop_loss=Decimal("3200.00"),
+        target_1=Decimal("3450.00"),
+        target_2=Decimal("3750.00"),
+        status="IN_PROGRESS",
+        allocated_capital=Decimal("100000.00"),
+        dynamic_stop_loss=Decimal("3366.33"),  # Trailing stop elevated above entry
+        highest_price_recorded=Decimal("3460.00"),
+        tranche_2_active=True,
+        tranche_2_buy_price=Decimal("3450.00"),
+        tranche_2_stop_loss=Decimal("3366.33"),
+        ratchet_stage="TARGET_1_HIT"
+    )
+    audit.daily_prices = []
+
+    # Candles: Day 1 touches T1 (3460), Day 2 pulls back to 3366.33 (which is > entry 3333.00)
+    fake_candles = [
+        {"timestamp": "2026-11-11T10:00:00Z", "open": 3333.0, "high": 3460.0, "low": 3330.0, "close": 3455.0},
+        {"timestamp": "2026-11-12T10:00:00Z", "open": 3450.0, "high": 3455.0, "low": 3360.0, "close": 3366.33},
+    ]
+
+    mock_cycle_res = MagicMock()
+    mock_cycle_res.scalars.return_value.first.return_value = cycle
+
+    mock_audits_res = MagicMock()
+    mock_audits_res.scalars.return_value.all.return_value = [audit]
+
+    mock_db.execute.side_effect = [mock_cycle_res, mock_audits_res]
+
+    with patch("backend.services.market_data.market_data_service.fetch_candles", new=AsyncMock(return_value=fake_candles)), \
+         patch.object(SwingAuditService, "generate_excel_workbook", new=AsyncMock(return_value=None)):
+
+        res = await SwingAuditService.update_daily_prices(mock_db, cycle_id=cycle.id)
+
+        assert res["status"] == "success"
+        # Must be STOPPED_IN_PROFIT, NEVER STOPLOSS_HIT!
+        assert audit.status == "STOPPED_IN_PROFIT"
+        assert audit.ratchet_stage == "STOPPED_IN_PROFIT"
+        assert float(audit.exit_price) >= 3333.00
+        assert float(audit.realized_pnl_rupees) >= 0.0
+        assert float(audit.profit_loss_pct) >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_chronological_state_isolation_prevents_day1_leakage(mock_db, tmp_path):
+    """
+    Verifies that re-evaluating an active trade always starts Day 1 with initial conditions,
+    preventing lookahead bias from killing valid trades on Day 1 using later days' elevated stops.
+    """
+    today = date(2026, 11, 11)
+    cycle = SwingTradeAuditCycle(
+        id="c4444444-4444-4444-4444-444444444444",
+        cycle_number=1,
+        from_date=today,
+        to_date=add_trading_days(today, 11),
+        status="ACTIVE",
+        excel_file_path=str(tmp_path / "test_isolation.xlsx")
+    )
+
+    # In previous run, dynamic_stop_loss was set to 500.0 on Day 3
+    audit = SwingTradeAudit(
+        id="a3333333-3333-3333-3333-333333333333",
+        cycle_id=cycle.id,
+        symbol="KOTAKBANK.NS",
+        company_name="Kotak Bank",
+        recommendation_date=today,
+        buy_price=Decimal("488.00"),
+        target_price=Decimal("540.00"),
+        stop_loss=Decimal("460.00"),  # Initial SL
+        target_1=Decimal("505.00"),
+        target_2=Decimal("540.00"),
+        status="IN_PROGRESS",
+        allocated_capital=Decimal("100000.00"),
+        dynamic_stop_loss=Decimal("500.00"),  # Previously elevated
+        tranche_2_active=True
+    )
+    audit.daily_prices = []
+
+    # Candles: Day 1 low is 480 (below previous dynamic SL 500, but well above initial SL 460)
+    # Day 2 reaches 508 (hits T1)
+    fake_candles = [
+        {"timestamp": "2026-11-11T10:00:00Z", "open": 488.0, "high": 495.0, "low": 480.0, "close": 492.0},
+        {"timestamp": "2026-11-12T10:00:00Z", "open": 493.0, "high": 508.0, "low": 490.0, "close": 506.0},
+    ]
+
+    mock_cycle_res = MagicMock()
+    mock_cycle_res.scalars.return_value.first.return_value = cycle
+
+    mock_audits_res = MagicMock()
+    mock_audits_res.scalars.return_value.all.return_value = [audit]
+
+    mock_db.execute.side_effect = [mock_cycle_res, mock_audits_res]
+
+    with patch("backend.services.market_data.market_data_service.fetch_candles", new=AsyncMock(return_value=fake_candles)), \
+         patch.object(SwingAuditService, "generate_excel_workbook", new=AsyncMock(return_value=None)):
+
+        res = await SwingAuditService.update_daily_prices(mock_db, cycle_id=cycle.id)
+
+        assert res["status"] == "success"
+        # Must NOT be stopped out on Day 1! Should have advanced to Target 1 hit / breakeven locked
+        assert audit.status != "STOPLOSS_HIT"
+        assert audit.ratchet_stage in ("TARGET_1_HIT", "INITIAL", "BREAKEVEN_LOCKED")
+
+
+@pytest.mark.asyncio
+async def test_anti_duplication_active_trade(mock_db):
+    """Verifies that an active IN_PROGRESS trade cannot be duplicated in the same cycle."""
+    today = date(2026, 11, 15)
+    cycle = SwingTradeAuditCycle(
+        id="c5555555-5555-5555-5555-555555555555",
+        cycle_number=1,
+        from_date=today,
+        to_date=add_trading_days(today, 11),
+        status="ACTIVE"
+    )
+
+    existing_active = SwingTradeAudit(
+        id="a4444444-4444-4444-4444-444444444444",
+        cycle_id=cycle.id,
+        symbol="TITAN.NS",
+        status="IN_PROGRESS",
+        recommendation_date=today,
+        buy_price=Decimal("3400.00")
+    )
+
+    mock_cycle_res = MagicMock()
+    mock_cycle_res.scalars.return_value.first.return_value = cycle
+
+    mock_active_res = MagicMock()
+    mock_active_res.scalars.return_value.first.return_value = existing_active
+
+    mock_db.execute.side_effect = [mock_cycle_res, mock_active_res]
+
+    result = await SwingAuditService.track_swing_trade(
+        db=mock_db,
+        symbol="TITAN.NS",
+        trade_plan={"entry_price": 3410.0, "target_price": 3600.0, "stop_loss": 3300.0},
+        total_score=80.0
+    )
+
+    # Must return the existing active record without inserting a new one
+    assert result.id == existing_active.id
+    mock_db.add.assert_not_called()

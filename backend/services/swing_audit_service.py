@@ -234,7 +234,29 @@ class SwingAuditService:
         if not norm_symbol.endswith(".NS") and not norm_symbol.endswith(".BO") and not norm_symbol.startswith("^"):
             norm_symbol = f"{norm_symbol}.NS"
 
-        # Check for duplicate recommendation on same date
+        # Check for duplicate recommendation on same date OR active trade already in progress
+        active_existing_stmt = select(SwingTradeAudit).where(
+            and_(
+                SwingTradeAudit.cycle_id == cycle.id,
+                SwingTradeAudit.symbol == norm_symbol,
+                SwingTradeAudit.status == "IN_PROGRESS"
+            )
+        )
+        active_existing = (await db.execute(active_existing_stmt)).scalars().first()
+        if active_existing:
+            if user_bought and not active_existing.user_bought:
+                active_existing.user_bought = True
+                u_price = user_buy_price if (user_buy_price and user_buy_price > 0) else float(active_existing.buy_price)
+                active_existing.user_buy_price = Decimal(str(round(u_price, 2)))
+                active_existing.user_buy_time = datetime.now(timezone.utc)
+                await db.commit()
+                await db.refresh(active_existing)
+                await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
+                logger.info(f"Updated user execution for active audit {norm_symbol} @ ₹{active_existing.user_buy_price}")
+            else:
+                logger.info(f"Active swing trade already in progress for {norm_symbol} in Cycle #{cycle.cycle_number}. Skipping duplicate.")
+            return active_existing
+
         existing_stmt = select(SwingTradeAudit).where(
             and_(
                 SwingTradeAudit.cycle_id == cycle.id,
@@ -320,6 +342,15 @@ class SwingAuditService:
         rec_date = recommendation_date or date.today()
         cycle = await SwingAuditService.get_or_create_active_cycle(db, rec_date)
 
+        # Pre-query all currently active symbols in this cycle to prevent duplicate positions
+        active_symbols_stmt = select(SwingTradeAudit.symbol).where(
+            and_(
+                SwingTradeAudit.cycle_id == cycle.id,
+                SwingTradeAudit.status == "IN_PROGRESS"
+            )
+        )
+        active_symbols = set((await db.execute(active_symbols_stmt)).scalars().all())
+
         added_count = 0
         for stock_data in stocks:
             symbol = stock_data.get("symbol", "")
@@ -331,7 +362,12 @@ class SwingAuditService:
             if not norm_symbol.endswith(".NS") and not norm_symbol.endswith(".BO") and not norm_symbol.startswith("^"):
                 norm_symbol = f"{norm_symbol}.NS"
 
-            # Check for duplicate
+            # Check if active position already exists in this cycle
+            if norm_symbol in active_symbols:
+                logger.info(f"Skipping batch catalog for {norm_symbol}: active position already in progress in Cycle #{cycle.cycle_number}.")
+                continue
+
+            # Check for duplicate on same date
             existing_stmt = select(SwingTradeAudit).where(
                 and_(
                     SwingTradeAudit.cycle_id == cycle.id,
@@ -636,12 +672,15 @@ class SwingAuditService:
                     capital_val = float(audit.allocated_capital or 100000.0)
 
                     # Dynamic Coupled Ratchet & Trailing Stop state
-                    current_sl = float(audit.dynamic_stop_loss or initial_sl)
-                    highest_p = float(audit.highest_price_recorded or buy_val)
-                    tranche_2_active = bool(audit.tranche_2_active)
-                    tranche_2_buy = float(audit.tranche_2_buy_price or 0.0)
-                    tranche_2_sl = float(audit.tranche_2_stop_loss or 0.0)
-                    ratchet_stage = audit.ratchet_stage or "INITIAL"
+                    # CRITICAL FIX (Chronological State Isolation):
+                    # Day 1 MUST ALWAYS start with initial conditions!
+                    # Never leak future elevated stops or Tranche 2 activation from prior sync runs into Day 1!
+                    current_sl = initial_sl
+                    highest_p = buy_val
+                    tranche_2_active = False
+                    tranche_2_buy = 0.0
+                    tranche_2_sl = 0.0
+                    ratchet_stage = "INITIAL"
 
                     # Process Day 1 through Day 11
                     for idx, (candle_date, c_data) in enumerate(valid_candles[:11]):
@@ -770,29 +809,47 @@ class SwingAuditService:
                                 combined_pnl_rs = round(((t1_gain / 100.0) * (capital_val * 0.5)) + ((t2_gain / 100.0) * (capital_val * 0.5)), 2)
                                 combined_gain_pct = round((combined_pnl_rs / capital_val) * 100.0, 2)
 
-                                audit.status = "STOPPED_IN_PROFIT" if combined_pnl_rs >= 0 else "STOPLOSS_HIT"
-                                audit.ratchet_stage = "STOPPED_IN_PROFIT" if combined_pnl_rs >= 0 else "STOPLOSS_HIT"
+                                # INVARIANT: If primary exit price >= entry, it is mathematically IMPOSSIBLE to be a loss!
+                                if exit_price_val >= buy_val or combined_pnl_rs >= 0:
+                                    audit.status = "STOPPED_IN_PROFIT"
+                                    audit.ratchet_stage = "STOPPED_IN_PROFIT"
+                                    if exit_price_val >= buy_val and combined_pnl_rs < 0:
+                                        # Protect Tranche 1 locked gain from being erased by Tranche 2 modeling artifacts
+                                        combined_pnl_rs = round(((exit_price_val - buy_val) / buy_val) * capital_val * 0.5, 2)
+                                        combined_gain_pct = round((combined_pnl_rs / capital_val) * 100.0, 2)
+                                else:
+                                    audit.status = "STOPLOSS_HIT"
+                                    audit.ratchet_stage = "STOPLOSS_HIT"
+
                                 audit.exit_date = candle_date
                                 audit.exit_price = Decimal(str(round(exit_price_val, 2)))
                                 audit.exit_day_number = day_num
                                 audit.profit_loss_pct = Decimal(str(combined_gain_pct))
                                 audit.realized_pnl_rupees = Decimal(str(combined_pnl_rs))
                                 audit.notes = f"Coupled Ratchet stop triggered on Day {day_num} ({candle_date}). Tranche 1 @ ₹{exit_price_val:.2f} (+{t1_gain:.1f}%), Tranche 2 @ ₹{t2_exit_p:.2f} ({t2_gain:+.1f}%). Net: ₹{combined_pnl_rs:+,.2f}."
-                                logger.info(f"[Audit Ratchet Exit] {audit.symbol} exited in profit on Day {day_num} @ ₹{exit_price_val:.2f} (Net: +{combined_gain_pct}%, ₹{combined_pnl_rs})")
+                                logger.info(f"[Audit Ratchet Exit] {audit.symbol} exited on Day {day_num} @ ₹{exit_price_val:.2f} (Status: {audit.status}, Net: {combined_gain_pct}%, ₹{combined_pnl_rs})")
                             else:
                                 # Normal initial stoploss breach before Target 1
                                 loss_pct = round(((exit_price_val - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
                                 pnl_val = round((loss_pct / 100.0) * capital_val, 2)
 
-                                audit.status = "STOPLOSS_HIT"
-                                audit.ratchet_stage = "STOPLOSS_HIT"
+                                # INVARIANT: If exit price >= buy_val, it's NOT a stoploss hit!
+                                if exit_price_val >= buy_val:
+                                    audit.status = "STOPPED_IN_PROFIT"
+                                    audit.ratchet_stage = "STOPPED_IN_PROFIT"
+                                    loss_pct = max(0.0, loss_pct)
+                                    pnl_val = max(0.0, pnl_val)
+                                else:
+                                    audit.status = "STOPLOSS_HIT"
+                                    audit.ratchet_stage = "STOPLOSS_HIT"
+
                                 audit.exit_date = candle_date
                                 audit.exit_price = Decimal(str(round(exit_price_val, 2)))
                                 audit.exit_day_number = day_num
                                 audit.profit_loss_pct = Decimal(str(loss_pct))
                                 audit.realized_pnl_rupees = Decimal(str(pnl_val))
                                 audit.notes = f"Stop Loss breached on Day {day_num} ({candle_date}). Sold at ₹{exit_price_val:.2f}."
-                                logger.info(f"[Audit SL Executed] {audit.symbol} stopped out on Day {day_num} @ ₹{exit_price_val:.2f} ({loss_pct}%)")
+                                logger.info(f"[Audit SL Executed] {audit.symbol} exited on Day {day_num} @ ₹{exit_price_val:.2f} ({loss_pct}%)")
                             break
 
                         # ─── EXECUTION RULE 3: SINGLE-TARGET WIN (NO T2 CONFIGURED) ─────
@@ -914,6 +971,46 @@ class SwingAuditService:
                 "win_rate": 0.0,
                 "total_pnl_rupees": 0.0
             }
+
+    @staticmethod
+    async def recalculate_active_cycle(db: AsyncSession, reset_exited: bool = True) -> Dict[str, Any]:
+        """
+        Recalculates the active audit cycle from scratch.
+        Resets prematurely exited / lookahead-corrupted records back to IN_PROGRESS so the
+        clean chronological state-isolated engine evaluates every day accurately.
+        """
+        from sqlalchemy import update
+        cycle = await SwingAuditService.get_or_create_active_cycle(db)
+        if not cycle:
+            return {"status": "no_cycle", "updated_count": 0}
+
+        if reset_exited:
+            try:
+                await db.execute(
+                    update(SwingTradeAudit)
+                    .where(SwingTradeAudit.cycle_id == cycle.id)
+                    .values(
+                        status="IN_PROGRESS",
+                        exit_date=None,
+                        exit_price=None,
+                        exit_day_number=None,
+                        profit_loss_pct=None,
+                        realized_pnl_rupees=None,
+                        dynamic_stop_loss=None,
+                        highest_price_recorded=None,
+                        tranche_2_active=False,
+                        tranche_2_buy_price=None,
+                        tranche_2_stop_loss=None,
+                        ratchet_stage="INITIAL"
+                    )
+                )
+                await db.commit()
+                logger.info(f"Reset {cycle.total_trades} audit trades in Cycle #{cycle.cycle_number} for chronological recalculation.")
+            except Exception as reset_err:
+                logger.warning(f"Error resetting active cycle audits: {reset_err}")
+                await db.rollback()
+
+        return await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
 
     @staticmethod
     async def generate_excel_workbook(db: AsyncSession, cycle_id: uuid.UUID) -> Optional[Path]:

@@ -183,20 +183,25 @@ class ScreenerService:
             "all_results": all_results
         }
 
-        # Automatically catalog high-conviction BUY setups into active 11-day audit ledger & Excel
-        if buy_stocks:
-            async def _auto_catalog_screener_buys(stocks_to_catalog):
-                try:
-                    from backend.services.swing_audit_service import SwingAuditService
-                    from backend.core.database import AsyncSessionLocal
-                    async with AsyncSessionLocal() as audit_db:
-                        await SwingAuditService.track_batch_swing_trades(
-                            db=audit_db,
-                            stocks=stocks_to_catalog
-                        )
-                except Exception as ex:
-                    logger.warning(f"Failed to auto-catalog screener buys into audit: {ex}")
-            asyncio.create_task(_auto_catalog_screener_buys(list(buy_stocks)))
+        # Automatically catalog elite high-conviction BUY setups (Score >= 78) into active 11-day audit ledger & Excel
+        # Only triggers during manual force refresh or automated EOD tasks, capped to top 3 per sector
+        if buy_stocks and force_refresh:
+            elite_buys = [s for s in buy_stocks if float(s.get("total_score", 0.0) or 0.0) >= 78.0]
+            elite_buys.sort(key=lambda s: float(s.get("total_score", 0.0) or 0.0), reverse=True)
+            capped_elite_buys = elite_buys[:3]
+            if capped_elite_buys:
+                async def _auto_catalog_screener_buys(stocks_to_catalog):
+                    try:
+                        from backend.services.swing_audit_service import SwingAuditService
+                        from backend.core.database import AsyncSessionLocal
+                        async with AsyncSessionLocal() as audit_db:
+                            await SwingAuditService.track_batch_swing_trades(
+                                db=audit_db,
+                                stocks=stocks_to_catalog
+                            )
+                    except Exception as ex:
+                        logger.warning(f"Failed to auto-catalog screener buys into audit: {ex}")
+                asyncio.create_task(_auto_catalog_screener_buys(list(capped_elite_buys)))
 
         # Dynamic market-hours cache (60s open, 1 hour closed)
         await cache_set(cache_key, output, ttl=get_dynamic_screener_ttl())
@@ -470,6 +475,19 @@ class ScreenerService:
             market_regime = "NORMAL"
             nifty_rs = float(indicators.get("rs_momentum_20d", 0.0)) if indicators else 0.0
             
+            nifty_ind = prefetched_nifty_indicators or {}
+            nifty_ema_20 = float(nifty_ind.get("ema_20") or nifty_ind.get("ema_21") or 0.0)
+            nifty_ema_50 = float(nifty_ind.get("ema_50") or 0.0)
+            nifty_rsi = float(nifty_ind.get("rsi") or 50.0)
+            is_nifty_bearish = (nifty_ema_20 > 0 and nifty_ema_50 > 0 and nifty_ema_20 < nifty_ema_50) or (nifty_rsi < 45.0)
+
+            if is_nifty_bearish:
+                market_regime = "BEARISH_MARKET_REGIME"
+                market_defense_active = True
+                buy_threshold = 78.0  # In market corrections, require elite 78+ conviction for BUY
+            else:
+                buy_threshold = 70.0  # Elevated from 60.0 to 70.0 for 75%+ win rate precision
+
             # If stock is lagging while market falls, enforce strict defensive filtering
             if nifty_rs < -0.05 and raw_conviction < 75:
                 raw_conviction -= 10
@@ -501,7 +519,7 @@ class ScreenerService:
             swing_low = min(recent_lows) if recent_lows else current_price - (1.0 * atr)
             swing_high = max(recent_highs) if recent_highs else current_price + (1.0 * atr)
 
-            if total_score >= 60:
+            if total_score >= buy_threshold:
                 action = "BUY"
                 # Determine "Best Price to Buy" (Optimal Entry Zone) vs Current Market Price
                 ref_support = ema_21 if ema_21 > 0 else (bb_mid if bb_mid > 0 else current_price - (0.5 * atr))

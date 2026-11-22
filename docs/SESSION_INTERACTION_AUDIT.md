@@ -5455,3 +5455,40 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 14.11s (exit code 0)**.
 - **Next Safe Step**: Instruct user to pull `origin main` on the live server and run `docker compose restart backend`.
 
+---
+
+### Session Entry 89
+- **Timestamp:** 2026-11-22 14:15:00 UTC (2026-11-22 19:45:00 IST)
+- **User Prompt:**  
+  `"see the audits and net loss you made extracted from system , how end user can bear this many type of losses can it be there to make a profity not 100% but more that 75 % + confidence here see the values how end user bears the loss by using our system how to make our system best than this tell me? /goal /browser /plan /teamwork /learn /boost /automation /plugin /run-workflow /swarm /migrate-workflows /generative_ui /migrate-agent-settings /agy-customizations /neon"`  
+  *(Attached: `Swing_Trade_Audit_Cycle_1_(22-Nov-2026_1359UTC).xlsx`)*
+- **Forensic Diagnosis & Data Verification**:
+  1. **The Phantom Loss Bug (37 of 79 Closed Trades / 46.8%)**:
+     - System marked 37 trades as `STOPLOSS_HIT` with negative P&L even though the exit price was **higher than or equal to the entry price**.
+     - Example: M&M entered @ ₹3333.00, exited @ ₹3366.33 (+1.00% gain) marked as `STOPLOSS_HIT` with -₹835.33 loss; Axis Bank exited @ ₹1338.50 (+0.16%) marked with -₹1425.05 loss; UltraTech exited @ ₹12221.00 (+1.00%) marked with -₹628.04 loss.
+     - Cause: `tranche_2_active` was loaded from prior sync passes without validating if Target 1 was achieved on Day 1. Tranche 2 simulated an artificial loss from the elevated Target 1 price, wiping out Tranche 1 gains and corrupting the trade status.
+  2. **The Lookahead Re-Entrancy Bug (48 of 79 Trades / 60.8% Killed on Day 1)**:
+     - The daily price sync re-used `audit.dynamic_stop_loss` from subsequent days (e.g. Day 5 or 6 trailing stops) when re-evaluating Day 1. Multi-day winning setups (e.g. Kotak +3.5%, Maruti +7.5%, UltraTech +3.3%) were prematurely stopped out on Day 1 due to future-leakage re-entrancy.
+  3. **Unconstrained Over-Trading (241 Recommendations in 11 Days)**:
+     - `run_screener` dumped all stocks with score $\ge 60$ into the audit ledger on every user page load, and `backend/api/stocks.py` added trades whenever a chart was viewed. The same 33 stocks (Kotak 5x, Titan 5x, TCS 5x) had multiple overlapping active positions.
+- **Architectural Remediations Applied**:
+  1. `backend/services/swing_audit_service.py`:
+     - **Chronological State Isolation**: Every trade evaluation strictly begins at Day 1 with `current_sl = initial_sl`, `highest_p = buy_val`, `tranche_2_active = False`, `tranche_2_buy = 0.0`, `ratchet_stage = "INITIAL"`. Future elevated stops cannot leak into Day 1.
+     - **Strict Accounting Invariant**: If `exit_price_val >= buy_val or combined_pnl_rs >= 0`, trade is **strictly marked as `STOPPED_IN_PROFIT`** with non-negative realized P&L.
+     - **Anti-Duplication Engine**: In `track_swing_trade` and `track_batch_swing_trades`, checks `status == "IN_PROGRESS"` in the active cycle. Skips opening duplicate active positions for the same symbol.
+     - **1-Click Recalculation Engine**: Implemented `recalculate_active_cycle(db, reset_exited=True)` to rebuild corrupted cycle ledgers with complete chronological isolation.
+  2. `backend/api/swing_audit.py`:
+     - Exposed `POST /api/swing-audit/recalculate` with `reset_exited=True` query param.
+  3. `backend/services/screener.py`:
+     - **Macro Market Regime Filter**: Checks Nifty 50 trend & momentum (`ema_20 < ema_50` or `rsi < 45`). In bearish regimes, requires score $\ge 78.0$ for BUY; in normal regimes elevated from 60.0 to 70.0.
+     - **Gated Auto-Cataloging**: Auto-cataloging only runs during `force_refresh=True` or EOD cron, filters for elite scores $\ge 78.0$, sorts descending, and caps to top 3 setups per sector.
+  4. `backend/tasks/swing_audit_tasks.py`:
+     - In `run_eod_screener_and_audit_sync_async`, filters for `score >= 78.0` and caps candidates to max top 5 platform-wide per day.
+  5. `backend/api/stocks.py`:
+     - Removed `_auto_track_task()` so casual chart viewing is strictly read-only.
+- **Verification Evidence**:
+  - `pytest backend/tests/test_swing_audit.py backend/tests/test_swing_screener_categorization.py`: **20 / 20 passed (100% green)** in 82.78s.
+  - Added new tests: `test_stopped_in_profit_accounting_invariant`, `test_chronological_state_isolation_prevents_day1_leakage`, `test_anti_duplication_active_trade`.
+  - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 32.00s (exit code 0)**.
+- **Next Safe Step**: Instruct user to pull `origin main` on the live server, run `docker compose restart backend`, and trigger `POST /api/swing-audit/recalculate` to rebuild the active cycle ledger.
+
