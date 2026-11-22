@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -979,23 +979,26 @@ class SwingAuditService:
         Resets prematurely exited / lookahead-corrupted records back to IN_PROGRESS so the
         clean chronological state-isolated engine evaluates every day accurately.
         """
-        from sqlalchemy import update
+        await ensure_swing_audit_schema(db)
         cycle = await SwingAuditService.get_or_create_active_cycle(db)
         if not cycle:
             return {"status": "no_cycle", "updated_count": 0}
+
+        cycle_id = cycle.id
+        cycle_number = cycle.cycle_number
 
         if reset_exited:
             try:
                 await db.execute(
                     update(SwingTradeAudit)
-                    .where(SwingTradeAudit.cycle_id == cycle.id)
+                    .where(SwingTradeAudit.cycle_id == cycle_id)
                     .values(
                         status="IN_PROGRESS",
                         exit_date=None,
                         exit_price=None,
                         exit_day_number=None,
-                        profit_loss_pct=None,
-                        realized_pnl_rupees=None,
+                        profit_loss_pct=Decimal("0.00"),
+                        realized_pnl_rupees=Decimal("0.00"),
                         dynamic_stop_loss=None,
                         highest_price_recorded=None,
                         tranche_2_active=False,
@@ -1005,12 +1008,12 @@ class SwingAuditService:
                     )
                 )
                 await db.commit()
-                logger.info(f"Reset {cycle.total_trades} audit trades in Cycle #{cycle.cycle_number} for chronological recalculation.")
+                logger.info(f"Reset audit trades in Cycle #{cycle_number} for chronological recalculation.")
             except Exception as reset_err:
                 logger.warning(f"Error resetting active cycle audits: {reset_err}")
                 await db.rollback()
 
-        return await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
+        return await SwingAuditService.update_daily_prices(db, cycle_id=cycle_id)
 
     @staticmethod
     async def generate_excel_workbook(db: AsyncSession, cycle_id: uuid.UUID) -> Optional[Path]:
@@ -1062,6 +1065,7 @@ class SwingAuditService:
                     audits_stmt = (
                         select(SwingTradeAudit)
                         .where(SwingTradeAudit.cycle_id == cycle_id)
+                        .options(selectinload(SwingTradeAudit.daily_prices))
                     )
                     res = await db.execute(audits_stmt)
                     raw_audits = list(res.scalars().all())
@@ -1090,12 +1094,6 @@ class SwingAuditService:
                         a_loaded = True
                 except Exception:
                     pass
-                if not a_loaded:
-                    raw_dp = getattr(a, "daily_prices", None)
-                    if isinstance(raw_dp, list) and raw_dp:
-                        for dp in raw_dp:
-                            dp_by_audit[a.id][dp.day_number] = dp
-                        a_loaded = True
                 if not a_loaded and getattr(a, "id", None):
                     unloaded_audit_ids.append(a.id)
 
