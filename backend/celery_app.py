@@ -41,6 +41,10 @@ celery_app.conf.update(
     task_send_sent_event=True,
     broker_heartbeat=30,
     event_queue_expires=60,
+    broker_connection_retry_on_startup=False,
+    broker_connection_max_retries=1,
+    broker_transport_options={"max_retries": 1, "interval_start": 0, "interval_step": 0.2, "interval_max": 0.5, "socket_timeout": 1.0, "socket_connect_timeout": 1.0},
+    result_backend_transport_options={"max_retries": 1, "interval_start": 0, "interval_step": 0.2, "interval_max": 0.5, "socket_timeout": 1.0, "socket_connect_timeout": 1.0},
 )
 
 # Beat schedule — periodic tasks
@@ -61,6 +65,13 @@ celery_app.conf.beat_schedule = {
     "bulk-market-analysis": {
         "task": "backend.tasks.market_tasks.analyze_market_bulk",
         "schedule": 900.0, # 15 minutes
+    },
+    # Periodic Sector Screener Pre-Warming: ensures Redis always has fresh high-conviction ML setups
+    "prewarm-nifty50-screener": {
+        "task": "backend.tasks.market_tasks.run_sector_screener_task",
+        "schedule": 900.0,
+        "kwargs": {"sector": "NIFTY_50", "force_refresh": True},
+        "options": {"expires": 850},
     },
     # Paper Trading evaluation: every 60 seconds
     "evaluate-paper-trades": {

@@ -105,3 +105,94 @@ async def _analyze_market_bulk_async():
     await cache_set("screener:bulk:latest", screener_results, ttl=3600)
     logger.info(f"Bulk analysis finished for {len(screener_results)} stocks and cached to Redis")
     return screener_results
+
+
+@celery_app.task(name="backend.tasks.market_tasks.run_sector_screener_task", bind=True)
+def run_sector_screener_task(self, sector: str = "NIFTY_50", force_refresh: bool = True, job_id: str = None):
+    """
+    Dedicated Celery task that executes full-pipeline AI screening for a sector universe
+    in the background worker container, keeping Uvicorn at 0% CPU and zero timeouts.
+    """
+    logger.info(f"Celery executing sector screener for {sector} (job_id: {job_id})...")
+    try:
+        results = asyncio.run(_run_sector_screener_async(sector=sector, force_refresh=force_refresh, job_id=job_id))
+        return {
+            "status": "success",
+            "sector": sector,
+            "job_id": job_id,
+            "stocks_analyzed": len(results.get("all_results", []) if isinstance(results, dict) else []),
+        }
+    except Exception as e:
+        logger.error(f"Celery sector screener failed for {sector}: {e}")
+        if job_id:
+            try:
+                from backend.core.cache import cache_set
+                asyncio.run(cache_set(f"screener_job:{job_id}", {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "error": str(e),
+                }, ttl=600))
+            except Exception:
+                pass
+        return {"error": str(e)}
+
+
+async def _run_sector_screener_async(sector: str, force_refresh: bool, job_id: str = None):
+    from backend.services.screener import ScreenerService, SECTOR_UNIVERSES, NIFTY_UNIVERSE
+    from backend.core.cache import cache_set
+    from datetime import datetime, timezone
+
+    norm_sector = sector.upper().replace(" ", "_") if sector else "DEFAULT"
+    symbols = SECTOR_UNIVERSES.get(norm_sector, NIFTY_UNIVERSE)
+
+    async def _progress_cb(completed: int, total: int):
+        if job_id:
+            pct = min(98, max(5, int((completed / max(1, total)) * 95) + 3))
+            try:
+                await cache_set(f"screener_job:{job_id}", {
+                    "job_id": job_id,
+                    "sector": norm_sector,
+                    "status": "running",
+                    "progress": pct,
+                    "completed": completed,
+                    "total": total,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }, ttl=600)
+            except Exception:
+                pass
+
+    def _sync_progress_cb(completed: int, total: int):
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(_progress_cb(completed, total))
+        except Exception:
+            pass
+
+    res = await ScreenerService.run_screener(
+        symbols=symbols,
+        sector=norm_sector,
+        force_refresh=force_refresh,
+        pace_seconds=0.15,
+        progress_cb=_sync_progress_cb,
+    )
+
+    if job_id:
+        try:
+            persisted = {
+                "job_id": job_id,
+                "sector": norm_sector,
+                "status": "completed",
+                "progress": 100,
+                "completed": len(symbols),
+                "total": len(symbols),
+                "result": res,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "error": None,
+            }
+            await cache_set(f"screener_job:{job_id}", persisted, ttl=600)
+        except Exception:
+            pass
+
+    return res
+

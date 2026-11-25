@@ -6,6 +6,7 @@ and generates strict institutional-grade trade setups with defined risk/reward.
 
 from __future__ import annotations
 
+import os
 import asyncio
 import time as time_mod
 import uuid
@@ -183,56 +184,84 @@ class ScreenerService:
                 if ScreenerService._scan_jobs.get(old_id, {}).get("status") != "running":
                     ScreenerService._scan_jobs.pop(old_id, None)
 
-        async def _run_job() -> None:
-            def _on_progress(completed: int, total: int) -> None:
-                pct = min(98, max(5, int((completed / max(1, total)) * 95) + 3))
-                job_state["completed"] = completed
-                job_state["total"] = total
-                job_state["progress"] = pct
-
+        # 1. Forward scan to dedicated Celery worker (keeps Uvicorn at 0% CPU & eliminates timeouts)
+        dispatched_to_celery = False
+        if not os.getenv("PYTEST_CURRENT_TEST") and os.getenv("ENABLE_CELERY_SCREENER", "true").lower() == "true":
             try:
-                res = await ScreenerService.run_screener(
-                    symbols=symbols,
-                    sector=norm_sector,
-                    force_refresh=force_refresh,
-                    progress_cb=_on_progress,
+                from backend.tasks.market_tasks import run_sector_screener_task
+                celery_res = run_sector_screener_task.apply_async(
+                    kwargs={"sector": norm_sector, "force_refresh": force_refresh, "job_id": job_id},
+                    retry=False,
                 )
-                job_state["status"] = "completed"
-                job_state["progress"] = 100
-                job_state["completed"] = len(symbols)
-                job_state["result"] = res
-                job_state["finished_at"] = datetime.now(timezone.utc).isoformat()
-            except Exception as exc:
-                logger.error(f"Background scan job {job_id} failed: {exc}")
-                job_state["status"] = "failed"
-                job_state["error"] = str(exc)
-            finally:
-                if ScreenerService._active_sector_jobs.get(norm_sector) == job_id:
-                    ScreenerService._active_sector_jobs.pop(norm_sector, None)
-                try:
-                    # Persist final job summary cleanly (without huge cached_data duplication)
+                if celery_res and celery_res.id:
+                    dispatched_to_celery = True
+                    job_state["celery_task_id"] = str(celery_res.id)
+                    # Save initial job state to Redis for immediate worker coordination
                     persisted = {k: v for k, v in job_state.items() if k != "cached_data"}
-                    await cache_set(f"screener_job:{job_id}", persisted, ttl=600)
-                except Exception:
-                    pass
+                    try:
+                        await cache_set(f"screener_job:{job_id}", persisted, ttl=600)
+                    except Exception:
+                        pass
+                    logger.info(f"Dispatched sector screener for {norm_sector} to Celery worker (task_id: {celery_res.id})")
+            except Exception as e:
+                logger.debug(f"Celery dispatch unavailable, using bounded async fallback: {e}")
+                dispatched_to_celery = False
 
-        task = asyncio.create_task(_run_job())
-        ScreenerService._scan_bg_tasks.add(task)
-        task.add_done_callback(ScreenerService._scan_bg_tasks.discard)
+        # 2. Resilient fallback for standalone unit testing or environments without Celery
+        if not dispatched_to_celery:
+            async def _run_job() -> None:
+                def _on_progress(completed: int, total: int) -> None:
+                    pct = min(98, max(5, int((completed / max(1, total)) * 95) + 3))
+                    job_state["completed"] = completed
+                    job_state["total"] = total
+                    job_state["progress"] = pct
+
+                try:
+                    res = await ScreenerService.run_screener(
+                        symbols=symbols,
+                        sector=norm_sector,
+                        force_refresh=force_refresh,
+                        progress_cb=_on_progress,
+                    )
+                    job_state["status"] = "completed"
+                    job_state["progress"] = 100
+                    job_state["completed"] = len(symbols)
+                    job_state["result"] = res
+                    job_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+                except Exception as exc:
+                    logger.error(f"Background scan job {job_id} failed: {exc}")
+                    job_state["status"] = "failed"
+                    job_state["error"] = str(exc)
+                finally:
+                    if ScreenerService._active_sector_jobs.get(norm_sector) == job_id:
+                        ScreenerService._active_sector_jobs.pop(norm_sector, None)
+                    try:
+                        persisted = {k: v for k, v in job_state.items() if k != "cached_data"}
+                        await cache_set(f"screener_job:{job_id}", persisted, ttl=600)
+                    except Exception:
+                        pass
+
+            task = asyncio.create_task(_run_job())
+            ScreenerService._scan_bg_tasks.add(task)
+            task.add_done_callback(ScreenerService._scan_bg_tasks.discard)
+
         return dict(job_state)
 
     @staticmethod
     async def get_scan_job_status(job_id: str) -> Optional[dict]:
         """Return lightweight status of an async screener scan job without re-sending cached_data."""
-        job = ScreenerService._scan_jobs.get(job_id)
-        if job:
-            return {k: v for k, v in job.items() if k != "cached_data"}
+        # Check Redis first (which Celery updates in real-time)
         try:
             cached = await cache_get(f"screener_job:{job_id}")
             if isinstance(cached, dict):
                 return {k: v for k, v in cached.items() if k != "cached_data"}
         except Exception:
             pass
+
+        # Check in-process fallback state
+        job = ScreenerService._scan_jobs.get(job_id)
+        if job:
+            return {k: v for k, v in job.items() if k != "cached_data"}
         return None
 
     @staticmethod
@@ -389,7 +418,7 @@ class ScreenerService:
             await cache_set(cache_key, output, ttl=get_dynamic_screener_ttl())
             if all_results:
                 try:
-                    await cache_set(lkg_key, output, ttl=14400)  # 4h Last-Known-Good fallback snapshot
+                    await cache_set(lkg_key, output, ttl=43200)  # 12h Last-Known-Good fallback snapshot
                 except Exception:
                     pass
             return output

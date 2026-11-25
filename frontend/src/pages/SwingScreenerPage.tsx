@@ -239,14 +239,26 @@ export default function SwingScreenerPage() {
         return
       }
 
-      // Poll lightweight status endpoint every 1.5s (max ~120s) — never holds a 60s Nginx connection
-      for (let attempt = 0; attempt < 80; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 1500))
+      // Poll lightweight status endpoint every 2s (max ~120s) with transient error tolerance
+      let consecutiveErrors = 0
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 2000))
         if (scanGenerationRef.current !== gen) return
 
-        const pollRes = await marketApi.getScreenerScanStatus(jobId)
+        let pollRes: any = null
+        try {
+          pollRes = await marketApi.getScreenerScanStatus(jobId)
+          consecutiveErrors = 0
+        } catch (pollErr: any) {
+          consecutiveErrors++
+          if (consecutiveErrors >= 3) {
+            throw pollErr
+          }
+          continue
+        }
+
         if (scanGenerationRef.current !== gen) return
-        const job = pollRes.data
+        const job = pollRes?.data
 
         if (typeof job?.progress === 'number') {
           setScanProgress(job.progress)

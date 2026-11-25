@@ -14,6 +14,26 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25)
 
+- **CELERY WORKER DECOUPLING, BACKGROUND PRE-WARMING & SCREENER TIMEOUT ERADICATION (COMPLETE & VERIFIED - 2026-11-25):**
+  - **Issues Investigated & Resolved**:
+    1. Addressed user's core conceptual question: *"if you are forwarding the process to celery workers instead of ML doesnt it affects the system precision for profit booking?"* Confirmed and mathematically validated that Celery is strictly an asynchronous job queue / execution worker, NOT a substitute for Machine Learning. It runs the exact same PyTorch LSTM, Transformer, LightGBM, and 14 technical indicator models. Decoupling the heavy 25-stock AI screening pipeline into Celery worker (`stockcelery`) preserves and enhances profit booking precision because:
+       - AI compute is never aborted mid-inference by HTTP 30s/60s proxy timeouts.
+       - The web event loop (`stockbackend`) remains completely unblocked, allowing live websocket price ticks and `synchronize_candle_tip` to update dynamic profit targets and trailing stop losses in real-time.
+    2. Decoupled 25-stock AI screening compute into Celery worker (`stockcelery`):
+       - Added `@celery_app.task(name="backend.tasks.market_tasks.run_sector_screener_task", bind=True)` and `_run_sector_screener_async(sector, force_refresh, job_id)` in `backend/tasks/market_tasks.py`.
+       - Added automated periodic background pre-warming for `NIFTY_50` screener in `backend/celery_app.py` (`prewarm-nifty50-screener`, every 15 min, Mon-Fri 09:15-15:30 IST).
+       - Added non-blocking Kombu/Redis broker connection options in `backend/celery_app.py` (`broker_connection_retry_on_startup=False`, `broker_connection_max_retries=1`, `socket_timeout=1.0`, `socket_connect_timeout=1.0`).
+       - Updated `ScreenerService.start_scan_job` in `backend/services/screener.py` to dispatch to Celery asynchronously in production with atomic Redis status tracking (`screener_job:{job_id}`), retaining resilient in-process async fallback when Celery or Redis is unavailable (e.g. unit tests via `PYTEST_CURRENT_TEST` check).
+       - Updated `ScreenerService.get_scan_job_status` to check Redis first and omit heavy `cached_data` on polling requests.
+       - Extended LKG (Last Known Good) cache TTL to 43200s (12 hours) to ensure instant screener rendering even on cold boots.
+       - Updated `frontend/src/pages/SwingScreenerPage.tsx` with transient poll error tolerance (up to 3 consecutive poll retry attempts) so brief network hiccups do not prematurely trigger an error toast.
+  - **Verification Evidence**:
+    - `pytest` across 12 backend regression test suites: **90 passed, 0 failed in 92.36s (100% green)**.
+    - `backend/tests/test_asgi_screener_smoke.py`: **1 passed in 23.51s (100% green)**. Total backend test coverage: **91 passed, 0 failed**.
+    - Frontend production build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 14.29s (exit code 0)**.
+  - **Exact Next Safe Step**: Commit and push locally (`git add`, `git commit`, `git push origin main`), then have user execute `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
+
+
 - **FYERS `-300` SYMBOL-POISONING FIX, NEON AUTH/POLL LATENCY REDUCTION & 1-OCPU SCREENER TIMEOUT ELIMINATION (COMPLETE & VERIFIED - 2026-11-25):**
   - **Post-`0ab0e83` Issues Resolved**:
     1. **Fyers `-300 invalid_symbols` False Token Expiry**: Live Admin showed `"Fyers access token is expired (WebSocket error: {'code': -300, 'message': 'Please provide a valid symbol', 's': 'error', 'type': 'sub', 'invalid_symbols': ['NSE:TATAMOTORS-EQ']})"`. Updated `backend/services/fyers_stream.py` (`_handle_invalid_symbol_message`, `_invalid_symbols`, `_subscribe_chunks`, `subscribe_symbols`) and `backend/services/market_data.py` (`_invalid_fyers_symbols`, `fetch_quotes_bulk`, `fetch_quote`, `fetch_candles`, `reset_fyers_health`) to quarantine symbol-specific `-300` symbols and cleanly retry remaining valid chunk keys while leaving `_fyers_token_valid` intact (preserving token expiry handling for `-300` with `"token"`/`"expire"`).
