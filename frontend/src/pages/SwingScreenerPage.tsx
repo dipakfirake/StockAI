@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { marketApi, paperTradingApi, alertsApi, swingAuditApi } from '../services/api'
 import { 
@@ -110,6 +110,8 @@ export default function SwingScreenerPage() {
   const [data, setData] = useState<ScreenerResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [scanProgress, setScanProgress] = useState<number | null>(null)
+  const scanGenerationRef = useRef(0)
   const [syncingAudit, setSyncingAudit] = useState(false)
   const [tradingSymbol, setTradingSymbol] = useState<string | null>(null)
   const [showArchiveModal, setShowArchiveModal] = useState(false)
@@ -204,25 +206,82 @@ export default function SwingScreenerPage() {
   }
 
   const fetchScreener = async (forceRefresh = false) => {
+    const gen = ++scanGenerationRef.current
     if (forceRefresh) setRefreshing(true)
     else setLoading(true)
+    setScanProgress(null)
 
     try {
-      const res = await marketApi.getScreener(sector, forceRefresh)
-      setData(res.data)
-      if (forceRefresh) toast.success('Market scan updated successfully')
+      const startRes = await marketApi.startScreenerScan(sector, forceRefresh)
+      if (scanGenerationRef.current !== gen) return
+
+      const initialJob = startRes.data
+      if (initialJob?.status === 'completed' && initialJob?.result) {
+        setData(initialJob.result)
+        setScanProgress(null)
+        if (forceRefresh) toast.success('Market scan updated successfully')
+        return
+      }
+
+      // Immediately show LKG snapshot while background scan progresses if available
+      if (initialJob?.cached_data) {
+        setData(initialJob.cached_data)
+        setLoading(false)
+      }
+      setScanProgress(typeof initialJob?.progress === 'number' ? initialJob.progress : 5)
+
+      const jobId = initialJob?.job_id
+      if (!jobId) {
+        const fallbackRes = await marketApi.getScreener(sector, forceRefresh)
+        if (scanGenerationRef.current !== gen) return
+        setData(fallbackRes.data)
+        if (forceRefresh) toast.success('Market scan updated successfully')
+        return
+      }
+
+      // Poll lightweight status endpoint every 1.5s (max ~120s) — never holds a 60s Nginx connection
+      for (let attempt = 0; attempt < 80; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        if (scanGenerationRef.current !== gen) return
+
+        const pollRes = await marketApi.getScreenerScanStatus(jobId)
+        if (scanGenerationRef.current !== gen) return
+        const job = pollRes.data
+
+        if (typeof job?.progress === 'number') {
+          setScanProgress(job.progress)
+        }
+        if (job?.status === 'completed' && job?.result) {
+          setData(job.result)
+          setScanProgress(null)
+          if (forceRefresh) toast.success('Market scan updated successfully')
+          return
+        }
+        if (job?.status === 'failed') {
+          throw new Error(job.error || 'Background scan failed')
+        }
+      }
+
+      throw new Error('Market scan timed out after 120s')
     } catch (err: any) {
+      if (scanGenerationRef.current !== gen) return
       console.error('Failed to fetch screener:', err)
       toast.error('Failed to load swing trade screener', err?.message || 'Network error')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (scanGenerationRef.current === gen) {
+        setLoading(false)
+        setRefreshing(false)
+        setScanProgress(null)
+      }
     }
   }
 
   useEffect(() => {
     fetchScreener(false)
     fetchCurrentCycle()
+    return () => {
+      scanGenerationRef.current += 1
+    }
   }, [sector])
 
   // Interactive Zerodha-style order modal launcher
@@ -307,13 +366,17 @@ export default function SwingScreenerPage() {
 
           <button 
             onClick={() => fetchScreener(true)} 
-            disabled={refreshing || loading}
+            disabled={refreshing || loading || scanProgress !== null}
             className="btn btn-secondary no-shrink"
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 38, whiteSpace: 'nowrap', flex: '0 0 auto' }}
             title="Scan entire market now"
           >
-            <RefreshCw size={15} className={refreshing ? 'spin' : ''} />
-            <span>{refreshing ? 'Scanning...' : 'Run Fresh Scan'}</span>
+            <RefreshCw size={15} className={(refreshing || scanProgress !== null) ? 'spin' : ''} />
+            <span>
+              {(refreshing || scanProgress !== null)
+                ? (scanProgress !== null ? `Scanning... ${scanProgress}%` : 'Scanning...')
+                : 'Run Fresh Scan'}
+            </span>
           </button>
 
           <button 

@@ -324,7 +324,7 @@ async def get_fyers_status(
             "name": "",
             "fy_id": client_id,
             "masked_fy_id": _mask_id(client_id),
-            "message": f"Fyers access token is expired ({MarketDataService._fyers_token_expired_reason or '06:00 AM IST daily renewal required'}). Dual Engine active via Yahoo Finance backup.",
+            "message": f"Fyers access token is expired ({getattr(MarketDataService, '_fyers_token_error_reason', '') or '06:00 AM IST daily renewal required'}). Dual Engine active via Yahoo Finance backup.",
             "dual_engine": feed_info,
             "rate_governor": gov_metrics,
             "ping_ms": None,
@@ -341,8 +341,16 @@ async def get_fyers_status(
 
     start_t = time.perf_counter()
     try:
+        from backend.core.executors import run_in_fast_executor
+        from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_USER_ACTION
+
         fyers = fyersModel.FyersModel(client_id=client_id, is_async=False, token=access_token, log_path="")
-        prof = await asyncio.wait_for(asyncio.to_thread(fyers.get_profile), timeout=3.5)
+        prof = await fyers_rate_governor.execute(
+            lambda: run_in_fast_executor(fyers.get_profile),
+            priority=PRIORITY_USER_ACTION,
+            coalescing_key="settings:fyers:get_profile",
+            timeout=3.5,
+        )
         ping_ms = round((time.perf_counter() - start_t) * 1000, 1)
 
         if prof.get("s") == "ok":
@@ -692,9 +700,11 @@ async def update_fyers_token(
     ping_ok = False
     ping_ms = 85.0
     try:
+        from backend.core.executors import run_in_fast_executor
+
         start_t = time.perf_counter()
         fyers = fyersModel.FyersModel(client_id=client_id, is_async=False, token=token, log_path="")
-        prof = await asyncio.wait_for(asyncio.to_thread(fyers.get_profile), timeout=7.0)
+        prof = await asyncio.wait_for(run_in_fast_executor(fyers.get_profile), timeout=7.0)
         ping_ms = round((time.perf_counter() - start_t) * 1000, 1)
         if prof.get("s") == "ok":
             user_name = prof.get("data", {}).get("name", "Trader")

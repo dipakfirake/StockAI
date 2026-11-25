@@ -12,7 +12,7 @@ from starlette.requests import ClientDisconnect
 
 from backend.services.presence import presence_service
 from backend.core.logging_config import get_logger
-from backend.core.geoip import resolve_ip_location
+from backend.core.geoip import resolve_ip_location_nonblocking
 from backend.models.user import User
 from backend.api.admin import require_admin
 
@@ -50,7 +50,7 @@ async def heartbeat(payload: PresencePayload, request: Request):
     Returns the current number of active users online.
     """
     client_ip = _get_client_ip(request)
-    location = await resolve_ip_location(client_ip, request.headers)
+    location = await resolve_ip_location_nonblocking(client_ip, request.headers)
 
     meta = {
         "user_id": payload.user_id,

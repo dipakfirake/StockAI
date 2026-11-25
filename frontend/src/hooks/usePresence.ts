@@ -24,6 +24,8 @@ export function usePresence(user: any) {
   const [liveUsers, setLiveUsers] = useState<LiveUserSession[]>([])
   const [loadingUsers, setLoadingUsers] = useState<boolean>(false)
   const sessionIdRef = useRef<string>('')
+  const heartbeatInFlightRef = useRef<boolean>(false)
+  const backoffUntilRef = useRef<number>(0)
 
   // Persistent unique session ID per tab
   if (!sessionIdRef.current) {
@@ -42,6 +44,7 @@ export function usePresence(user: any) {
   const sendHeartbeat = useCallback(async () => {
     const sessionId = sessionIdRef.current
     if (!sessionId || document.visibilityState === 'hidden' || (typeof navigator !== 'undefined' && !navigator.onLine)) return
+    if (heartbeatInFlightRef.current || Date.now() < backoffUntilRef.current) return
 
     const isAdmin = Boolean(user?.is_admin)
     const role: 'ADMIN' | 'PRO' | 'FREE' | 'GUEST' = isAdmin
@@ -63,20 +66,31 @@ export function usePresence(user: any) {
       device: isMobile ? 'Mobile' : 'Desktop',
     }
 
+    heartbeatInFlightRef.current = true
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const abortTimer = controller ? setTimeout(() => controller.abort(), 5000) : null
     try {
       const res = await fetch('/api/presence/heartbeat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller?.signal,
       })
       if (res.ok) {
+        backoffUntilRef.current = 0
         const data = await res.json()
         if (typeof data.count === 'number' && data.count > 0) {
           setLiveCount(data.count)
         }
+      } else if (res.status >= 500 || res.status === 429) {
+        // Back off 60s on transient gateway saturation to avoid piling up requests
+        backoffUntilRef.current = Date.now() + 60000
       }
     } catch {
-      // Non-blocking in-memory heartbeat
+      backoffUntilRef.current = Date.now() + 30000
+    } finally {
+      if (abortTimer) clearTimeout(abortTimer)
+      heartbeatInFlightRef.current = false
     }
   }, [user])
 

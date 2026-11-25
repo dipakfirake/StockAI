@@ -464,6 +464,35 @@ async def get_options_chain(
         logger.error(f"Failed to generate options chain for {symbol}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch options data")
 
+@router.post("/screener/scan", status_code=202)
+async def start_screener_scan_job(
+    sector: str = Query(None, description="Optional sector universe to scan asynchronously"),
+    force_refresh: bool = Query(True, description="Bypass cache and run fresh market scan"),
+    current_user=Depends(get_current_user),
+):
+    """
+    Launch a non-blocking async screener scan job in background (returns immediately with job_id
+    and cached/LKG snapshot so browser requests never hold 60s Nginx connections).
+    """
+    try:
+        return await screener_service.start_scan_job(sector=sector, force_refresh=force_refresh)
+    except Exception as e:
+        logger.error(f"Failed to launch screener scan job: {e}")
+        raise HTTPException(status_code=500, detail="Failed to launch screener scan")
+
+
+@router.get("/screener/scan/{job_id}")
+async def get_screener_scan_job(
+    job_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Poll status and completed payload of an async screener scan job."""
+    job = await screener_service.get_scan_job_status(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Screener scan job not found")
+    return job
+
+
 @router.get("/screener")
 async def get_swing_trade_screener(
     sector: str = Query(None, description="Optional sector universe to screen (e.g. NIFTY_50, BANKING, IT, AUTO, PHARMA, ENERGY, FMCG, METAL)"),

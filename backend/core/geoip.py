@@ -6,8 +6,10 @@ fraud detection, and CERT-In 2022 compliance without collecting invasive browser
 Features in-memory Redis caching (24-hour TTL) to guarantee sub-millisecond response times.
 """
 
+import asyncio
 import ipaddress
-from typing import Mapping, Optional
+import time
+from typing import Mapping, Optional, Set, Tuple
 from backend.core.cache import get_redis
 from backend.core.logging_config import get_logger
 
@@ -15,6 +17,19 @@ logger = get_logger(__name__)
 
 GEOIP_CACHE_TTL = 86400  # 24 hours
 GEOIP_FAIL_TTL = 3600    # 1 hour for failed lookups
+
+# Sub-millisecond process-local L1 geo cache + deduplicated background lookup guard
+_local_geo_cache: dict[str, tuple[str, float]] = {}
+_pending_geo_ips: Set[str] = set()
+_geo_bg_tasks: Set[asyncio.Task] = set()
+_geo_sem: Optional[asyncio.Semaphore] = None
+
+
+def _get_geo_sem() -> asyncio.Semaphore:
+    global _geo_sem
+    if _geo_sem is None:
+        _geo_sem = asyncio.Semaphore(2)
+    return _geo_sem
 
 
 def is_local_or_private_ip(ip_str: str) -> bool:
@@ -50,43 +65,51 @@ async def resolve_ip_location(ip_str: str, headers: Optional[Mapping[str, str]] 
         if country:
             return f"India ({country})" if country.upper() == "IN" else country
 
+    # 2. Check process-local L1 cache (sub-microsecond)
+    now = time.monotonic()
+    l1 = _local_geo_cache.get(clean_ip)
+    if l1 and l1[1] > now:
+        return l1[0]
+
     cache_key = f"presence:geoip:{clean_ip}"
     redis_client = None
 
-    # 2. Check Redis cache
+    # 3. Check Redis cache
     try:
         redis_client = await get_redis()
         if redis_client:
             cached = await redis_client.get(cache_key)
             if cached:
-                if isinstance(cached, bytes):
-                    return cached.decode("utf-8")
-                return str(cached)
+                val = cached.decode("utf-8") if isinstance(cached, bytes) else str(cached)
+                _local_geo_cache[clean_ip] = (val, now + 3600.0)
+                return val
     except Exception as exc:
         logger.debug(f"[GeoIP] Redis cache check error: {exc}")
 
-    # 3. Query IP-API with strict timeout (non-blocking)
+    # 4. Query IP-API with strict timeout (non-blocking)
     resolved_location = "India (Network IP)"
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=1.5) as client:
-            resp = await client.get(
-                f"http://ip-api.com/json/{clean_ip}?fields=status,country,city,regionName"
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("status") == "success":
-                    city = data.get("city")
-                    country = data.get("country")
-                    region = data.get("regionName")
-                    if city and country:
-                        resolved_location = f"{city}, {country}"
-                    elif country:
-                        resolved_location = f"{region}, {country}" if region else country
+        async with _get_geo_sem():
+            async with httpx.AsyncClient(timeout=1.5) as client:
+                resp = await client.get(
+                    f"http://ip-api.com/json/{clean_ip}?fields=status,country,city,regionName"
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("status") == "success":
+                        city = data.get("city")
+                        country = data.get("country")
+                        region = data.get("regionName")
+                        if city and country:
+                            resolved_location = f"{city}, {country}"
+                        elif country:
+                            resolved_location = f"{region}, {country}" if region else country
     except Exception as exc:
         logger.debug(f"[GeoIP] External lookup skipped or timed out for {clean_ip}: {exc}")
 
-    # 4. Cache resolved location in Redis
+    # 5. Cache resolved location in L1 + Redis
+    _local_geo_cache[clean_ip] = (resolved_location, time.monotonic() + 3600.0)
     if redis_client:
         try:
             await redis_client.setex(cache_key, GEOIP_CACHE_TTL, resolved_location)
@@ -94,3 +117,59 @@ async def resolve_ip_location(ip_str: str, headers: Optional[Mapping[str, str]] 
             pass
 
     return resolved_location
+
+
+async def resolve_ip_location_nonblocking(ip_str: str, headers: Optional[Mapping[str, str]] = None) -> str:
+    """
+    Fast-path geolocation resolver for high-frequency endpoints like /presence/heartbeat.
+    Never waits on external ip-api.com HTTP calls inline; schedules background resolution
+    only once per uncached IP so heartbeats remain sub-millisecond.
+    """
+    clean_ip = (ip_str or "").strip()
+    if is_local_or_private_ip(clean_ip):
+        return "Localhost / Internal Network"
+
+    if headers:
+        h_lower = {str(k).lower(): str(v) for k, v in headers.items()}
+        city = h_lower.get("cf-ipcity") or h_lower.get("x-geo-city")
+        country = h_lower.get("cf-ipcountry") or h_lower.get("x-geo-country")
+        if city and country:
+            return f"{city}, {country}"
+        if country:
+            return f"India ({country})" if country.upper() == "IN" else country
+
+    now = time.monotonic()
+    l1 = _local_geo_cache.get(clean_ip)
+    if l1 and l1[1] > now:
+        return l1[0]
+
+    cache_key = f"presence:geoip:{clean_ip}"
+    try:
+        redis_client = await get_redis()
+        if redis_client:
+            cached = await redis_client.get(cache_key)
+            if cached:
+                val = cached.decode("utf-8") if isinstance(cached, bytes) else str(cached)
+                _local_geo_cache[clean_ip] = (val, now + 3600.0)
+                return val
+    except Exception:
+        pass
+
+    # Warm asynchronously in background at most once per IP
+    if clean_ip and clean_ip not in _pending_geo_ips:
+        _pending_geo_ips.add(clean_ip)
+
+        async def _bg_lookup() -> None:
+            try:
+                await resolve_ip_location(clean_ip, None)
+            finally:
+                _pending_geo_ips.discard(clean_ip)
+
+        try:
+            task = asyncio.create_task(_bg_lookup())
+            _geo_bg_tasks.add(task)
+            task.add_done_callback(_geo_bg_tasks.discard)
+        except RuntimeError:
+            _pending_geo_ips.discard(clean_ip)
+
+    return "India (Network IP)"

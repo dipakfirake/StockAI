@@ -99,7 +99,7 @@ async def _analyze_market_bulk_async():
     from backend.data.ingestion.candle_ingestion import NSE_NIFTY50_SYMBOLS
     
     # Run the screener on a large subset (using NIFTY 50 for stability, can be expanded to 500)
-    screener_results = await ScreenerService.run_screener(NSE_NIFTY50_SYMBOLS, force_refresh=True)
+    screener_results = await ScreenerService.run_screener(NSE_NIFTY50_SYMBOLS, force_refresh=True, pace_seconds=0.30)
     
     # Save the entire massive JSON payload to Redis
     await cache_set("screener:bulk:latest", screener_results, ttl=3600)

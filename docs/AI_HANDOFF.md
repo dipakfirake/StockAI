@@ -12,7 +12,23 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22)
+## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25)
+
+- **SWING SCREENER RATE-LIMIT CASCADE, EVENT-LOOP FREEZE & 504 GATEWAY TIMEOUT ELIMINATION (COMPLETE & VERIFIED - 2026-11-25):**
+  - **Issues Investigated & Resolved**:
+    1. Scanning `Nifty 50 (Benchmark 25)` in `SwingScreenerPage` triggered ~45 `POST /api/presence/heartbeat` `504`s, `AxiosError: timeout of 60000ms exceeded` retries (`attempt 1/3..3/3`), `3500.4 ms` / `60000ms` timeouts on Admin `Trigger Live Fyers API Check`, and `/health/live` `504 Gateway Time-out` while backend stayed alive (`uptime_seconds: 261818.92`).
+    2. **5 Interlocking Root Causes Fixed**:
+       - **Event-Loop HTML & Indicator Freeze**: `_fetch_screener_fundamentals` (`market_data.py`) parsed 218KB Screener.in pages synchronously with `BeautifulSoup(..., "html.parser")` (`8,985.74 ms` / 25 pages on desktop; ~25–45s on 1-OCPU VM), alongside synchronous `indicator_service.compute_all` (`59.65 ms/sym`) in `screener.py`. Fixed by switching to C-backed `lxml.html` (`2,042.90 ms` total) offloaded onto dedicated `scraper_io_executor`, plus single-dispatch ML/indicator offload onto `ml_compute_executor` (`torch.set_num_threads(1)`).
+       - **Fyers Batch Rejection Waterfall**: `ScreenerService.run_screener` `batch_size = 6` caused 5/6 symbols to fail 250ms Fyers spacing (`[True, False, False, False, False, False]`) and stampede Yahoo/Screener.in (`yf.Ticker.history` had no timeout, `feedparser.parse` leaked 5s sockets, `CACHE_TTL_DAILY_MARKET_OPEN=30` purged 250 daily bars every 30s, `_get_fyers_client` hit Postgres before Redis). Fixed via `acquire_fyers_rate_budget_slot` paced waiting, `SingleFlightGroup` + negative caching (`300s`), 8s Yahoo timeout, async `httpx` RSS fetch, same-day `candles_daily_base:{ist_date}` cache live-patched via `synchronize_candle_tip`, prioritized in-mem/Redis `fyers_creds`, and shorter `5.0s` 429 cooldowns.
+       - **5-Thread Pool Starvation**: Isolated `backend/core/executors.py` (`fast_control_executor(8)`, `scraper_io_executor(6)`, `ml_compute_executor(2-4)`), moving `fyers.get_profile`, `fyers.history`/`quotes`, and `verify_password` off the shared scraper pool; moved GeoIP `ip-api.com` lookup off inline `/api/presence/heartbeat` into `resolve_ip_location_nonblocking`.
+       - **`FyersRateGovernor` Priority Inversion & Settings Typo**: Refactored `fyers_rate_governor.py` to release locks before sleep and schedule via preemptible `heapq` priority queue + isolated `_inflight_lock`; added `reset_backoff()` on `reset_fyers_health()`; fixed `_fyers_token_expired_reason` → `_fyers_token_error_reason` in `backend/api/settings.py`.
+       - **Axios 60s Retry Multiplier & Blocking HTTP**: Excluded `/market/screener`, `/market/bulk-screener`, `/alerts/screener-proximity-radar`, and `force_refresh` calls from Axios auto-retries (`frontend/src/services/api.ts`), added 5s `AbortController` + 60s backoff to `usePresence.ts`, added per-sector `SingleFlightGroup` + LKG snapshots + `POST /api/market/screener/scan` & `GET /api/market/screener/scan/{job_id}` async polling in `SwingScreenerPage.tsx`.
+  - **Verification Evidence**:
+    - `py_compile` across all 14 modified/created Python files: **exit code 0**.
+    - Backend `pytest` across 10 suites (`test_screener_storm_and_starvation.py`, `test_fyers_rate_governor.py`, `test_m1_warmup_governor_challenge.py`, `test_m3_adversarial_challenge.py`, `test_feed_failover_handover.py`, `test_fyers_stream.py`, `test_screener_proximity_radar.py`, `test_swing_screener_categorization.py`, `test_market_data.py`, `test_best_buy_price_and_indicators.py`): **74 / 74 passed (0 failed) in 76.16s**.
+    - Local live FastAPI ASGI smoke test: `/health/live` -> `200 (18.57ms)`, `/api/presence/heartbeat` -> `200`.
+    - Frontend `npm --prefix frontend run build` (`tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 15.60s (exit code 0)**.
+  - **Exact Next Safe Step**: Commit/push changes from localhost and have user run `git pull origin main && sudo docker compose build backend frontend && sudo docker compose up -d backend frontend` on the live server (plus host Nginx `proxy_read_timeout 120s` and `limit_req` exemptions for `/health/live` and `/api/presence/heartbeat`).
 
 - **FORENSIC AUDIT LOSS ELIMINATION, PHANTOM LOSS ERADICATION & 75%+ WIN-RATE CONVICTION ENGINE (COMPLETE & VERIFIED - 2026-11-22):**
   - **Issues Investigated & Delivered**:

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import settings
 from backend.core.database import get_db
+from backend.core.executors import run_in_fast_executor
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -169,7 +170,7 @@ async def verify_admin_docs_access(
         result = await db.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
         if user and user.is_active and user.is_admin:
-            is_valid = await asyncio.to_thread(verify_password, credentials.password, user.hashed_password)
+            is_valid = await run_in_fast_executor(verify_password, credentials.password, user.hashed_password)
             if is_valid:
                 return user
 

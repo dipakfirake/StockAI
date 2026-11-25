@@ -13,6 +13,8 @@ import yfinance as yf
 from backend.core.config import settings
 from backend.core.logging_config import get_logger
 from backend.core.cache import cache_get, cache_set
+from backend.core.cache_manager import cache_manager
+from backend.core.executors import run_in_fast_executor, run_in_scraper_executor
 from backend.core.market_hours import get_dynamic_candle_ttl, is_indian_market_open, get_current_ist_time
 from fyers_apiv3 import fyersModel
 
@@ -303,6 +305,7 @@ class MarketDataService:
     _last_fyers_request_time: float = 0.0
     _rate_budget_lock: Optional[asyncio.Lock] = None
     _rate_budget_lock_loop: Optional[asyncio.AbstractEventLoop] = None
+    _mem_fyers_creds: Optional[tuple[str, str, float]] = None
 
     @classmethod
     def _get_rate_budget_lock(cls) -> asyncio.Lock:
@@ -430,6 +433,42 @@ class MarketDataService:
             return True
 
     @classmethod
+    async def acquire_fyers_rate_budget_slot(cls, max_wait_seconds: float = 3.5) -> bool:
+        """
+        Smoothly waits OUTSIDE locks for a spacing slot when Fyers is throttled by
+        inter-request spacing (<250ms), instead of dropping concurrent candle pulls onto
+        slow Yahoo/Screener fallback scrapers. Respects mocked check_and_record_fyers_rate_budget cleanly.
+        """
+        import time
+
+        deadline = time.monotonic() + max(0.0, max_wait_seconds)
+        for _ in range(10):
+            if await cls.check_and_record_fyers_rate_budget():
+                return True
+
+            now = time.time()
+            # Only retry if rejection was caused by short spacing/burst (not mocked denial or 1m quota full)
+            last_req = cls._last_fyers_request_time
+            recent_1m = [t for t in cls._fyers_request_timestamps if now - t < 60.0]
+            if last_req <= 0 or len(recent_1m) >= 40:
+                return False
+            if not cls._fyers_token_valid or now < cls._fyers_cooldown_until:
+                return False
+
+            min_spacing = 0.25
+            if cls.is_in_warmup():
+                elapsed = now - cls._warmup_started_at
+                min_spacing = 1.5 if elapsed < 20.0 else (0.8 if elapsed < 40.0 else 0.4)
+
+            wait_s = max(0.08, (min_spacing - (now - last_req)) + 0.02)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.02:
+                return False
+            await asyncio.sleep(min(wait_s, 0.5, remaining))
+
+        return False
+
+    @classmethod
     def get_feed_status(cls) -> dict:
         """Returns the current state of the dual-connection market data engine."""
         import time
@@ -510,12 +549,18 @@ class MarketDataService:
         cls._active_engine = "PRIMARY_FYERS"
         cls._circuit_state = "CLOSED"
         cls._canary_in_progress = False
+        cls._mem_fyers_creds = None
         if engage_warmup:
             cls.engage_warmup_governor(60.0)
         else:
             cls._warmup_until = 0.0
             cls._warmup_started_at = 0.0
             cls._last_fyers_request_time = 0.0
+        try:
+            from backend.services.fyers_rate_governor import fyers_rate_governor
+            fyers_rate_governor.reset_backoff()
+        except Exception:
+            pass
         logger.info("Dual-Engine: Fyers token refreshed. Hot-swapping back to Primary Fyers Engine.")
 
     @classmethod
@@ -681,10 +726,25 @@ class MarketDataService:
         client_id = settings.FYERS_CLIENT_ID
         access_token = settings.FYERS_ACCESS_TOKEN
 
+        # Fast in-process credential micro-cache (15s) to avoid opening DB connections per stock
+        import time as _time_mod
+        mem_creds = MarketDataService._mem_fyers_creds
+        if mem_creds and _time_mod.time() < mem_creds[2]:
+            client_id, access_token = mem_creds[0], mem_creds[1]
+            return fyersModel.FyersModel(client_id=client_id, is_async=False, token=access_token, log_path="")
+
         try:
             from backend.core.cache import cache_get, cache_set
-            
-            # Priority 1: Check PostgreSQL SystemSettings (authoritative user configuration)
+
+            # Priority 1: Check Redis Cache ('fyers_creds') first to avoid Postgres round-trips per quote/candle
+            cached_creds = await cache_get("fyers_creds")
+            if cached_creds and cached_creds.get("client_id") and cached_creds.get("access_token"):
+                client_id = str(cached_creds["client_id"]).strip()
+                access_token = str(cached_creds["access_token"]).strip()
+                MarketDataService._mem_fyers_creds = (client_id, access_token, _time_mod.time() + 15.0)
+                return fyersModel.FyersModel(client_id=client_id, is_async=False, token=access_token, log_path="")
+
+            # Priority 2: Check PostgreSQL SystemSettings if Redis cache cold
             db = AsyncSessionLocal()
             try:
                 fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
@@ -696,17 +756,10 @@ class MarketDataService:
                     access_token = fyers_token_obj.value.strip()
             finally:
                 await asyncio.shield(db.close())
-                    
-            # Priority 2: Check Redis Cache ('fyers_creds') if DB did not provide credentials
-            if not access_token or not client_id:
-                cached_creds = await cache_get("fyers_creds")
-                if cached_creds:
-                    if not client_id and cached_creds.get("client_id"):
-                        client_id = cached_creds["client_id"]
-                    if not access_token and cached_creds.get("access_token"):
-                        access_token = cached_creds["access_token"]
-            elif client_id and access_token:
+
+            if client_id and access_token:
                 await cache_set("fyers_creds", {"client_id": client_id, "access_token": access_token}, ttl=300)
+                MarketDataService._mem_fyers_creds = (client_id, access_token, _time_mod.time() + 15.0)
         except Exception:
             pass
         
@@ -880,7 +933,7 @@ class MarketDataService:
                 
                 from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_USER_ACTION
                 response = await fyers_rate_governor.execute(
-                    lambda: asyncio.to_thread(fyers.quotes, data),
+                    lambda: run_in_fast_executor(fyers.quotes, data),
                     priority=PRIORITY_USER_ACTION,
                     coalescing_key=f"quote:{fyers_symbol}"
                 )
@@ -927,7 +980,7 @@ class MarketDataService:
                     else:
                         logger.warning(f"Fyers returned zero price for {fyers_symbol}, falling through to backup")
                 elif response.get("code") in (429, -360):
-                    MarketDataService.record_fyers_rate_limit(f"Fyers rate limit ({response.get('code')}) hit in single quote", cooldown_seconds=30.0)
+                    MarketDataService.record_fyers_rate_limit(f"Fyers rate limit ({response.get('code')}) hit in single quote", cooldown_seconds=5.0)
                 elif fyers_symbol.startswith("BSE:"):
                     return await MarketDataService.fetch_quote(original_symbol.replace(".BO", ".NS"))
                 else:
@@ -938,15 +991,15 @@ class MarketDataService:
                     elif resp_code == -300:
                         logger.warning(f"Fyers reported invalid symbol for {fyers_symbol}: {response}")
                     elif resp_code in (500, 502, 503, 504) or "502" in err_msg or "503" in err_msg or "bad gateway" in err_msg.lower() or "gateway timeout" in err_msg.lower():
-                        MarketDataService.record_fyers_rate_limit(f"Fyers server error (code {resp_code})", cooldown_seconds=60.0)
+                        MarketDataService.record_fyers_rate_limit(f"Fyers server error (code {resp_code})", cooldown_seconds=15.0)
                     elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
-                        MarketDataService.record_fyers_rate_limit("Fyers rate limit (-360/429) hit in single quote", cooldown_seconds=30.0)
+                        MarketDataService.record_fyers_rate_limit("Fyers rate limit (-360/429) hit in single quote", cooldown_seconds=5.0)
                     logger.warning(f"Fyers quote returned non-ok for {fyers_symbol}: {response}")
 
             except Exception as e:
                 err_str = str(e).lower()
                 if "-360" in err_str or "429" in err_str or "rate limit" in err_str or "1015" in err_str or "plan limit" in err_str:
-                    MarketDataService.record_fyers_rate_limit(f"Fyers rate limit exception: {e}", cooldown_seconds=30.0)
+                    MarketDataService.record_fyers_rate_limit(f"Fyers rate limit exception: {e}", cooldown_seconds=5.0)
                 elif "-15" in err_str or "-16" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
                     MarketDataService.mark_fyers_token_expired(f"Fyers auth exception: {e}", cooldown_seconds=300.0)
                 elif any(k in err_str for k in ("timeout", "timed out", "connection refused", "connecterror", "connection error", "connection reset", "502", "503", "504", "bad gateway", "service unavailable", "gateway timeout")) or isinstance(e, (TimeoutError, ConnectionRefusedError, ConnectionError, OSError)):
@@ -964,7 +1017,7 @@ class MarketDataService:
             session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
             yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
             ticker = yf.Ticker(yf_sym, session=session)
-            hist = await asyncio.to_thread(ticker.history, period="5d")
+            hist = await asyncio.wait_for(run_in_scraper_executor(ticker.history, period="5d"), timeout=5.0)
             if not hist.empty:
                 last_price = float(hist["Close"].iloc[-1])
                 prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else last_price
@@ -1086,7 +1139,7 @@ class MarketDataService:
                     data = {"symbols": fyers_symbols_str}
                     from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_INTERACTIVE
                     response = await fyers_rate_governor.execute(
-                        lambda: asyncio.to_thread(fyers.quotes, data),
+                        lambda: run_in_fast_executor(fyers.quotes, data),
                         priority=PRIORITY_INTERACTIVE,
                         coalescing_key=f"bulk:{fyers_symbols_str}"
                     )
@@ -1132,7 +1185,7 @@ class MarketDataService:
                                     except Exception:
                                         pass
                     elif response.get("code") in (429, -360):
-                        MarketDataService.record_fyers_rate_limit(f"Fyers rate limit ({response.get('code')}) hit in bulk quotes", cooldown_seconds=30.0)
+                        MarketDataService.record_fyers_rate_limit(f"Fyers rate limit ({response.get('code')}) hit in bulk quotes", cooldown_seconds=5.0)
                         break
                     else:
                         err_msg = str(response)
@@ -1143,20 +1196,20 @@ class MarketDataService:
                         elif resp_code == -300:
                             logger.warning(f"Fyers reported invalid symbol parameter in chunk: {chunk_keys[:5]}")
                         elif resp_code in (500, 502, 503, 504) or "502" in err_msg or "503" in err_msg or "bad gateway" in err_msg.lower() or "gateway timeout" in err_msg.lower():
-                            MarketDataService.record_fyers_rate_limit(f"Fyers server error (code {resp_code}) in bulk quotes", cooldown_seconds=60.0)
+                            MarketDataService.record_fyers_rate_limit(f"Fyers server error (code {resp_code}) in bulk quotes", cooldown_seconds=15.0)
                             break
                         elif resp_code == -360 or "429" in err_msg or "rate limit" in err_msg.lower() or "1015" in err_msg or "plan limit" in err_msg.lower():
-                            MarketDataService.record_fyers_rate_limit("Fyers rate limit (-360/429) detected in bulk quotes", cooldown_seconds=30.0)
+                            MarketDataService.record_fyers_rate_limit("Fyers rate limit (-360/429) detected in bulk quotes", cooldown_seconds=5.0)
                             break
                         logger.error(f"Fyers bulk quote returned non-ok: {response}")
             except Exception as e:
                 err_str = str(e).lower()
                 if "-360" in err_str or "429" in err_str or "rate limit" in err_str or "1015" in err_str or "plan limit" in err_str:
-                    MarketDataService.record_fyers_rate_limit(f"Bulk quote rate limit: {e}", cooldown_seconds=30.0)
+                    MarketDataService.record_fyers_rate_limit(f"Bulk quote rate limit: {e}", cooldown_seconds=5.0)
                 elif "-15" in err_str or "-16" in err_str or "-17" in err_str or ("token" in err_str and ("expire" in err_str or "invalid" in err_str)):
                     MarketDataService.mark_fyers_token_expired(f"Bulk quote auth exception: {e}", cooldown_seconds=300.0)
                 elif any(k in err_str for k in ("timeout", "timed out", "connection refused", "connecterror", "connection error", "connection reset", "502", "503", "504", "bad gateway", "service unavailable", "gateway timeout")) or isinstance(e, (TimeoutError, ConnectionRefusedError, ConnectionError, OSError)):
-                    MarketDataService.record_fyers_rate_limit(f"Fyers bulk quote server/network error: {e}", cooldown_seconds=60.0)
+                    MarketDataService.record_fyers_rate_limit(f"Fyers bulk quote server/network error: {e}", cooldown_seconds=15.0)
                 logger.error(f"Fyers bulk quote failed: {e}")
         else:
             remaining = int(MarketDataService._fyers_cooldown_until - now)
@@ -1220,7 +1273,7 @@ class MarketDataService:
                         tickers = " ".join(yf_map.keys())
                         return yf.download(tickers, period="5d", interval="1d", progress=False, group_by="ticker", session=session)
 
-                    df = await asyncio.wait_for(asyncio.to_thread(_batch_yf), timeout=6.0)
+                    df = await asyncio.wait_for(run_in_scraper_executor(_batch_yf), timeout=6.0)
                     if df is not None and not df.empty:
                         for yf_sym, orig_sym in yf_map.items():
                             try:
@@ -1280,303 +1333,357 @@ class MarketDataService:
         return quotes_dict
 
     @staticmethod
+    def _fetch_yf_candles_sync(yf_sym: str, interval: str, period: str, original_symbol: str):
+        import requests
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        ticker = yf.Ticker(yf_sym, session=session)
+        df = ticker.history(interval=interval, period=period, auto_adjust=True)
+        if df is None or df.empty:
+            return []
+        fallback_candles = []
+        for ts, row in df.iterrows():
+            try:
+                c_close = float(row["Close"])
+                c_open = float(row["Open"]) if not pd.isna(row.get("Open")) else c_close
+                c_high = float(row["High"]) if not pd.isna(row.get("High")) else c_close
+                c_low = float(row["Low"]) if not pd.isna(row.get("Low")) else c_close
+                c_vol = int(row["Volume"]) if not pd.isna(row.get("Volume")) else 0
+                if math.isfinite(c_close) and c_close > 0:
+                    fallback_candles.append({
+                        "timestamp": ts.isoformat(),
+                        "open": c_open,
+                        "high": c_high,
+                        "low": c_low,
+                        "close": c_close,
+                        "volume": c_vol,
+                    })
+            except (ValueError, TypeError):
+                continue
+        return fallback_candles
+
+    @staticmethod
     async def fetch_candles(
         symbol: str,
         timeframe: str = "1d",
         limit: int = 200,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        prefetched_quote: Optional[dict] = None,
     ) -> list[dict]:
         """
         Fetch OHLCV candles from Fyers API.
-        Includes automatic pagination to bypass Fyers' maximum days constraint for deep historical ML training.
+        Uses IST-date daily historical base caching patched live via bulk quotes,
+        single-flight request coalescing, and paced Fyers slot waiting to eliminate
+        Yahoo/Screener thundering-herd cascades.
         """
         if timeframe not in VALID_TIMEFRAMES:
             raise ValueError(f"Invalid timeframe '{timeframe}'. Valid: {VALID_TIMEFRAMES}")
 
         original_symbol = symbol
-        fyers_symbol = MarketDataService._normalise_symbol(symbol)        
+        fyers_symbol = MarketDataService._normalise_symbol(symbol)
         cache_key = f"candles:{original_symbol}:{timeframe}:{limit}:{start_date}:{end_date}"
         cached = await cache_get(cache_key)
         if cached:
             logger.debug(f"Candle cache hit: {original_symbol} {timeframe}")
+            if prefetched_quote and timeframe == "1d" and not start_date and not end_date:
+                return MarketDataService.synchronize_candle_tip(cached, prefetched_quote)
             return cached
 
-        fyers_interval = FYERS_INTERVAL_MAP[timeframe]
+        is_daily_rolling = (
+            timeframe == "1d"
+            and not start_date
+            and not end_date
+            and limit is not None
+            and limit <= 365
+        )
+        ist_today = get_current_ist_time().strftime("%Y-%m-%d")
+        base_key = f"candles_daily_base:{ist_today}:{original_symbol}:{limit}"
 
-        import time
-        now = time.time()
-        # Check for dynamic credential updates in DB, Redis, or .env
-        await MarketDataService.check_credentials_changed()
+        # Fast-path incremental live-tip synthesis from same-day closed daily base candles
+        if is_daily_rolling:
+            try:
+                base_candles = await cache_get(base_key)
+                if base_candles and isinstance(base_candles, list) and len(base_candles) >= 20:
+                    tip_quote = prefetched_quote
+                    if not tip_quote or tip_quote.get("price", 0) <= 0:
+                        tip_quote = await cache_get(f"quote:{original_symbol}")
+                    if not is_indian_market_open() or (tip_quote and tip_quote.get("price", 0) > 0):
+                        synced = (
+                            MarketDataService.synchronize_candle_tip(base_candles, tip_quote)
+                            if tip_quote and tip_quote.get("price", 0) > 0
+                            else base_candles
+                        )
+                        await cache_set(cache_key, synced, ttl=get_dynamic_candle_ttl(timeframe))
+                        logger.debug(f"Daily base cache fast-path hit for {original_symbol}")
+                        return synced
+            except Exception as e:
+                logger.debug(f"Daily base cache fast-path skipped for {original_symbol}: {e}")
 
-        # Circuit breaker canary recovery probe:
-        # If token was marked invalid, but cooldown has elapsed -> Probe Fyers (HALF_OPEN)
-        if not MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
-            if not MarketDataService._canary_in_progress:
-                await MarketDataService.probe_fyers_canary(probe_symbol=fyers_symbol)
+        async def _store_candles(candles_out: list[dict]) -> None:
+            ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
+            await cache_set(cache_key, candles_out, ttl=ttl)
+            if is_daily_rolling and len(candles_out) >= 20:
+                try:
+                    await cache_set(base_key, candles_out, ttl=21600)  # 6h intra-day base history
+                except Exception:
+                    pass
 
-        try:
-            if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
-                fyers = await MarketDataService._get_fyers_client()
-                all_candles = []
-                
-                # 1. Determine the global start and end timestamps
-                if start_date and end_date:
-                    dt_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                    dt_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                else:
-                    dt_end = datetime.now(timezone.utc)
-                    if limit and limit < 300:
-                        # Proportional fast single-query range for real-time indicators & scanner
-                        if timeframe in ["1d", "1w", "1mo"]:
-                            mult = 7.0 if timeframe == "1w" else (30.0 if timeframe == "1mo" else 1.8)
-                            dt_start = dt_end - timedelta(days=int(limit * mult) + 30)
-                        elif timeframe in ["1h", "30m", "15m", "5m"]:
-                            dt_start = dt_end - timedelta(days=min(limit, 30))
-                        elif timeframe == "1m":
-                            dt_start = dt_end - timedelta(days=min(limit, 10))
+        async def _fetch_upstream() -> list[dict]:
+            inner_cached = await cache_get(cache_key)
+            if inner_cached:
+                return inner_cached
+
+            fyers_interval = FYERS_INTERVAL_MAP[timeframe]
+
+            import time
+            now = time.time()
+            # Check for dynamic credential updates in DB, Redis, or .env
+            await MarketDataService.check_credentials_changed()
+
+            # Circuit breaker canary recovery probe:
+            # If token was marked invalid, but cooldown has elapsed -> Probe Fyers (HALF_OPEN)
+            if not MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until:
+                if not MarketDataService._canary_in_progress:
+                    await MarketDataService.probe_fyers_canary(probe_symbol=fyers_symbol)
+
+            try:
+                if (
+                    MarketDataService._fyers_token_valid
+                    and now >= MarketDataService._fyers_cooldown_until
+                    and await MarketDataService.acquire_fyers_rate_budget_slot(max_wait_seconds=3.5)
+                ):
+                    fyers = await MarketDataService._get_fyers_client()
+                    all_candles = []
+
+                    # 1. Determine the global start and end timestamps
+                    if start_date and end_date:
+                        dt_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                        dt_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                     else:
-                        # Deep historical coverage for ML training and extensive backtesting
-                        if timeframe in ["1d", "1w", "1mo"]:
-                            dt_start = datetime(2015, 1, 1, tzinfo=timezone.utc)
-                        elif timeframe in ["1h", "30m", "15m", "5m"]:
-                            dt_start = dt_end - timedelta(days=100)
-                        elif timeframe == "1m":
-                            dt_start = dt_end - timedelta(days=60)
-                    
-                # 2. Backward Pagination Loop (Fyers max range is 100 days for intraday, 365 days for daily)
-                # Paginating backwards ensures the most recent market candles (today/yesterday)
-                # are retrieved FIRST so any pagination cutoff never leaves candles stuck in old years.
-                max_days_per_request = 365 if timeframe in ["1d", "1w", "1mo"] else 100
-                
-                chunk_end = dt_end
-                chunk_idx = 0
-                while chunk_end > dt_start:
-                    if chunk_idx > 0:
-                        # Pacing delay between pagination chunks to respect 4 req/sec burst limit
-                        await asyncio.sleep(0.25)
-                        # Verify and record budget against rate limiter for subsequent pagination chunks
-                        if not await MarketDataService.check_and_record_fyers_rate_budget():
-                            logger.warning(
-                                f"Fyers rate budget exhausted during candle pagination for {fyers_symbol} "
-                                f"(chunk {chunk_idx + 1}). Halting further pagination to preserve broker quota."
+                        dt_end = datetime.now(timezone.utc)
+                        if limit and limit < 300:
+                            if timeframe in ["1d", "1w", "1mo"]:
+                                mult = 7.0 if timeframe == "1w" else (30.0 if timeframe == "1mo" else 1.8)
+                                dt_start = dt_end - timedelta(days=int(limit * mult) + 30)
+                            elif timeframe in ["1h", "30m", "15m", "5m"]:
+                                dt_start = dt_end - timedelta(days=min(limit, 30))
+                            elif timeframe == "1m":
+                                dt_start = dt_end - timedelta(days=min(limit, 10))
+                        else:
+                            if timeframe in ["1d", "1w", "1mo"]:
+                                dt_start = datetime(2015, 1, 1, tzinfo=timezone.utc)
+                            elif timeframe in ["1h", "30m", "15m", "5m"]:
+                                dt_start = dt_end - timedelta(days=100)
+                            elif timeframe == "1m":
+                                dt_start = dt_end - timedelta(days=60)
+
+                    # 2. Backward Pagination Loop
+                    max_days_per_request = 365 if timeframe in ["1d", "1w", "1mo"] else 100
+
+                    chunk_end = dt_end
+                    chunk_idx = 0
+                    while chunk_end > dt_start:
+                        if chunk_idx > 0:
+                            await asyncio.sleep(0.26)
+                            if not await MarketDataService.acquire_fyers_rate_budget_slot(max_wait_seconds=1.0):
+                                logger.warning(
+                                    f"Fyers rate budget exhausted during candle pagination for {fyers_symbol} "
+                                    f"(chunk {chunk_idx + 1}). Halting further pagination to preserve broker quota."
+                                )
+                                break
+
+                        chunk_idx += 1
+                        chunk_start = max(chunk_end - timedelta(days=max_days_per_request), dt_start)
+
+                        data = {
+                            "symbol": fyers_symbol,
+                            "resolution": fyers_interval,
+                            "date_format": "1",
+                            "range_from": chunk_start.strftime("%Y-%m-%d"),
+                            "range_to": chunk_end.strftime("%Y-%m-%d"),
+                            "cont_flag": "1",
+                        }
+
+                        max_retries = 2
+                        for attempt in range(max_retries):
+                            from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_BACKGROUND
+                            response = await fyers_rate_governor.execute(
+                                lambda: run_in_fast_executor(fyers.history, data),
+                                priority=PRIORITY_BACKGROUND,
+                                coalescing_key=f"candle:{fyers_symbol}:{fyers_interval}:{data['range_from']}:{data['range_to']}"
                             )
+                            if response.get("s") == "ok":
+                                break
+
+                            if response.get("code") in (-360, 429):
+                                MarketDataService.record_fyers_rate_limit("Fyers history rate limited", cooldown_seconds=5.0)
+                                break
+                            if response.get("code") in [-16, -300] or response.get("s") in ["no_data", "error"]:
+                                break
+
+                            logger.warning(f"Fyers history failed for {fyers_symbol} ({chunk_start.date()} to {chunk_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")
+                            await asyncio.sleep(0.5)
+                        else:
                             break
 
-                    chunk_idx += 1
-                    chunk_start = max(chunk_end - timedelta(days=max_days_per_request), dt_start)
-                    
-                    data = {
-                        "symbol": fyers_symbol,
-                        "resolution": fyers_interval,
-                        "date_format": "1",
-                        "range_from": chunk_start.strftime("%Y-%m-%d"),
-                        "range_to": chunk_end.strftime("%Y-%m-%d"),
-                        "cont_flag": "1" # Continuous data for futures/indices
-                    }
-                    
-                    max_retries = 2
-                    for attempt in range(max_retries):
-                        from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_BACKGROUND
-                        response = await fyers_rate_governor.execute(
-                            lambda: asyncio.to_thread(fyers.history, data),
-                            priority=PRIORITY_BACKGROUND,
-                            coalescing_key=f"candle:{fyers_symbol}:{fyers_interval}:{data['range_from']}:{data['range_to']}"
-                        )
-                        if response.get("s") == "ok":
+                        if "candles" in response and response["candles"]:
+                            all_candles.extend(response["candles"])
+                        elif not all_candles:
                             break
-                        
-                        # If authentication fails (-16), rate limited (429/-360), symbol is invalid (-300), or no data exists (pre-IPO), skip immediately without retry delay
-                        if response.get("code") in (-360, 429):
-                            MarketDataService.record_fyers_rate_limit("Fyers history rate limited", cooldown_seconds=30.0)
-                            break
-                        if response.get("code") in [-16, -300] or response.get("s") in ["no_data", "error"]:
-                            break
-                            
-                        logger.warning(f"Fyers history failed for {fyers_symbol} ({chunk_start.date()} to {chunk_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")
-                        await asyncio.sleep(1.0)
-                    else:
-                        break
-                        
-                    if "candles" in response and response["candles"]:
-                        all_candles.extend(response["candles"])
-                    elif not all_candles:
-                        # If the most recent chunk had no data or failed, stop
-                        break
-                        
-                    chunk_end = chunk_start - timedelta(days=1)
-                    
-                if all_candles:
-                    # Fyers candle format: [Epoch, Open, High, Low, Close, Volume]
-                    formatted_candles = []
-                    seen_ts = set()
-                    for c in all_candles:
-                        if c[0] in seen_ts:
-                            continue
-                        seen_ts.add(c[0])
-                        ts_dt = datetime.fromtimestamp(c[0], timezone.utc)
-                        formatted_candles.append({
-                            "timestamp": ts_dt.isoformat(),
-                            "open": float(c[1]),
-                            "high": float(c[2]),
-                            "low": float(c[3]),
-                            "close": float(c[4]),
-                            "volume": int(c[5])
-                        })
-                        
-                    # Sort chronologically and retain complete dataset
-                    formatted_candles.sort(key=lambda x: x["timestamp"])
 
-                    # Freshness Guard: If requesting live market data (no explicit historical date bounds),
-                    # guarantee the most recent candle is not severely stale (>45 days old)
-                    if not start_date and not end_date and formatted_candles:
-                        latest_dt = datetime.fromisoformat(formatted_candles[-1]["timestamp"].replace("Z", "+00:00"))
-                        if (dt_end - latest_dt).days > 45:
-                            logger.warning(f"Fyers returned stale historical candles for {fyers_symbol} ending {latest_dt.date()}. Invoking fallback.")
-                            raise ValueError(f"Fyers candles stale for {fyers_symbol}")
+                        chunk_end = chunk_start - timedelta(days=1)
 
-                    ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
-                    await cache_set(cache_key, formatted_candles, ttl=ttl)
-                    return formatted_candles
-                else:
-                    logger.warning(f"Empty candle data returned by Fyers for {fyers_symbol}")
-                    if fyers_symbol.startswith("BSE:"):
-                        # Dual-listed fallback in Fyers: try NSE
-                        return await MarketDataService.fetch_candles(
-                            symbol=original_symbol.replace(".BO", ".NS"),
-                            timeframe=timeframe,
-                            limit=limit,
-                            start_date=start_date,
-                            end_date=end_date,
-                        )
-
-        except Exception as e:
-            logger.error(f"Failed to fetch Fyers history for {original_symbol}: {e}")
-
-        # Secondary fallback if Fyers token is expired or temporary network error
-        try:
-            import yfinance as yf
-            import requests
-            session = requests.Session()
-            session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-            yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
-            clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-            yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
-            interval = yf_timeframe_map.get(timeframe, "1d")
-            
-            if timeframe in ["1d", "1w", "1mo"]:
-                if limit and limit >= 300:
-                    period = "10y"
-                elif limit:
-                    period = "2y"
-                else:
-                    period = "10y"
-            else:
-                period = "60d"
-            
-            ticker = yf.Ticker(yf_sym, session=session)
-            df = await asyncio.to_thread(ticker.history, interval=interval, period=period, auto_adjust=True)
-            if not df.empty:
-                fallback_candles = []
-                for ts, row in df.iterrows():
-                    try:
-                        c_close = float(row["Close"])
-                        c_open = float(row["Open"]) if not pd.isna(row.get("Open")) else c_close
-                        c_high = float(row["High"]) if not pd.isna(row.get("High")) else c_close
-                        c_low = float(row["Low"]) if not pd.isna(row.get("Low")) else c_close
-                        c_vol = int(row["Volume"]) if not pd.isna(row.get("Volume")) else 0
-                        if math.isfinite(c_close) and c_close > 0:
-                            fallback_candles.append({
-                                "timestamp": ts.isoformat(),
-                                "open": c_open,
-                                "high": c_high,
-                                "low": c_low,
-                                "close": c_close,
-                                "volume": c_vol,
-                            })
-                    except (ValueError, TypeError):
-                        continue
-
-                # Dual-listed fallback: If a .BO symbol returns fewer than 30 candles, fallback to its NSE counterpart (.NS)
-                if len(fallback_candles) < 30 and original_symbol.endswith(".BO"):
-                    nse_candles = await MarketDataService.fetch_candles(f"{clean_sym}.NS", timeframe, limit, start_date, end_date)
-                    if len(nse_candles) > len(fallback_candles):
-                        ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
-                        await cache_set(cache_key, nse_candles, ttl=ttl)
-                        return nse_candles
-
-                if fallback_candles:
-                    ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
-                    await cache_set(cache_key, fallback_candles, ttl=ttl)
-                    return fallback_candles
-            elif original_symbol.endswith(".BO"):
-                nse_candles = await MarketDataService.fetch_candles(f"{clean_sym}.NS", timeframe, limit, start_date, end_date)
-                if nse_candles:
-                    ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
-                    await cache_set(cache_key, nse_candles, ttl=ttl)
-                    return nse_candles
-        except Exception as e:
-            logger.debug(f"yfinance candle fetch failed for {original_symbol}: {e}")
-
-        # 3. Tertiary fallback via direct Yahoo Chart API (resilient against crumb/cookie errors)
-        try:
-            import httpx
-            yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
-
-            yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
-            interval = yf_timeframe_map.get(timeframe, "1d")
-            chart_range = "1y" if interval == "1d" else ("60d" if "m" in interval or "h" in interval else "5y")
-
-            direct_chart_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval={interval}&range={chart_range}"
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            async with httpx.AsyncClient(headers=headers, timeout=6.0) as client:
-                resp = await client.get(direct_chart_url)
-                if resp.status_code == 200:
-                    cdata = resp.json()
-                    res_list = cdata.get("chart", {}).get("result", [])
-                    if res_list:
-                        result0 = res_list[0]
-                        timestamps = result0.get("timestamp", [])
-                        quotes_arr = result0.get("indicators", {}).get("quote", [{}])[0]
-                        opens = quotes_arr.get("open", [])
-                        highs = quotes_arr.get("high", [])
-                        lows = quotes_arr.get("low", [])
-                        closes = quotes_arr.get("close", [])
-                        volumes = quotes_arr.get("volume", [])
-
-                        direct_candles = []
-                        for i in range(len(timestamps)):
-                            try:
-                                c = closes[i] if i < len(closes) else None
-                                if c is None or not math.isfinite(c) or c <= 0:
-                                    continue
-                                o = opens[i] if i < len(opens) and opens[i] is not None and math.isfinite(opens[i]) else c
-                                h = highs[i] if i < len(highs) and highs[i] is not None and math.isfinite(highs[i]) else c
-                                l = lows[i] if i < len(lows) and lows[i] is not None and math.isfinite(lows[i]) else c
-                                v = volumes[i] if i < len(volumes) and volumes[i] is not None and math.isfinite(volumes[i]) else 0
-                                ts_iso = datetime.fromtimestamp(timestamps[i], tz=timezone.utc).isoformat()
-                                direct_candles.append({
-                                    "timestamp": ts_iso,
-                                    "open": round(float(o), 2),
-                                    "high": round(float(h), 2),
-                                    "low": round(float(l), 2),
-                                    "close": round(float(c), 2),
-                                    "volume": int(v),
-                                })
-                            except Exception:
+                    if all_candles:
+                        formatted_candles = []
+                        seen_ts = set()
+                        for c in all_candles:
+                            if c[0] in seen_ts:
                                 continue
+                            seen_ts.add(c[0])
+                            ts_dt = datetime.fromtimestamp(c[0], timezone.utc)
+                            formatted_candles.append({
+                                "timestamp": ts_dt.isoformat(),
+                                "open": float(c[1]),
+                                "high": float(c[2]),
+                                "low": float(c[3]),
+                                "close": float(c[4]),
+                                "volume": int(c[5]),
+                            })
 
-                        if direct_candles:
-                            direct_candles.sort(key=lambda x: x["timestamp"])
-                            if limit and len(direct_candles) > limit:
-                                direct_candles = direct_candles[-limit:]
-                            ttl = 86400 if (start_date and end_date) else get_dynamic_candle_ttl(timeframe)
-                            await cache_set(cache_key, direct_candles, ttl=ttl)
-                            return direct_candles
-        except Exception as e:
-            logger.debug(f"Direct Yahoo Chart candle fallback failed for {original_symbol}: {e}")
+                        formatted_candles.sort(key=lambda x: x["timestamp"])
 
-        return []
+                        if not start_date and not end_date and formatted_candles:
+                            latest_dt = datetime.fromisoformat(formatted_candles[-1]["timestamp"].replace("Z", "+00:00"))
+                            if (dt_end - latest_dt).days > 45:
+                                logger.warning(f"Fyers returned stale historical candles for {fyers_symbol} ending {latest_dt.date()}. Invoking fallback.")
+                                raise ValueError(f"Fyers candles stale for {fyers_symbol}")
+
+                        await _store_candles(formatted_candles)
+                        return formatted_candles
+                    else:
+                        logger.warning(f"Empty candle data returned by Fyers for {fyers_symbol}")
+                        if fyers_symbol.startswith("BSE:"):
+                            return await MarketDataService.fetch_candles(
+                                symbol=original_symbol.replace(".BO", ".NS"),
+                                timeframe=timeframe,
+                                limit=limit,
+                                start_date=start_date,
+                                end_date=end_date,
+                                prefetched_quote=prefetched_quote,
+                            )
+
+            except Exception as e:
+                logger.error(f"Failed to fetch Fyers history for {original_symbol}: {e}")
+
+            # Secondary fallback via Yahoo Finance on isolated scraper executor with strict 8s timeout
+            try:
+                yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
+                clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
+                yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
+                interval = yf_timeframe_map.get(timeframe, "1d")
+
+                if timeframe in ["1d", "1w", "1mo"]:
+                    if limit and limit >= 300:
+                        period = "10y"
+                    elif limit:
+                        period = "2y"
+                    else:
+                        period = "10y"
+                else:
+                    period = "60d"
+
+                fallback_candles = await asyncio.wait_for(
+                    run_in_scraper_executor(
+                        MarketDataService._fetch_yf_candles_sync,
+                        yf_sym,
+                        interval,
+                        period,
+                        original_symbol,
+                    ),
+                    timeout=8.0,
+                )
+                if fallback_candles:
+                    if len(fallback_candles) < 30 and original_symbol.endswith(".BO"):
+                        nse_candles = await MarketDataService.fetch_candles(
+                            f"{clean_sym}.NS", timeframe, limit, start_date, end_date, prefetched_quote=prefetched_quote
+                        )
+                        if len(nse_candles) > len(fallback_candles):
+                            await _store_candles(nse_candles)
+                            return nse_candles
+
+                    await _store_candles(fallback_candles)
+                    return fallback_candles
+                elif original_symbol.endswith(".BO"):
+                    nse_candles = await MarketDataService.fetch_candles(
+                        f"{clean_sym}.NS", timeframe, limit, start_date, end_date, prefetched_quote=prefetched_quote
+                    )
+                    if nse_candles:
+                        await _store_candles(nse_candles)
+                        return nse_candles
+            except Exception as e:
+                logger.debug(f"yfinance candle fetch failed for {original_symbol}: {e}")
+
+            # 3. Tertiary fallback via direct Yahoo Chart API (non-blocking async httpx)
+            try:
+                import httpx
+                yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
+
+                yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
+                interval = yf_timeframe_map.get(timeframe, "1d")
+                chart_range = "1y" if interval == "1d" else ("60d" if "m" in interval or "h" in interval else "5y")
+
+                direct_chart_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval={interval}&range={chart_range}"
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                async with httpx.AsyncClient(headers=headers, timeout=6.0) as client:
+                    resp = await client.get(direct_chart_url)
+                    if resp.status_code == 200:
+                        cdata = resp.json()
+                        res_list = cdata.get("chart", {}).get("result", [])
+                        if res_list:
+                            result0 = res_list[0]
+                            timestamps = result0.get("timestamp", [])
+                            quotes_arr = result0.get("indicators", {}).get("quote", [{}])[0]
+                            opens = quotes_arr.get("open", [])
+                            highs = quotes_arr.get("high", [])
+                            lows = quotes_arr.get("low", [])
+                            closes = quotes_arr.get("close", [])
+                            volumes = quotes_arr.get("volume", [])
+
+                            direct_candles = []
+                            for i in range(len(timestamps)):
+                                try:
+                                    c = closes[i] if i < len(closes) else None
+                                    if c is None or not math.isfinite(c) or c <= 0:
+                                        continue
+                                    o = opens[i] if i < len(opens) and opens[i] is not None and math.isfinite(opens[i]) else c
+                                    h = highs[i] if i < len(highs) and highs[i] is not None and math.isfinite(highs[i]) else c
+                                    l = lows[i] if i < len(lows) and lows[i] is not None and math.isfinite(lows[i]) else c
+                                    v = volumes[i] if i < len(volumes) and volumes[i] is not None and math.isfinite(volumes[i]) else 0
+                                    ts_iso = datetime.fromtimestamp(timestamps[i], tz=timezone.utc).isoformat()
+                                    direct_candles.append({
+                                        "timestamp": ts_iso,
+                                        "open": round(float(o), 2),
+                                        "high": round(float(h), 2),
+                                        "low": round(float(l), 2),
+                                        "close": round(float(c), 2),
+                                        "volume": int(v),
+                                    })
+                                except Exception:
+                                    continue
+
+                            if direct_candles:
+                                direct_candles.sort(key=lambda x: x["timestamp"])
+                                if limit and len(direct_candles) > limit:
+                                    direct_candles = direct_candles[-limit:]
+                                await _store_candles(direct_candles)
+                                return direct_candles
+            except Exception as e:
+                logger.debug(f"Direct Yahoo Chart candle fallback failed for {original_symbol}: {e}")
+
+            return []
+
+        return await cache_manager.single_flight.execute(f"sf:{cache_key}", _fetch_upstream)
 
     @staticmethod
     async def search_stocks(query: str) -> list[dict]:
@@ -1757,138 +1864,244 @@ class MarketDataService:
             return None
 
     @staticmethod
+    def _parse_screener_html_sync(html_text: str) -> dict:
+        """
+        High-speed C-backed Screener.in DOM extractor isolated onto scraper worker threads.
+        Uses lxml.html (libxml2 C parser) to eliminate pure-Python HTML tree GIL contention,
+        with automatic BeautifulSoup fallback if lxml.html is unavailable.
+        """
+        res: dict = {}
+        ratios_map: dict[str, str] = {}
+        bs_data: dict[str, str] = {}
+        pl_data: dict[str, str] = {}
+
+        try:
+            from lxml import html as lxml_html
+
+            doc = lxml_html.fromstring(html_text)
+
+            # 1. Company Name & Profile
+            h1 = doc.find(".//h1")
+            if h1 is not None:
+                h1_txt = (h1.text_content() or "").strip()
+                if h1_txt:
+                    res["name"] = h1_txt
+
+            about_div = doc.find(".//div[@class='about']")
+            if about_div is None:
+                for div_el in doc.iter("div"):
+                    if "about" in (div_el.attrib.get("class") or "").split():
+                        about_div = div_el
+                        break
+            if about_div is not None:
+                about_txt = (about_div.text_content() or "").strip()
+                if about_txt:
+                    res["description"] = about_txt
+
+            peers_sec = doc.get_element_by_id("peers", None)
+            if peers_sec is not None:
+                peer_links = [
+                    (a.text_content() or "").strip()
+                    for a in peers_sec.iter("a")
+                    if "/market/" in (a.attrib.get("href") or "")
+                ]
+                if len(peer_links) >= 1:
+                    res["sector"] = peer_links[0]
+                if len(peer_links) >= 2:
+                    res["industry"] = peer_links[-1]
+
+            # 2. Top Ratios List
+            ratios_ul = doc.get_element_by_id("top-ratios", None)
+            if ratios_ul is not None:
+                for li in ratios_ul.iter("li"):
+                    name_txt = None
+                    val_txt = None
+                    for sp in li.iter("span"):
+                        cls_tokens = (sp.attrib.get("class") or "").split()
+                        if "name" in cls_tokens and name_txt is None:
+                            name_txt = (sp.text_content() or "").strip().lower()
+                        elif "number" in cls_tokens and val_txt is None:
+                            val_txt = (sp.text_content() or "").strip()
+                    if name_txt and val_txt is not None:
+                        ratios_map[name_txt] = val_txt
+
+            # 3. Balance Sheet Table
+            bs_sec = doc.get_element_by_id("balance-sheet", None)
+            if bs_sec is not None:
+                for row in bs_sec.iter("tr"):
+                    cols = [(c.text_content() or "").strip() for c in row if c.tag in ("th", "td")]
+                    if cols and len(cols) > 1:
+                        row_name = cols[0].replace("\xa0+", "").replace("+", "").strip().lower()
+                        bs_data[row_name] = cols[-1]
+
+            # 4. Profit & Loss Table
+            pl_sec = doc.get_element_by_id("profit-loss", None)
+            if pl_sec is not None:
+                for row in pl_sec.iter("tr"):
+                    cols = [(c.text_content() or "").strip() for c in row if c.tag in ("th", "td")]
+                    if cols and len(cols) > 1:
+                        row_name = cols[0].replace("\xa0+", "").replace("+", "").strip().lower()
+                        pl_data[row_name] = cols[-1]
+                        if len(cols) > 2:
+                            pl_data["prev_" + row_name] = cols[-2]
+        except Exception:
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(html_text, "html.parser")
+
+            h1 = soup.find("h1")
+            if h1 and h1.text.strip():
+                res["name"] = h1.text.strip()
+
+            about_div = soup.find("div", class_="about")
+            if about_div and about_div.text.strip():
+                res["description"] = about_div.text.strip()
+
+            peers_sec = soup.find("section", id="peers")
+            if peers_sec:
+                peer_links = [a.text.strip() for a in peers_sec.find_all("a") if "/market/" in a.get("href", "")]
+                if len(peer_links) >= 1:
+                    res["sector"] = peer_links[0]
+                if len(peer_links) >= 2:
+                    res["industry"] = peer_links[-1]
+
+            ratios_ul = soup.find("ul", id="top-ratios")
+            if ratios_ul:
+                for li in ratios_ul.find_all("li"):
+                    name_elem = li.find("span", class_="name")
+                    val_elem = li.find("span", class_="number")
+                    if name_elem and val_elem:
+                        ratios_map[name_elem.text.strip().lower()] = val_elem.text.strip()
+
+            bs_sec = soup.find("section", id="balance-sheet")
+            if bs_sec:
+                for row in bs_sec.find_all("tr"):
+                    cols = [c.text.strip() for c in row.find_all(["th", "td"])]
+                    if cols and len(cols) > 1:
+                        row_name = cols[0].replace("\xa0+", "").replace("+", "").strip().lower()
+                        bs_data[row_name] = cols[-1]
+
+            pl_sec = soup.find("section", id="profit-loss")
+            if pl_sec:
+                for row in pl_sec.find_all("tr"):
+                    cols = [c.text.strip() for c in row.find_all(["th", "td"])]
+                    if cols and len(cols) > 1:
+                        row_name = cols[0].replace("\xa0+", "").replace("+", "").strip().lower()
+                        pl_data[row_name] = cols[-1]
+                        if len(cols) > 2:
+                            pl_data["prev_" + row_name] = cols[-2]
+
+        # Map extracted values
+        mcap_cr = MarketDataService._clean_num(ratios_map.get("market cap"))
+        if mcap_cr is not None:
+            res["market_cap"] = mcap_cr * 10_000_000.0
+
+        pe = MarketDataService._clean_num(ratios_map.get("stock p/e"))
+        if pe is not None:
+            res["pe_ratio"] = pe
+            res["forward_pe"] = pe
+
+        curr_price = MarketDataService._clean_num(ratios_map.get("current price"))
+        bv = MarketDataService._clean_num(ratios_map.get("book value"))
+        if bv is not None:
+            res["book_value"] = bv
+            if curr_price and bv > 0:
+                res["price_to_book"] = round(curr_price / bv, 2)
+
+        roe_val = MarketDataService._clean_num(ratios_map.get("roe"))
+        if roe_val is not None:
+            res["roe"] = round(roe_val / 100.0, 4)
+
+        roce_val = MarketDataService._clean_num(ratios_map.get("roce"))
+        if roce_val is not None:
+            res["roa"] = round(roce_val / 100.0, 4)
+
+        div_yield = MarketDataService._clean_num(ratios_map.get("dividend yield"))
+        if div_yield is not None:
+            res["dividend_yield"] = round(div_yield / 100.0, 4)
+
+        # Debt to Equity: Borrowings / (Equity Capital + Reserves)
+        borrowings = MarketDataService._clean_num(bs_data.get("borrowings"))
+        equity = MarketDataService._clean_num(bs_data.get("equity capital"))
+        reserves = MarketDataService._clean_num(bs_data.get("reserves"))
+        if borrowings is not None and equity is not None and reserves is not None:
+            net_worth = equity + reserves
+            if net_worth > 0:
+                res["debt_to_equity"] = round(borrowings / net_worth, 2)
+            elif borrowings == 0:
+                res["debt_to_equity"] = 0.0
+
+        # Total Revenue & Revenue Growth
+        sales_cr = MarketDataService._clean_num(pl_data.get("sales"))
+        if sales_cr is not None:
+            res["total_revenue"] = sales_cr * 10_000_000.0
+            prev_sales_cr = MarketDataService._clean_num(pl_data.get("prev_sales"))
+            if prev_sales_cr and prev_sales_cr > 0:
+                res["revenue_growth"] = round((sales_cr - prev_sales_cr) / prev_sales_cr, 4)
+
+        op_profit_cr = MarketDataService._clean_num(pl_data.get("operating profit"))
+        if op_profit_cr is not None:
+            res["ebitda"] = op_profit_cr * 10_000_000.0
+
+        # Current Ratio approximation
+        other_liab = MarketDataService._clean_num(bs_data.get("other liabilities"))
+        tot_liab = MarketDataService._clean_num(bs_data.get("total liabilities"))
+        if other_liab and other_liab > 0 and tot_liab:
+            res["current_ratio"] = round(min(5.0, max(0.5, (tot_liab - (borrowings or 0)) / (other_liab * 2.5))), 2)
+
+        return res
+
+    @staticmethod
     async def _fetch_screener_fundamentals(clean_sym: str) -> dict:
         """
         Scrapes authentic corporate fundamental metrics, balance sheet, and P&L ratios from Screener.in.
-        Provides high-precision fundamental data for Indian equities when Yahoo Finance rate-limits requests.
+        Offloads HTML DOM parsing onto scraper_io_executor so Uvicorn's event loop stays 100% responsive.
         """
         import httpx
-        from bs4 import BeautifulSoup
+
+        neg_key = f"screener_neg:{clean_sym}"
+        try:
+            if await cache_get(neg_key):
+                return {}
+        except Exception:
+            pass
 
         url = f"https://www.screener.in/company/{clean_sym}/"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         }
-        res: dict = {}
         try:
-            async with httpx.AsyncClient(headers=headers, timeout=8.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(headers=headers, timeout=6.0, follow_redirects=True) as client:
                 r = await client.get(url)
-                if r.status_code != 200:
-                    return res
+                if r.status_code != 200 or not r.text:
+                    # Back off re-scraping 429/404/5xx targets for 5 minutes
+                    try:
+                        await cache_set(neg_key, {"status": r.status_code}, ttl=300)
+                    except Exception:
+                        pass
+                    return {}
+                html_text = r.text
 
-                soup = BeautifulSoup(r.text, "html.parser")
-
-                # 1. Company Name & Profile
-                h1 = soup.find("h1")
-                if h1 and h1.text.strip():
-                    res["name"] = h1.text.strip()
-
-                about_div = soup.find("div", class_="about")
-                if about_div and about_div.text.strip():
-                    res["description"] = about_div.text.strip()
-
-                peers_sec = soup.find("section", id="peers")
-                if peers_sec:
-                    peer_links = [a.text.strip() for a in peers_sec.find_all("a") if "/market/" in a.get("href", "")]
-                    if len(peer_links) >= 1:
-                        res["sector"] = peer_links[0]
-                    if len(peer_links) >= 2:
-                        res["industry"] = peer_links[-1]
-
-                # 2. Top Ratios List
-                ratios_map = {}
-                ratios_ul = soup.find("ul", id="top-ratios")
-                if ratios_ul:
-                    for li in ratios_ul.find_all("li"):
-                        name_elem = li.find("span", class_="name")
-                        val_elem = li.find("span", class_="number")
-                        if name_elem and val_elem:
-                            ratios_map[name_elem.text.strip().lower()] = val_elem.text.strip()
-
-                # 3. Balance Sheet Table
-                bs_data = {}
-                bs_sec = soup.find("section", id="balance-sheet")
-                if bs_sec:
-                    for row in bs_sec.find_all("tr"):
-                        cols = [c.text.strip() for c in row.find_all(["th", "td"])]
-                        if cols and len(cols) > 1:
-                            row_name = cols[0].replace("\xa0+", "").replace("+", "").strip().lower()
-                            bs_data[row_name] = cols[-1]
-
-                # 4. Profit & Loss Table
-                pl_data = {}
-                pl_sec = soup.find("section", id="profit-loss")
-                if pl_sec:
-                    for row in pl_sec.find_all("tr"):
-                        cols = [c.text.strip() for c in row.find_all(["th", "td"])]
-                        if cols and len(cols) > 1:
-                            row_name = cols[0].replace("\xa0+", "").replace("+", "").strip().lower()
-                            pl_data[row_name] = cols[-1]
-                            if len(cols) > 2:
-                                pl_data["prev_" + row_name] = cols[-2]
-
-                # Map extracted values
-                mcap_cr = MarketDataService._clean_num(ratios_map.get("market cap"))
-                if mcap_cr is not None:
-                    res["market_cap"] = mcap_cr * 10_000_000.0
-
-                pe = MarketDataService._clean_num(ratios_map.get("stock p/e"))
-                if pe is not None:
-                    res["pe_ratio"] = pe
-                    res["forward_pe"] = pe
-
-                curr_price = MarketDataService._clean_num(ratios_map.get("current price"))
-                bv = MarketDataService._clean_num(ratios_map.get("book value"))
-                if bv is not None:
-                    res["book_value"] = bv
-                    if curr_price and bv > 0:
-                        res["price_to_book"] = round(curr_price / bv, 2)
-
-                roe_val = MarketDataService._clean_num(ratios_map.get("roe"))
-                if roe_val is not None:
-                    res["roe"] = round(roe_val / 100.0, 4)
-
-                roce_val = MarketDataService._clean_num(ratios_map.get("roce"))
-                if roce_val is not None:
-                    res["roa"] = round(roce_val / 100.0, 4)
-
-                div_yield = MarketDataService._clean_num(ratios_map.get("dividend yield"))
-                if div_yield is not None:
-                    res["dividend_yield"] = round(div_yield / 100.0, 4)
-
-                # Debt to Equity: Borrowings / (Equity Capital + Reserves)
-                borrowings = MarketDataService._clean_num(bs_data.get("borrowings"))
-                equity = MarketDataService._clean_num(bs_data.get("equity capital"))
-                reserves = MarketDataService._clean_num(bs_data.get("reserves"))
-                if borrowings is not None and equity is not None and reserves is not None:
-                    net_worth = equity + reserves
-                    if net_worth > 0:
-                        res["debt_to_equity"] = round(borrowings / net_worth, 2)
-                    elif borrowings == 0:
-                        res["debt_to_equity"] = 0.0
-
-                # Total Revenue & Revenue Growth
-                sales_cr = MarketDataService._clean_num(pl_data.get("sales"))
-                if sales_cr is not None:
-                    res["total_revenue"] = sales_cr * 10_000_000.0
-                    prev_sales_cr = MarketDataService._clean_num(pl_data.get("prev_sales"))
-                    if prev_sales_cr and prev_sales_cr > 0:
-                        res["revenue_growth"] = round((sales_cr - prev_sales_cr) / prev_sales_cr, 4)
-
-                op_profit_cr = MarketDataService._clean_num(pl_data.get("operating profit"))
-                if op_profit_cr is not None:
-                    res["ebitda"] = op_profit_cr * 10_000_000.0
-
-                # Current Ratio approximation
-                other_liab = MarketDataService._clean_num(bs_data.get("other liabilities"))
-                tot_liab = MarketDataService._clean_num(bs_data.get("total liabilities"))
-                if other_liab and other_liab > 0 and tot_liab:
-                    res["current_ratio"] = round(min(5.0, max(0.5, (tot_liab - (borrowings or 0)) / (other_liab * 2.5))), 2)
-
+            return await asyncio.wait_for(
+                run_in_scraper_executor(MarketDataService._parse_screener_html_sync, html_text),
+                timeout=6.0,
+            )
         except Exception as e:
             logger.debug(f"Screener.in fundamentals extraction failed for {clean_sym}: {e}")
+            try:
+                await cache_set(neg_key, {"status": "error"}, ttl=180)
+            except Exception:
+                pass
+            return {}
 
-        return res
+    @staticmethod
+    def _fetch_yf_info_sync(yf_symbol: str) -> dict:
+        import requests
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        ticker = yf.Ticker(yf_symbol, session=session)
+        info = ticker.info
+        return info if isinstance(info, dict) else {}
 
     @staticmethod
     async def get_stock_info(symbol: str) -> dict:
@@ -1896,10 +2109,10 @@ class MarketDataService:
         yf_symbol = MarketDataService._normalise_yf_symbol(symbol)
         clean_sym = symbol.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-INDEX", "").replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
         
-        # Check cache: only treat as hit if real corporate ratios exist or it's an explicit index
+        # Check cache: return hit if valid ratios, index flag, OR negative cool-down entry exists
         cache_key = f"info:{clean_sym}"
         cached = await cache_get(cache_key)
-        if cached and (cached.get("pe_ratio") is not None or cached.get("roe") is not None or cached.get("is_index")):
+        if cached and (cached.get("pe_ratio") is not None or cached.get("roe") is not None or cached.get("is_index") or cached.get("_neg_cached")):
             return cached
 
         # Check if index
@@ -1931,87 +2144,95 @@ class MarketDataService:
             await cache_set(cache_key, result, ttl=3600 * 24)
             return result
 
-        result = {
-            "symbol": symbol,
-            "name": clean_sym,
-            "sector": "N/A",
-            "industry": "N/A",
-            "market_cap": 0,
-            "is_index": False,
-            "pe_ratio": None,
-            "forward_pe": None,
-            "eps": None,
-            "dividend_yield": None,
-            "description": "Detailed company information is being updated.",
-            "roe": None,
-            "roa": None,
-            "book_value": None,
-            "price_to_book": None,
-            "debt_to_equity": None,
-            "total_revenue": None,
-            "revenue_growth": None,
-            "ebitda": None,
-            "free_cashflow": None,
-            "current_ratio": None,
-        }
+        async def _compute_info() -> dict:
+            c2 = await cache_get(cache_key)
+            if c2 and (c2.get("pe_ratio") is not None or c2.get("roe") is not None or c2.get("_neg_cached")):
+                return c2
 
-        # 1. Primary extractor: Screener.in for authentic Indian corporate balance sheets & valuations
-        screener_data = await MarketDataService._fetch_screener_fundamentals(clean_sym)
-        if screener_data:
-            result.update(screener_data)
+            result = {
+                "symbol": symbol,
+                "name": clean_sym,
+                "sector": "N/A",
+                "industry": "N/A",
+                "market_cap": 0,
+                "is_index": False,
+                "pe_ratio": None,
+                "forward_pe": None,
+                "eps": None,
+                "dividend_yield": None,
+                "description": "Detailed company information is being updated.",
+                "roe": None,
+                "roa": None,
+                "book_value": None,
+                "price_to_book": None,
+                "debt_to_equity": None,
+                "total_revenue": None,
+                "revenue_growth": None,
+                "ebitda": None,
+                "free_cashflow": None,
+                "current_ratio": None,
+            }
 
-        # 2. Secondary fallback / enrichment: Yahoo Finance (if fields still missing)
-        if result.get("pe_ratio") is None or result.get("market_cap") == 0 or result.get("sector") == "N/A":
-            try:
-                import requests
-                session = requests.Session()
-                session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-                ticker = await asyncio.to_thread(yf.Ticker, yf_symbol, session=session)
-                info = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.info), timeout=4.0)
-                if isinstance(info, dict) and info.get("marketCap"):
-                    if not result.get("name") or result["name"] == clean_sym:
-                        result["name"] = info.get("longName", result["name"])
-                    if result.get("sector") in ("N/A", ""):
-                        result["sector"] = info.get("sector", "N/A")
-                    if result.get("industry") in ("N/A", ""):
-                        result["industry"] = info.get("industry", "N/A")
-                    if not result.get("market_cap"):
-                        result["market_cap"] = info.get("marketCap", 0)
-                    if result.get("pe_ratio") is None:
-                        result["pe_ratio"] = info.get("trailingPE")
-                    if result.get("forward_pe") is None:
-                        result["forward_pe"] = info.get("forwardPE")
-                    if result.get("eps") is None:
-                        result["eps"] = info.get("trailingEps")
-                    if result.get("dividend_yield") is None:
-                        result["dividend_yield"] = info.get("dividendYield")
-                    if result.get("description") == "Detailed company information is being updated.":
-                        result["description"] = info.get("longBusinessSummary", result["description"])
-                    if result.get("roe") is None:
-                        result["roe"] = info.get("returnOnEquity")
-                    if result.get("roa") is None:
-                        result["roa"] = info.get("returnOnAssets")
-                    if result.get("book_value") is None:
-                        result["book_value"] = info.get("bookValue")
-                    if result.get("price_to_book") is None:
-                        result["price_to_book"] = info.get("priceToBook")
-                    if result.get("debt_to_equity") is None:
-                        result["debt_to_equity"] = info.get("debtToEquity")
-                    if result.get("total_revenue") is None:
-                        result["total_revenue"] = info.get("totalRevenue")
-                    if result.get("revenue_growth") is None:
-                        result["revenue_growth"] = info.get("revenueGrowth")
-                    if result.get("ebitda") is None:
-                        result["ebitda"] = info.get("ebitda")
-                    if result.get("current_ratio") is None:
-                        result["current_ratio"] = info.get("currentRatio")
-            except Exception as e:
-                logger.debug(f"Yahoo Finance ticker.info omitted for {symbol}: {e}")
+            # 1. Primary extractor: Screener.in for authentic Indian corporate balance sheets & valuations
+            screener_data = await MarketDataService._fetch_screener_fundamentals(clean_sym)
+            if screener_data:
+                result.update(screener_data)
 
-        # Cache valid corporate data for 12 hours (balance sheets do not change intraday)
-        ttl = 3600 * 12 if (result.get("pe_ratio") is not None or result.get("roe") is not None) else 300
-        await cache_set(cache_key, result, ttl=ttl)
-        return result
+            # 2. Secondary fallback / enrichment: Yahoo Finance (if fields still missing)
+            if result.get("pe_ratio") is None or result.get("market_cap") == 0 or result.get("sector") == "N/A":
+                try:
+                    info = await asyncio.wait_for(
+                        run_in_scraper_executor(MarketDataService._fetch_yf_info_sync, yf_symbol),
+                        timeout=4.5,
+                    )
+                    if isinstance(info, dict) and info.get("marketCap"):
+                        if not result.get("name") or result["name"] == clean_sym:
+                            result["name"] = info.get("longName", result["name"])
+                        if result.get("sector") in ("N/A", ""):
+                            result["sector"] = info.get("sector", "N/A")
+                        if result.get("industry") in ("N/A", ""):
+                            result["industry"] = info.get("industry", "N/A")
+                        if not result.get("market_cap"):
+                            result["market_cap"] = info.get("marketCap", 0)
+                        if result.get("pe_ratio") is None:
+                            result["pe_ratio"] = info.get("trailingPE")
+                        if result.get("forward_pe") is None:
+                            result["forward_pe"] = info.get("forwardPE")
+                        if result.get("eps") is None:
+                            result["eps"] = info.get("trailingEps")
+                        if result.get("dividend_yield") is None:
+                            result["dividend_yield"] = info.get("dividendYield")
+                        if result.get("description") == "Detailed company information is being updated.":
+                            result["description"] = info.get("longBusinessSummary", result["description"])
+                        if result.get("roe") is None:
+                            result["roe"] = info.get("returnOnEquity")
+                        if result.get("roa") is None:
+                            result["roa"] = info.get("returnOnAssets")
+                        if result.get("book_value") is None:
+                            result["book_value"] = info.get("bookValue")
+                        if result.get("price_to_book") is None:
+                            result["price_to_book"] = info.get("priceToBook")
+                        if result.get("debt_to_equity") is None:
+                            result["debt_to_equity"] = info.get("debtToEquity")
+                        if result.get("total_revenue") is None:
+                            result["total_revenue"] = info.get("totalRevenue")
+                        if result.get("revenue_growth") is None:
+                            result["revenue_growth"] = info.get("revenueGrowth")
+                        if result.get("ebitda") is None:
+                            result["ebitda"] = info.get("ebitda")
+                        if result.get("current_ratio") is None:
+                            result["current_ratio"] = info.get("currentRatio")
+                except Exception as e:
+                    logger.debug(f"Yahoo Finance ticker.info omitted for {symbol}: {e}")
+
+            has_ratios = result.get("pe_ratio") is not None or result.get("roe") is not None
+            if not has_ratios:
+                result["_neg_cached"] = True
+            ttl = 3600 * 12 if has_ratios else 300
+            await cache_set(cache_key, result, ttl=ttl)
+            return result
+
+        return await cache_manager.single_flight.execute(f"sf:{cache_key}", _compute_info)
 
 
     @staticmethod
@@ -2020,32 +2241,83 @@ class MarketDataService:
         yf_symbol = MarketDataService._normalise_yf_symbol(symbol)
         cache_key = f"news:{yf_symbol}"
         cached = await cache_get(cache_key)
-        if cached:
+        if cached is not None:
             return cached
 
+        async def _compute_news() -> list[dict]:
+            try:
+                import requests
+
+                def _news_sync():
+                    session = requests.Session()
+                    session.headers.update({"User-Agent": "Mozilla/5.0"})
+                    ticker = yf.Ticker(yf_symbol, session=session)
+                    return ticker.news or []
+
+                news_items = await asyncio.wait_for(
+                    run_in_scraper_executor(_news_sync),
+                    timeout=8.0,
+                )
+
+                articles = []
+                for item in news_items[:10]:
+                    articles.append({
+                        "title": item.get("title", ""),
+                        "publisher": item.get("publisher", ""),
+                        "link": item.get("link", ""),
+                        "providerPublishTime": item.get("providerPublishTime", 0),
+                        "type": item.get("type", "STORY"),
+                    })
+
+                await cache_set(cache_key, articles, ttl=3600 if articles else 300)
+                return articles
+            except Exception as e:
+                logger.debug(f"Failed to fetch news for {symbol}: {e}")
+                return []
+
+        return await cache_manager.single_flight.execute(f"sf:{cache_key}", _compute_news)
+
+    @staticmethod
+    def _fetch_yf_events_sync(yf_symbol: str) -> dict:
+        import requests
+        import pandas as pd
+
+        events = {"earnings_date": None, "dividends": []}
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0"})
+        ticker = yf.Ticker(yf_symbol, session=session)
+
         try:
-            import requests
-            session = requests.Session()
-            session.headers.update({"User-Agent": "Mozilla/5.0"})
-            ticker = await asyncio.to_thread(yf.Ticker, yf_symbol, session=session)
-            news_items = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.news), timeout=15.0)
-            
-            articles = []
-            for item in news_items[:10]:
-                articles.append({
-                    "title": item.get("title", ""),
-                    "publisher": item.get("publisher", ""),
-                    "link": item.get("link", ""),
-                    "providerPublishTime": item.get("providerPublishTime", 0),
-                    "type": item.get("type", "STORY")
-                })
-                
-            await cache_set(cache_key, articles, ttl=3600)  # 1 hour cache
-            return articles
-        except Exception as e:
-            logger.error(f"Failed to fetch news for {symbol}: {e}.")
-            return []
-            
+            cal = ticker.calendar
+            if isinstance(cal, dict) and "Earnings Date" in cal:
+                dates = cal["Earnings Date"]
+                if len(dates) > 0:
+                    events["earnings_date"] = str(dates[0])
+            elif hasattr(cal, "empty") and not cal.empty:
+                events["earnings_date"] = str(cal.iloc[0, 0])
+        except Exception:
+            pass
+
+        try:
+            divs = ticker.dividends
+            if divs is not None and not divs.empty:
+                two_years_ago = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=730)
+                if divs.index.tz is None:
+                    two_years_ago = two_years_ago.tz_localize(None)
+                else:
+                    two_years_ago = two_years_ago.tz_convert(divs.index.tz)
+
+                recent_divs = divs[divs.index > two_years_ago]
+                for date, amount in recent_divs.items():
+                    events["dividends"].append({
+                        "date": date.isoformat() if hasattr(date, "isoformat") else str(date),
+                        "amount": float(amount),
+                    })
+        except Exception:
+            pass
+
+        return events
+
     @staticmethod
     async def fetch_corporate_events(symbol: str) -> dict:
         """Fetch corporate events: upcoming earnings date and recent dividends/splits."""
@@ -2055,53 +2327,28 @@ class MarketDataService:
         if cached:
             return cached
 
-        events = {"earnings_date": None, "dividends": []}
-        try:
-            import requests
-            session = requests.Session()
-            session.headers.update({"User-Agent": "Mozilla/5.0"})
-            ticker = await asyncio.to_thread(yf.Ticker, yf_symbol, session=session)
-            
-            # Fetch Calendar for Earnings Date
-            try:
-                cal = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.calendar), timeout=5.0)
-                if isinstance(cal, dict) and "Earnings Date" in cal:
-                    dates = cal["Earnings Date"]
-                    if len(dates) > 0:
-                        events["earnings_date"] = str(dates[0])
-                elif hasattr(cal, "empty") and not cal.empty:
-                    # Older yfinance returns DataFrame
-                    events["earnings_date"] = str(cal.iloc[0, 0])
-            except Exception as e:
-                logger.debug(f"Failed to fetch calendar for {symbol}: {e}")
+        async def _compute_events() -> dict:
+            c2 = await cache_get(cache_key)
+            if c2:
+                return c2
 
-            # Fetch Dividends
+            events = {"earnings_date": None, "dividends": []}
             try:
-                divs = await asyncio.wait_for(asyncio.to_thread(lambda: ticker.dividends), timeout=5.0)
-                if not divs.empty:
-                    # Get last 2 years of dividends
-                    import pandas as pd
-                    two_years_ago = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=730)
-                    
-                    if divs.index.tz is None:
-                        two_years_ago = two_years_ago.tz_localize(None)
-                    else:
-                        two_years_ago = two_years_ago.tz_convert(divs.index.tz)
-                        
-                    recent_divs = divs[divs.index > two_years_ago]
-                    for date, amount in recent_divs.items():
-                        events["dividends"].append({
-                            "date": date.isoformat() if hasattr(date, 'isoformat') else str(date),
-                            "amount": float(amount)
-                        })
+                events = await asyncio.wait_for(
+                    run_in_scraper_executor(MarketDataService._fetch_yf_events_sync, yf_symbol),
+                    timeout=6.0,
+                )
+                await cache_set(cache_key, events, ttl=86400)
+                return events
             except Exception as e:
-                logger.debug(f"Failed to fetch dividends for {symbol}: {e}")
-                
-            await cache_set(cache_key, events, ttl=86400) # cache for 24h
-            return events
-        except Exception as e:
-            logger.error(f"Failed to fetch events for {symbol}: {e}")
-            return events
+                logger.debug(f"Failed to fetch events for {symbol}: {e}")
+                try:
+                    await cache_set(cache_key, events, ttl=300)
+                except Exception:
+                    pass
+                return events
+
+        return await cache_manager.single_flight.execute(f"sf:{cache_key}", _compute_events)
 
 
 market_data_service = MarketDataService()

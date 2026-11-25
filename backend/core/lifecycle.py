@@ -12,6 +12,7 @@ import asyncio
 from typing import List
 from backend.core.database import engine, create_db_tables
 from backend.core.cache import get_redis
+from backend.core.executors import configure_ml_runtime, shutdown_executors
 from backend.core.logging_config import setup_logging, get_logger
 
 logger = get_logger(__name__)
@@ -31,6 +32,7 @@ class LifecycleManager:
         """Coordinated enterprise startup sequence."""
         logger.info("[Lifecycle] Starting enterprise services...")
         setup_logging()
+        configure_ml_runtime()
         await create_db_tables()
         logger.info("[Lifecycle] Core database tables verified.")
 
@@ -71,6 +73,9 @@ class LifecycleManager:
             logger.info("[Lifecycle] Database connection pool disposed cleanly.")
         except Exception as e:
             logger.error(f"[Lifecycle] Error disposing database pool: {e}")
+
+        # 4. Shut down isolated background threadpools
+        shutdown_executors()
 
         logger.info("[Lifecycle] Graceful shutdown sequence completed successfully.")
 

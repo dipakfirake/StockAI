@@ -7,11 +7,16 @@ and generates strict institutional-grade trade setups with defined risk/reward.
 from __future__ import annotations
 
 import asyncio
+import time as time_mod
+import uuid
 from datetime import datetime, timezone
+from typing import Callable, Optional
 import numpy as np
 
 from backend.core.logging_config import get_logger
 from backend.core.cache import cache_get, cache_set
+from backend.core.cache_manager import cache_manager
+from backend.core.executors import run_in_ml_executor
 from backend.core.market_hours import get_dynamic_screener_ttl
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service, candles_to_df
@@ -73,139 +78,324 @@ NIFTY_UNIVERSE = SECTOR_UNIVERSES["NIFTY_50"]
 
 
 class ScreenerService:
+    _scan_jobs: dict[str, dict] = {}
+    _active_sector_jobs: dict[str, str] = {}
+    _scan_bg_tasks: set[asyncio.Task] = set()
+
+    @staticmethod
+    def _compute_symbol_scoring_sync(
+        candles: list[dict],
+        symbol: str,
+        prefetched_nifty_indicators: Optional[dict] = None,
+        nifty_candles: Optional[list[dict]] = None,
+    ) -> tuple[dict, list[dict], dict]:
+        """
+        Runs technical indicator calculation, relative strength enrichment,
+        signal evaluation, and PyTorch/LightGBM ensemble scoring in a single
+        bounded ML executor dispatch — preventing event-loop freezing.
+        """
+        indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
+        if indicators:
+            try:
+                nifty_ind = prefetched_nifty_indicators
+                if not nifty_ind and nifty_candles and len(nifty_candles) >= 20:
+                    nifty_ind = indicator_service.compute_all(nifty_candles)
+                if nifty_ind and len(nifty_ind) > 0 and "price_return_20d" in nifty_ind:
+                    indicators["rs_momentum_20d"] = (
+                        indicators.get("price_return_20d", 0.0) - nifty_ind.get("price_return_20d", 0.0)
+                    )
+            except Exception as ex:
+                logger.warning(f"Failed to compute RS momentum for {symbol}: {ex}")
+
+        signals = signal_engine.evaluate(indicators, symbol)
+        ai_res = ai_engine_service.score(
+            indicators if indicators else {},
+            symbol=symbol,
+            compute_shap=False,
+            candles=candles if isinstance(candles, list) else None,
+        )
+        return indicators, signals, ai_res
+
+    @staticmethod
+    async def start_scan_job(sector: str = None, force_refresh: bool = True) -> dict:
+        """
+        Non-blocking async scan launcher: returns immediately with an active job_id
+        (coalescing duplicate clicks on the same sector) and Last-Known-Good snapshot
+        so the browser never waits >60s behind Nginx.
+        """
+        norm_sector = sector.upper().replace(" ", "_") if sector else "DEFAULT"
+        symbols = SECTOR_UNIVERSES.get(norm_sector, NIFTY_UNIVERSE)
+
+        # Fast-path: if fresh cache already exists and caller did not ask to force refresh, return immediately
+        if not force_refresh:
+            try:
+                fresh = await cache_get(f"screener_results_{norm_sector}")
+                if isinstance(fresh, dict) and "buy_stocks" in fresh:
+                    return {
+                        "job_id": f"cached_{norm_sector}",
+                        "sector": norm_sector,
+                        "status": "completed",
+                        "progress": 100,
+                        "completed": len(symbols),
+                        "total": len(symbols),
+                        "result": fresh,
+                        "error": None,
+                    }
+            except Exception:
+                pass
+
+        # Reuse active running job for this sector if one is already in progress
+        existing_job_id = ScreenerService._active_sector_jobs.get(norm_sector)
+        if existing_job_id and existing_job_id in ScreenerService._scan_jobs:
+            job = ScreenerService._scan_jobs[existing_job_id]
+            if job.get("status") == "running":
+                return dict(job)
+
+        # Grab quick LKG or fresh cache so UI can render without blank wait
+        quick_data = None
+        try:
+            quick_data = await cache_get(f"screener_results_{norm_sector}")
+            if not (isinstance(quick_data, dict) and "buy_stocks" in quick_data):
+                quick_data = await cache_get(f"screener_lkg_{norm_sector}")
+        except Exception:
+            quick_data = None
+
+        job_id = f"scan_{norm_sector}_{uuid.uuid4().hex[:10]}"
+        job_state = {
+            "job_id": job_id,
+            "sector": norm_sector,
+            "status": "running",
+            "progress": 5,
+            "completed": 0,
+            "total": len(symbols),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "cached_data": quick_data if isinstance(quick_data, dict) and "buy_stocks" in quick_data else None,
+            "result": None,
+            "error": None,
+        }
+        ScreenerService._scan_jobs[job_id] = job_state
+        ScreenerService._active_sector_jobs[norm_sector] = job_id
+
+        # Keep bounded in-memory job history
+        if len(ScreenerService._scan_jobs) > 50:
+            oldest = list(ScreenerService._scan_jobs.keys())[:-25]
+            for old_id in oldest:
+                if ScreenerService._scan_jobs.get(old_id, {}).get("status") != "running":
+                    ScreenerService._scan_jobs.pop(old_id, None)
+
+        async def _run_job() -> None:
+            def _on_progress(completed: int, total: int) -> None:
+                pct = min(98, max(5, int((completed / max(1, total)) * 95) + 3))
+                job_state["completed"] = completed
+                job_state["total"] = total
+                job_state["progress"] = pct
+
+            try:
+                res = await ScreenerService.run_screener(
+                    symbols=symbols,
+                    sector=norm_sector,
+                    force_refresh=force_refresh,
+                    progress_cb=_on_progress,
+                )
+                job_state["status"] = "completed"
+                job_state["progress"] = 100
+                job_state["completed"] = len(symbols)
+                job_state["result"] = res
+                job_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+            except Exception as exc:
+                logger.error(f"Background scan job {job_id} failed: {exc}")
+                job_state["status"] = "failed"
+                job_state["error"] = str(exc)
+            finally:
+                if ScreenerService._active_sector_jobs.get(norm_sector) == job_id:
+                    ScreenerService._active_sector_jobs.pop(norm_sector, None)
+                try:
+                    # Persist final job summary cleanly (without huge cached_data duplication)
+                    persisted = {k: v for k, v in job_state.items() if k != "cached_data"}
+                    await cache_set(f"screener_job:{job_id}", persisted, ttl=600)
+                except Exception:
+                    pass
+
+        task = asyncio.create_task(_run_job())
+        ScreenerService._scan_bg_tasks.add(task)
+        task.add_done_callback(ScreenerService._scan_bg_tasks.discard)
+        return dict(job_state)
+
+    @staticmethod
+    async def get_scan_job_status(job_id: str) -> Optional[dict]:
+        """Return status of an async screener scan job."""
+        job = ScreenerService._scan_jobs.get(job_id)
+        if job:
+            # Omit redundant cached_data once completed to keep poll payloads light
+            return {k: v for k, v in job.items() if not (k == "cached_data" and job.get("status") == "completed")}
+        try:
+            cached = await cache_get(f"screener_job:{job_id}")
+            if isinstance(cached, dict):
+                return cached
+        except Exception:
+            pass
+        return None
+
     @staticmethod
     async def run_screener(
         symbols: list[str] = None,
         sector: str = None,
-        force_refresh: bool = False
+        force_refresh: bool = False,
+        pace_seconds: float = 0.08,
+        progress_cb: Optional[Callable[[int, int], None]] = None,
     ) -> dict:
         """
         Run the multi-factor screener on a list of symbols or sector universe.
-        Returns categorized lists of BUY, SELL, and HOLD setups with summary stats.
+        Uses Single-Flight coalescing (even on force_refresh=True), bounded semaphore
+        pacing, and ML-executor isolation so upstream rate limits & event loop never choke.
         """
         norm_sector = sector.upper().replace(" ", "_") if sector else "DEFAULT"
         if not symbols:
             symbols = SECTOR_UNIVERSES.get(norm_sector, NIFTY_UNIVERSE)
 
         cache_key = f"screener_results_{norm_sector}"
+        lkg_key = f"screener_lkg_{norm_sector}"
         if not force_refresh:
             cached = await cache_get(cache_key)
             if cached and isinstance(cached, dict) and "buy_stocks" in cached:
                 logger.info(f"Returning cached screener results for {norm_sector}")
+                if progress_cb:
+                    progress_cb(len(symbols), len(symbols))
                 return cached
 
-        logger.info(f"Starting Swing Trade Screener for {len(symbols)} symbols ({norm_sector})...")
-        
-        # 1. Pre-fetch real-time quotes in bulk (50x efficiency gain: 1 single Fyers API call instead of N separate calls)
-        quotes_map = {}
-        try:
-            quotes_map = await market_data_service.fetch_quotes_bulk(symbols)
-        except Exception as e:
-            logger.debug(f"Failed to prefetch bulk quotes for {norm_sector}: {e}")
+        sf_key = f"sf:screener:run:{norm_sector}:{len(symbols)}:{bool(force_refresh)}"
 
-        # 2. Pre-fetch benchmark Nifty 50 indicators ONCE (eliminates N duplicate candle queries)
-        nifty_indicators = {}
-        try:
-            nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
-            if nifty_candles and len(nifty_candles) >= 20:
-                nifty_indicators = indicator_service.compute_all(nifty_candles)
-        except Exception as e:
-            logger.debug(f"Failed to prefetch Nifty indicators: {e}")
+        async def _execute_scan() -> dict:
+            if not force_refresh:
+                cached_inner = await cache_get(cache_key)
+                if cached_inner and isinstance(cached_inner, dict) and "buy_stocks" in cached_inner:
+                    return cached_inner
 
-        # 3. Process in batches with rate-limit guards
-        batch_size = 6
-        all_results = []
-        
-        for i in range(0, len(symbols), batch_size):
-            batch = symbols[i:i + batch_size]
-            tasks = [
-                ScreenerService._analyze_symbol(
-                    sym,
-                    force_refresh=force_refresh,
-                    prefetched_quote=quotes_map.get(sym),
-                    prefetched_nifty_indicators=nifty_indicators
-                )
-                for sym in batch
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+            logger.info(f"Starting Swing Trade Screener for {len(symbols)} symbols ({norm_sector})...")
+
+            # 1. Pre-fetch real-time quotes in bulk (1 single Fyers API call instead of N separate calls)
+            quotes_map = {}
+            try:
+                quotes_map = await market_data_service.fetch_quotes_bulk(symbols)
+            except Exception as e:
+                logger.debug(f"Failed to prefetch bulk quotes for {norm_sector}: {e}")
+
+            # 2. Pre-fetch benchmark Nifty 50 indicators ONCE on bounded ML executor
+            nifty_indicators = {}
+            try:
+                nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
+                if nifty_candles and len(nifty_candles) >= 20:
+                    nifty_indicators = await run_in_ml_executor(indicator_service.compute_all, nifty_candles)
+            except Exception as e:
+                logger.debug(f"Failed to prefetch Nifty indicators: {e}")
+
+            # 3. Paced bounded concurrency (max 4 upstream workers in flight)
+            sem = asyncio.Semaphore(4)
+            completed_count = 0
+
+            async def _run_one(idx: int, sym: str):
+                nonlocal completed_count
+                async with sem:
+                    if idx > 0 and pace_seconds > 0:
+                        # Gentle stagger keeps Fyers/Yahoo/Screener within safe burst envelope
+                        await asyncio.sleep(min(0.35, pace_seconds))
+                    try:
+                        return await ScreenerService._analyze_symbol(
+                            sym,
+                            force_refresh=force_refresh,
+                            prefetched_quote=quotes_map.get(sym),
+                            prefetched_nifty_indicators=nifty_indicators,
+                        )
+                    finally:
+                        completed_count += 1
+                        if progress_cb:
+                            try:
+                                progress_cb(completed_count, len(symbols))
+                            except Exception:
+                                pass
+
+            results = await asyncio.gather(
+                *[_run_one(i, sym) for i, sym in enumerate(symbols)],
+                return_exceptions=True,
+            )
+
+            all_results = []
             for res in results:
                 if isinstance(res, dict) and res.get("total_score", 0) > 0 and not res.get("error"):
                     all_results.append(res)
-                    
-            if i + batch_size < len(symbols):
-                await asyncio.sleep(0.15)
 
-        # Categorize into explicit trading lists
-        buy_stocks = [r for r in all_results if r.get("action") == "BUY"]
-        buy_stocks.sort(key=lambda x: x.get("total_score", 0), reverse=True)
+            # Categorize into explicit trading lists
+            buy_stocks = [r for r in all_results if r.get("action") == "BUY"]
+            buy_stocks.sort(key=lambda x: x.get("total_score", 0), reverse=True)
 
-        sell_stocks = [r for r in all_results if r.get("action") == "SELL"]
-        sell_stocks.sort(key=lambda x: x.get("total_score", 0))  # lowest score / strongest sell first
+            sell_stocks = [r for r in all_results if r.get("action") == "SELL"]
+            sell_stocks.sort(key=lambda x: x.get("total_score", 0))
 
-        hold_stocks = [r for r in all_results if r.get("action") == "HOLD"]
-        hold_stocks.sort(key=lambda x: x.get("total_score", 0), reverse=True)
+            hold_stocks = [r for r in all_results if r.get("action") == "HOLD"]
+            hold_stocks.sort(key=lambda x: x.get("total_score", 0), reverse=True)
 
-        # Sort all results by score descending
-        all_results.sort(key=lambda x: x.get("total_score", 0), reverse=True)
-        top_setups = [r for r in all_results if r.get("total_score", 0) >= 65]
+            all_results.sort(key=lambda x: x.get("total_score", 0), reverse=True)
+            top_setups = [r for r in all_results if r.get("total_score", 0) >= 65]
 
-        # Calculate institutional summary metrics
-        buy_gains = [r["trade_plan"]["expected_gain_pct"] for r in buy_stocks if r.get("trade_plan") and r["trade_plan"].get("expected_gain_pct")]
-        buy_rrs = [r["trade_plan"]["reward_to_risk"] for r in buy_stocks if r.get("trade_plan") and r["trade_plan"].get("reward_to_risk")]
-        sell_drops = [r["trade_plan"]["expected_gain_pct"] for r in sell_stocks if r.get("trade_plan") and r["trade_plan"].get("expected_gain_pct")]
+            buy_gains = [r["trade_plan"]["expected_gain_pct"] for r in buy_stocks if r.get("trade_plan") and r["trade_plan"].get("expected_gain_pct")]
+            buy_rrs = [r["trade_plan"]["reward_to_risk"] for r in buy_stocks if r.get("trade_plan") and r["trade_plan"].get("reward_to_risk")]
+            sell_drops = [r["trade_plan"]["expected_gain_pct"] for r in sell_stocks if r.get("trade_plan") and r["trade_plan"].get("expected_gain_pct")]
 
-        summary = {
-            "total_scanned": len(symbols),
-            "valid_results": len(all_results),
-            "buy_count": len(buy_stocks),
-            "sell_count": len(sell_stocks),
-            "hold_count": len(hold_stocks),
-            "avg_buy_gain_pct": round(float(np.mean(buy_gains)), 2) if buy_gains else 0.0,
-            "avg_buy_rr": round(float(np.mean(buy_rrs)), 2) if buy_rrs else 0.0,
-            "avg_sell_drop_pct": round(float(np.mean(sell_drops)), 2) if sell_drops else 0.0,
-            "market_breadth": "BULLISH" if len(buy_stocks) > len(sell_stocks) else ("BEARISH" if len(sell_stocks) > len(buy_stocks) else "NEUTRAL"),
-            "top_buy_pick": buy_stocks[0]["symbol"] if buy_stocks else None,
-            "top_sell_pick": sell_stocks[0]["symbol"] if sell_stocks else None,
-        }
+            summary = {
+                "total_scanned": len(symbols),
+                "valid_results": len(all_results),
+                "buy_count": len(buy_stocks),
+                "sell_count": len(sell_stocks),
+                "hold_count": len(hold_stocks),
+                "avg_buy_gain_pct": round(float(np.mean(buy_gains)), 2) if buy_gains else 0.0,
+                "avg_buy_rr": round(float(np.mean(buy_rrs)), 2) if buy_rrs else 0.0,
+                "avg_sell_drop_pct": round(float(np.mean(sell_drops)), 2) if sell_drops else 0.0,
+                "market_breadth": "BULLISH" if len(buy_stocks) > len(sell_stocks) else ("BEARISH" if len(sell_stocks) > len(buy_stocks) else "NEUTRAL"),
+                "top_buy_pick": buy_stocks[0]["symbol"] if buy_stocks else None,
+                "top_sell_pick": sell_stocks[0]["symbol"] if sell_stocks else None,
+            }
 
-        output = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "sector": norm_sector,
-            "total_scanned": len(symbols),
-            "stocks_scanned": len(symbols),
-            "setups_found": len(top_setups),
-            "summary": summary,
-            "buy_stocks": buy_stocks,
-            "sell_stocks": sell_stocks,
-            "hold_stocks": hold_stocks,
-            "top_setups": top_setups,
-            "all_results": all_results
-        }
+            output = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "sector": norm_sector,
+                "total_scanned": len(symbols),
+                "stocks_scanned": len(symbols),
+                "setups_found": len(top_setups),
+                "summary": summary,
+                "buy_stocks": buy_stocks,
+                "sell_stocks": sell_stocks,
+                "hold_stocks": hold_stocks,
+                "top_setups": top_setups,
+                "all_results": all_results,
+            }
 
-        # Automatically catalog elite high-conviction BUY setups (Score >= 78) into active 11-day audit ledger & Excel
-        # Only triggers during manual force refresh or automated EOD tasks, capped to top 3 per sector
-        if buy_stocks and force_refresh:
-            elite_buys = [s for s in buy_stocks if float(s.get("total_score", 0.0) or 0.0) >= 78.0]
-            elite_buys.sort(key=lambda s: float(s.get("total_score", 0.0) or 0.0), reverse=True)
-            capped_elite_buys = elite_buys[:3]
-            if capped_elite_buys:
-                async def _auto_catalog_screener_buys(stocks_to_catalog):
-                    try:
-                        from backend.services.swing_audit_service import SwingAuditService
-                        from backend.core.database import AsyncSessionLocal
-                        async with AsyncSessionLocal() as audit_db:
-                            await SwingAuditService.track_batch_swing_trades(
-                                db=audit_db,
-                                stocks=stocks_to_catalog
-                            )
-                    except Exception as ex:
-                        logger.warning(f"Failed to auto-catalog screener buys into audit: {ex}")
-                asyncio.create_task(_auto_catalog_screener_buys(list(capped_elite_buys)))
+            if buy_stocks and force_refresh:
+                elite_buys = [s for s in buy_stocks if float(s.get("total_score", 0.0) or 0.0) >= 78.0]
+                elite_buys.sort(key=lambda s: float(s.get("total_score", 0.0) or 0.0), reverse=True)
+                capped_elite_buys = elite_buys[:3]
+                if capped_elite_buys:
+                    async def _auto_catalog_screener_buys(stocks_to_catalog):
+                        try:
+                            from backend.services.swing_audit_service import SwingAuditService
+                            from backend.core.database import AsyncSessionLocal
+                            async with AsyncSessionLocal() as audit_db:
+                                await SwingAuditService.track_batch_swing_trades(
+                                    db=audit_db,
+                                    stocks=stocks_to_catalog,
+                                )
+                        except Exception as ex:
+                            logger.warning(f"Failed to auto-catalog screener buys into audit: {ex}")
+                    asyncio.create_task(_auto_catalog_screener_buys(list(capped_elite_buys)))
 
-        # Dynamic market-hours cache (60s open, 1 hour closed)
-        await cache_set(cache_key, output, ttl=get_dynamic_screener_ttl())
-        return output
+            await cache_set(cache_key, output, ttl=get_dynamic_screener_ttl())
+            if all_results:
+                try:
+                    await cache_set(lkg_key, output, ttl=14400)  # 4h Last-Known-Good fallback snapshot
+                except Exception:
+                    pass
+            return output
+
+        return await cache_manager.single_flight.execute(sf_key, _execute_scan)
 
     @staticmethod
     def get_all_sector_symbols() -> list[str]:
@@ -226,12 +416,12 @@ class ScreenerService:
     @staticmethod
     async def run_all_sectors_screener(
         force_refresh: bool = False,
-        min_score: float = 70.0
+        min_score: float = 70.0,
+        pace_seconds: float = 0.15,
     ) -> dict:
         """
-        Runs multi-factor screening across ALL 10 screener sectors in paced batches of 5 symbols
-        with inter-batch pauses to strictly protect Fyers API budget (< 4 req/sec).
-        Returns aggregated buy candidates and top setups.
+        Runs multi-factor screening across ALL 10 screener sectors with Single-Flight coalescing
+        and bounded pacing (max 4 concurrent workers) to strictly protect Fyers API budget.
         """
         cache_key = "screener_all_sectors_aggregated"
         if not force_refresh:
@@ -240,60 +430,69 @@ class ScreenerService:
                 logger.info("Returning cached multi-sector screener results")
                 return cached
 
-        all_symbols = ScreenerService.get_all_sector_symbols()
-        logger.info(f"Starting Multi-Sector Swing Screener for all {len(all_symbols)} unique symbols across {len(SECTOR_UNIVERSES)} sectors...")
+        async def _run_all() -> dict:
+            if not force_refresh:
+                cached_inner = await cache_get(cache_key)
+                if cached_inner and isinstance(cached_inner, dict) and "buy_stocks" in cached_inner:
+                    return cached_inner
 
-        # 1. Pre-fetch real-time quotes in bulk for all unique symbols across sectors
-        quotes_map = {}
-        try:
-            quotes_map = await market_data_service.fetch_quotes_bulk(all_symbols)
-        except Exception as e:
-            logger.debug(f"Failed to prefetch all-sectors bulk quotes: {e}")
+            all_symbols = ScreenerService.get_all_sector_symbols()
+            logger.info(f"Starting Multi-Sector Swing Screener for all {len(all_symbols)} unique symbols across {len(SECTOR_UNIVERSES)} sectors...")
 
-        # 2. Pre-fetch benchmark Nifty 50 indicators ONCE
-        nifty_indicators = {}
-        try:
-            nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
-            if nifty_candles and len(nifty_candles) >= 20:
-                nifty_indicators = indicator_service.compute_all(nifty_candles)
-        except Exception as e:
-            logger.debug(f"Failed to prefetch Nifty indicators: {e}")
+            quotes_map = {}
+            try:
+                quotes_map = await market_data_service.fetch_quotes_bulk(all_symbols)
+            except Exception as e:
+                logger.debug(f"Failed to prefetch all-sectors bulk quotes: {e}")
 
-        batch_size = 6
-        all_results = []
-        for i in range(0, len(all_symbols), batch_size):
-            batch = all_symbols[i:i + batch_size]
-            tasks = [
-                ScreenerService._analyze_symbol(
-                    sym,
-                    force_refresh=force_refresh,
-                    prefetched_quote=quotes_map.get(sym),
-                    prefetched_nifty_indicators=nifty_indicators
-                )
-                for sym in batch
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            nifty_indicators = {}
+            try:
+                nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
+                if nifty_candles and len(nifty_candles) >= 20:
+                    nifty_indicators = await run_in_ml_executor(indicator_service.compute_all, nifty_candles)
+            except Exception as e:
+                logger.debug(f"Failed to prefetch Nifty indicators: {e}")
 
+            sem = asyncio.Semaphore(4)
+
+            async def _scan_sym(idx: int, sym: str):
+                async with sem:
+                    if idx > 0 and pace_seconds > 0:
+                        await asyncio.sleep(min(0.4, pace_seconds))
+                    return await ScreenerService._analyze_symbol(
+                        sym,
+                        force_refresh=force_refresh,
+                        prefetched_quote=quotes_map.get(sym),
+                        prefetched_nifty_indicators=nifty_indicators,
+                    )
+
+            results = await asyncio.gather(
+                *[_scan_sym(i, s) for i, s in enumerate(all_symbols)],
+                return_exceptions=True,
+            )
+
+            all_results = []
             for res in results:
                 if isinstance(res, dict) and res.get("total_score", 0) > 0 and not res.get("error"):
                     all_results.append(res)
 
-            if i + batch_size < len(all_symbols):
-                # Pacing delay between batches to respect rate limits
-                await asyncio.sleep(0.15)
+            buy_stocks = [r for r in all_results if r.get("action") == "BUY" and float(r.get("total_score", 0) or 0) >= min_score]
+            buy_stocks.sort(key=lambda x: float(x.get("total_score", 0) or 0), reverse=True)
 
-        buy_stocks = [r for r in all_results if r.get("action") == "BUY" and float(r.get("total_score", 0) or 0) >= min_score]
-        buy_stocks.sort(key=lambda x: float(x.get("total_score", 0) or 0), reverse=True)
+            out = {
+                "total_scanned": len(all_symbols),
+                "sectors_scanned": list(SECTOR_UNIVERSES.keys()),
+                "buy_stocks": buy_stocks,
+                "all_results": all_results,
+                "setups_found": len(buy_stocks),
+            }
+            await cache_set(cache_key, out, ttl=300)
+            return out
 
-        out = {
-            "total_scanned": len(all_symbols),
-            "sectors_scanned": list(SECTOR_UNIVERSES.keys()),
-            "buy_stocks": buy_stocks,
-            "all_results": all_results,
-            "setups_found": len(buy_stocks)
-        }
-        await cache_set(cache_key, out, ttl=300)
-        return out
+        return await cache_manager.single_flight.execute(
+            f"sf:screener:all_sectors:{min_score}:{bool(force_refresh)}",
+            _run_all,
+        )
 
     @staticmethod
     async def _analyze_symbol(
@@ -350,39 +549,26 @@ class ScreenerService:
             if quote:
                 candles = market_data_service.synchronize_candle_tip(candles, quote)
 
-            indicators = indicator_service.compute_all(candles) if len(candles) >= 30 else {}
-            
-            # 2.5 Market Relative Strength (Accuracy Upgrade)
-            if indicators:
+            nifty_candles = None
+            if not prefetched_nifty_indicators:
                 try:
-                    nifty_ind = prefetched_nifty_indicators
-                    if not nifty_ind:
-                        nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
-                        if nifty_candles and len(nifty_candles) >= 20:
-                            nifty_ind = indicator_service.compute_all(nifty_candles)
-                    if nifty_ind and len(nifty_ind) > 0 and 'price_return_20d' in nifty_ind:
-                        nifty_return_20d = nifty_ind.get("price_return_20d", 0.0)
-                        stock_return_20d = indicators.get("price_return_20d", 0.0)
-                        indicators["rs_momentum_20d"] = stock_return_20d - nifty_return_20d
+                    nifty_candles = await market_data_service.fetch_candles("^NSEI", "1d", limit=50)
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(f"Failed to fetch Nifty for RS: {e}")
-            
-            signals = signal_engine.evaluate(indicators, symbol)
+                    logger.warning(f"Failed to fetch Nifty for RS: {e}")
+
+            # 2.5 & 3: Offload indicator crunching, signal evaluation & Tri-Model AI scoring
+            # onto bounded ML executor (keeping asyncio event loop 100% responsive)
+            indicators, signals, ai_res = await run_in_ml_executor(
+                ScreenerService._compute_symbol_scoring_sync,
+                candles,
+                symbol,
+                prefetched_nifty_indicators,
+                nifty_candles,
+            )
             sig = signals[0] if signals else {}
-            
+
             # Extract the raw 0-100 technical score from the new signal engine
             tech_raw = sig.get("composite_rating", 50)
-            
-            # 3. AI ML Score (Tri-Model Ensemble: LightGBM + BiLSTM + Transformer)
-            # Offload heavy neural network and tree inference to a background thread to prevent event-loop freezing
-            ai_res = await asyncio.to_thread(
-                ai_engine_service.score,
-                indicators if indicators else {},
-                symbol=symbol,
-                compute_shap=False,
-                candles=candles if isinstance(candles, list) else None,
-            )
             
             # 4. Comprehensive Fundamental & Valuation Analysis (35% Weight)
             # Evaluates all key valuation, profitability, solvency, and balance sheet ratios

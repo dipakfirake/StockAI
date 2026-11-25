@@ -7,8 +7,11 @@ from backend.services.fyers_stream import FyersStreamService
 
 @pytest.fixture
 def stream_service():
+    from backend.services.fyers_stream import _MEMORY_QUOTES
+    _MEMORY_QUOTES.clear()
     service = FyersStreamService()
-    return service
+    yield service
+    _MEMORY_QUOTES.clear()
 
 
 def test_fyers_stream_singleton():

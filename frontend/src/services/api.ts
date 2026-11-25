@@ -18,8 +18,10 @@ api.interceptors.request.use((config) => {
 // Interface for retry tracking
 interface RetryConfig {
   __retryCount?: number;
+  skipRetry?: boolean;
   method?: string;
   url?: string;
+  params?: any;
   headers?: any;
 }
 
@@ -41,9 +43,19 @@ api.interceptors.response.use(
       return Promise.reject(err)
     }
 
-    // Silently retry GET requests up to 3 times with exponential backoff during server restarts or transient network dropouts
+    // Never auto-retry heavy market scan or force-refresh endpoints — multiplying 60s scans causes cascading 504 storms
+    const urlStr = String(config?.url || '')
+    const isHeavyOrForced =
+      Boolean(config?.skipRetry) ||
+      Boolean(config?.params?.force_refresh) ||
+      urlStr.includes('/market/screener') ||
+      urlStr.includes('/market/bulk-screener') ||
+      urlStr.includes('/alerts/screener-proximity-radar') ||
+      urlStr.includes('/swing-audit/recalculate')
+
+    // Silently retry lightweight GET requests up to 3 times during brief server restarts
     const isRetryableMethod = !config?.method || ['get', 'head', 'options'].includes(config.method.toLowerCase())
-    const canRetry = config && isRetryableMethod && (isNetworkError || isServerRestart) && (config.__retryCount || 0) < 3
+    const canRetry = !isHeavyOrForced && config && isRetryableMethod && (isNetworkError || isServerRestart) && (config.__retryCount || 0) < 3
 
     if (canRetry) {
       config.__retryCount = (config.__retryCount || 0) + 1
@@ -247,7 +259,21 @@ export const marketApi = {
   getHeatmap: () => api.get('/market/heatmap'),
   getOptions: (symbol: string) => api.get(`/market/options/${encodeSymbol(symbol)}`),
   getScreener: (sector?: string, forceRefresh = false) =>
-    api.get('/market/screener', { params: { ...(sector && { sector }), force_refresh: forceRefresh } }),
+    api.get('/market/screener', {
+      params: { ...(sector && { sector }), force_refresh: forceRefresh },
+      timeout: 90000,
+      skipRetry: true,
+    } as any),
+  startScreenerScan: (sector?: string, forceRefresh = true) =>
+    api.post('/market/screener/scan', null, {
+      params: { ...(sector && { sector }), force_refresh: forceRefresh },
+      timeout: 15000,
+    }),
+  getScreenerScanStatus: (jobId: string) =>
+    api.get(`/market/screener/scan/${encodeURIComponent(jobId)}`, {
+      timeout: 15000,
+      skipRetry: true,
+    } as any),
   getBulkScreener: () => api.get('/market/bulk-screener'),
 }
 
