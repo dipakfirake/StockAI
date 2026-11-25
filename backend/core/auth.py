@@ -1,5 +1,7 @@
 """JWT authentication utilities."""
 
+import time as _time_mod
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -17,6 +19,24 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 security_basic_optional = HTTPBasic(auto_error=False)
+
+
+@dataclass(frozen=True)
+class CachedAuthUser:
+    """Lightweight immutable user identity returned by non-blocking JWT cache."""
+    id: object
+    email: str
+    name: str
+    is_active: bool
+    is_admin: bool
+    subscription_tier: str
+    pro_status: Optional[str] = None
+
+
+# Short in-memory auth cache (30s TTL) to eliminate per-request Neon DB round-trips
+# on high-frequency read/poll endpoints and /health/live checks.
+_AUTH_USER_CACHE: dict[str, tuple[CachedAuthUser, float]] = {}
+_AUTH_CACHE_TTL_SECONDS = 30.0
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -73,6 +93,85 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exception
     return user
+
+
+async def get_current_user_fast(
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+):
+    """
+    Non-blocking JWT auth dependency with 30s in-memory user cache.
+    Honors FastAPI test dependency overrides on get_current_user cleanly and
+    avoids holding a remote Neon Postgres session across read/poll requests.
+    """
+    override = request.app.dependency_overrides.get(get_current_user)
+    if override is not None:
+        if callable(override):
+            import inspect
+            res = override()
+            return await res if inspect.isawaitable(res) else res
+        return override
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if not token:
+        raise credentials_exception
+
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: Optional[str] = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    cache_key = str(user_id)
+    now = _time_mod.monotonic()
+    cached_entry = _AUTH_USER_CACHE.get(cache_key)
+    if cached_entry and cached_entry[1] > now:
+        cached_u = cached_entry[0]
+        if not cached_u.is_active:
+            raise credentials_exception
+        return cached_u
+
+    from backend.core.database import AsyncSessionLocal
+    from backend.models.user import User
+    from sqlalchemy import select
+    import uuid as _uuid
+
+    is_valid_uuid = False
+    try:
+        _uuid.UUID(cache_key)
+        is_valid_uuid = True
+    except (ValueError, TypeError):
+        is_valid_uuid = False
+
+    async with AsyncSessionLocal() as db:
+        if is_valid_uuid:
+            result = await db.execute(select(User).where(User.id == cache_key))
+        else:
+            result = await db.execute(select(User).where(User.email == cache_key))
+        user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise credentials_exception
+
+    cached_user = CachedAuthUser(
+        id=user.id,
+        email=user.email,
+        name=user.name or "",
+        is_active=bool(user.is_active),
+        is_admin=bool(user.is_admin),
+        subscription_tier=user.subscription_tier or "FREE",
+        pro_status=getattr(user, "pro_status", None),
+    )
+    _AUTH_USER_CACHE[cache_key] = (cached_user, _time_mod.monotonic() + _AUTH_CACHE_TTL_SECONDS)
+    if len(_AUTH_USER_CACHE) > 2000:
+        _AUTH_USER_CACHE.clear()
+    return cached_user
 
 
 async def get_current_user_optional(
@@ -212,7 +311,34 @@ async def verify_admin_or_local(
             headers={"WWW-Authenticate": 'Basic realm="StockAI Administrative API"'},
         )
 
+    # Fast in-memory admin JWT check avoids Neon DB latency on /health/live polls
+    if jwt_candidate:
+        try:
+            payload = jwt.decode(jwt_candidate, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            uid = str(payload.get("sub") or "")
+            if uid:
+                cached = _AUTH_USER_CACHE.get(uid)
+                if cached and cached[1] > _time_mod.monotonic():
+                    if cached[0].is_active and cached[0].is_admin:
+                        return cached[0]
+        except JWTError:
+            pass
+
     # External access: require Admin credentials with isolated session
     from backend.core.database import AsyncSessionLocal
     async with AsyncSessionLocal() as session:
-        return await verify_admin_docs_access(request, credentials, token, session)
+        admin_user = await verify_admin_docs_access(request, credentials, token, session)
+        if admin_user is not None:
+            _AUTH_USER_CACHE[str(admin_user.id)] = (
+                CachedAuthUser(
+                    id=admin_user.id,
+                    email=admin_user.email,
+                    name=admin_user.name or "",
+                    is_active=bool(admin_user.is_active),
+                    is_admin=bool(admin_user.is_admin),
+                    subscription_tier=admin_user.subscription_tier or "FREE",
+                    pro_status=getattr(admin_user, "pro_status", None),
+                ),
+                _time_mod.monotonic() + _AUTH_CACHE_TTL_SECONDS,
+            )
+        return admin_user

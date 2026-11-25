@@ -19,7 +19,7 @@ if is_celery:
 else:
     engine_kwargs["pool_size"] = settings.DATABASE_POOL_SIZE
     engine_kwargs["max_overflow"] = settings.DATABASE_MAX_OVERFLOW
-    engine_kwargs["pool_timeout"] = 10.0
+    engine_kwargs["pool_timeout"] = 8.0
 
 import urllib.parse
 
@@ -46,6 +46,11 @@ def get_async_db_url(url: str) -> str:
     return url
 
 db_url = get_async_db_url(settings.DATABASE_URL)
+if "sqlite" not in db_url.lower():
+    engine_kwargs["connect_args"] = {
+        "timeout": 5.0,
+        "command_timeout": 8.0,
+    }
 engine = create_async_engine(
     db_url,
     **engine_kwargs

@@ -223,15 +223,14 @@ class ScreenerService:
 
     @staticmethod
     async def get_scan_job_status(job_id: str) -> Optional[dict]:
-        """Return status of an async screener scan job."""
+        """Return lightweight status of an async screener scan job without re-sending cached_data."""
         job = ScreenerService._scan_jobs.get(job_id)
         if job:
-            # Omit redundant cached_data once completed to keep poll payloads light
-            return {k: v for k, v in job.items() if not (k == "cached_data" and job.get("status") == "completed")}
+            return {k: v for k, v in job.items() if k != "cached_data"}
         try:
             cached = await cache_get(f"screener_job:{job_id}")
             if isinstance(cached, dict):
-                return cached
+                return {k: v for k, v in cached.items() if k != "cached_data"}
         except Exception:
             pass
         return None

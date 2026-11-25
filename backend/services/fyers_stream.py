@@ -221,6 +221,7 @@ class FyersStreamService:
         self.__lifecycle_lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self._client_id: Optional[str] = None
         self._access_token: Optional[str] = None
+        self._invalid_symbols: Set[str] = set()
 
         # Pre-seed default core indices and high-activity equity symbols
         self._default_indices = [
@@ -327,34 +328,36 @@ class FyersStreamService:
         client_id = settings.FYERS_CLIENT_ID
         access_token = settings.FYERS_ACCESS_TOKEN
 
+        # Priority 1: Check Redis cache ('fyers_creds') first to avoid Neon DB latency on boot
         try:
-            from backend.core.database import AsyncSessionLocal
-            from backend.models.settings import SystemSettings
-            from sqlalchemy import select
+            cached_creds = await asyncio.wait_for(cache_get("fyers_creds"), timeout=0.8)
+            if cached_creds:
+                if not client_id and cached_creds.get("client_id"):
+                    client_id = cached_creds["client_id"]
+                if not access_token and cached_creds.get("access_token"):
+                    access_token = cached_creds["access_token"]
+        except Exception:
+            pass
 
-            db = AsyncSessionLocal()
-            try:
-                fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
-                fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
-                if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
-                    client_id = fyers_client_obj.value.strip()
-                if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10:
-                    access_token = fyers_token_obj.value.strip()
-            finally:
-                await asyncio.shield(db.close())
-        except Exception as e:
-            logger.debug(f"Database settings query skipped: {e}")
-
+        # Priority 2: Fallback to PostgreSQL SystemSettings if Redis missed
         if not access_token or not client_id:
             try:
-                cached_creds = await cache_get("fyers_creds")
-                if cached_creds:
-                    if not client_id and cached_creds.get("client_id"):
-                        client_id = cached_creds["client_id"]
-                    if not access_token and cached_creds.get("access_token"):
-                        access_token = cached_creds["access_token"]
-            except Exception:
-                pass
+                from backend.core.database import AsyncSessionLocal
+                from backend.models.settings import SystemSettings
+                from sqlalchemy import select
+
+                db = AsyncSessionLocal()
+                try:
+                    fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
+                    fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
+                    if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
+                        client_id = fyers_client_obj.value.strip()
+                    if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10:
+                        access_token = fyers_token_obj.value.strip()
+                finally:
+                    await asyncio.shield(db.close())
+            except Exception as e:
+                logger.debug(f"Database settings query skipped: {e}")
 
         # Check environment dynamic cache
         if hasattr(MarketDataService, "_env_cache") and MarketDataService._env_cache:
@@ -391,8 +394,9 @@ class FyersStreamService:
             )
             # Offload socket connect to worker thread guarded by strict 3.0s timeout
             if hasattr(self._socket, "connect"):
+                from backend.core.executors import run_in_fast_executor
                 await asyncio.wait_for(
-                    asyncio.to_thread(self._socket.connect),
+                    run_in_fast_executor(self._socket.connect),
                     timeout=3.0
                 )
             self._is_running = True
@@ -442,14 +446,56 @@ class FyersStreamService:
         except Exception as e:
             logger.error(f"Error subscribing symbols on Fyers open: {e}")
 
+    def _handle_invalid_symbol_message(self, message: Any) -> bool:
+        """
+        Handle Fyers -300 invalid-symbol subscription errors cleanly without expiring
+        the valid broker token. Prunes rejected symbols (e.g. delisted/renamed tickers
+        like NSE:TATAMOTORS-EQ) from future WebSocket/REST bulk batches.
+        """
+        is_symbol_err = False
+        bad_syms: list[str] = []
+        if isinstance(message, dict):
+            code = message.get("code")
+            msg_low = str(message.get("message", "")).lower()
+            if isinstance(message.get("invalid_symbols"), list):
+                bad_syms = [str(s).strip() for s in message["invalid_symbols"] if s]
+            if code == -300 and (bad_syms or "valid symbol" in msg_low or message.get("type") == "sub"):
+                is_symbol_err = True
+            elif bad_syms or "provide a valid symbol" in msg_low:
+                is_symbol_err = True
+        else:
+            msg_low = str(message).lower()
+            if "invalid_symbols" in msg_low or "provide a valid symbol" in msg_low:
+                is_symbol_err = True
+
+        if not is_symbol_err:
+            return False
+
+        for bad in bad_syms:
+            self._invalid_symbols.add(bad)
+            self._subscribed_symbols.discard(bad)
+        if bad_syms:
+            try:
+                from backend.services.market_data import MarketDataService
+                for bad in bad_syms:
+                    MarketDataService._invalid_fyers_symbols.add(bad)
+            except Exception:
+                pass
+        logger.warning(
+            f"Fyers WebSocket rejected invalid symbol(s) {bad_syms or message} — pruned from stream; keeping active Fyers token valid."
+        )
+        return True
+
     def _on_close(self, message: Any) -> None:
         """Callback when Fyers WebSocket closes."""
         self._is_connected = False
         logger.warning(f"Fyers Data Socket closed: {message}")
+        if self._handle_invalid_symbol_message(message):
+            return
         try:
             from backend.services.market_data import MarketDataService
             msg_str = str(message).lower()
-            if "token" in msg_str or "auth" in msg_str or "expire" in msg_str or "invalid" in msg_str:
+            if "token" in msg_str or "auth" in msg_str or "expire" in msg_str or "unauthorized" in msg_str:
                 MarketDataService.mark_fyers_token_expired(f"WebSocket closed: {message}")
         except Exception:
             pass
@@ -457,10 +503,12 @@ class FyersStreamService:
     def _on_error(self, message: Any) -> None:
         """Callback when Fyers WebSocket encounters an error."""
         logger.warning(f"Fyers Data Socket error: {message}")
+        if self._handle_invalid_symbol_message(message):
+            return
         try:
             from backend.services.market_data import MarketDataService
             msg_str = str(message).lower()
-            if "token" in msg_str or "auth" in msg_str or "expire" in msg_str or "invalid" in msg_str:
+            if "token" in msg_str or "auth" in msg_str or "expire" in msg_str or "unauthorized" in msg_str:
                 MarketDataService.mark_fyers_token_expired(f"WebSocket error: {message}")
         except Exception:
             pass
@@ -645,14 +693,17 @@ class FyersStreamService:
     async def _subscribe_chunks(self, symbols: List[str]) -> None:
         """
         Chunks symbols into batches of 20 and executes self._socket.subscribe()
-        inside asyncio.to_thread guarded by 3.0s timeout. Paces chunks to prevent
-        exceeding broker burst limits.
+        inside fast_control_executor guarded by 3.0s timeout. Filters out invalid
+        Fyers tickers (e.g. -300 rejected symbols) cleanly.
         """
+        symbols = [s for s in symbols if s and s not in self._invalid_symbols]
         if not symbols or not self._socket or not self.is_connected:
             return
 
         # Pre-resolve and warm HSM tokens in Redis & memory
         await self._resolve_and_cache_hsm_tokens(symbols)
+
+        from backend.core.executors import run_in_fast_executor
 
         # Batch into chunks of 20 as per interface contract
         chunk_size = 20
@@ -667,7 +718,7 @@ class FyersStreamService:
             try:
                 if hasattr(self._socket, "subscribe"):
                     await asyncio.wait_for(
-                        asyncio.to_thread(self._socket.subscribe, symbols=chunk, data_type="SymbolUpdate"),
+                        run_in_fast_executor(self._socket.subscribe, symbols=chunk, data_type="SymbolUpdate"),
                         timeout=3.0
                     )
             except asyncio.TimeoutError:
@@ -693,6 +744,8 @@ class FyersStreamService:
                 if not s:
                     continue
                 f_sym = MarketDataService._normalise_symbol(s)
+                if f_sym in self._invalid_symbols or f_sym in MarketDataService._invalid_fyers_symbols:
+                    continue
                 yf_sym = MarketDataService._normalise_yf_symbol(f_sym)
                 self._symbol_map[f_sym] = yf_sym
 

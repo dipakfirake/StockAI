@@ -267,11 +267,11 @@ export const marketApi = {
   startScreenerScan: (sector?: string, forceRefresh = true) =>
     api.post('/market/screener/scan', null, {
       params: { ...(sector && { sector }), force_refresh: forceRefresh },
-      timeout: 15000,
+      timeout: 30000,
     }),
   getScreenerScanStatus: (jobId: string) =>
     api.get(`/market/screener/scan/${encodeURIComponent(jobId)}`, {
-      timeout: 15000,
+      timeout: 20000,
       skipRetry: true,
     } as any),
   getBulkScreener: () => api.get('/market/bulk-screener'),

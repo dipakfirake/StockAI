@@ -340,3 +340,145 @@ async def test_settings_expired_token_reason_no_attribute_error():
         res = await get_fyers_status(force_refresh=False, db=mock_db, current_user=mock_user)
         assert res["token_status"] == "EXPIRED"
         assert "Unit test daily 06:00 AM expiry" in res["message"]
+
+
+@pytest.mark.asyncio
+async def test_fyers_websocket_invalid_symbol_minus300_does_not_expire_token():
+    """
+    Fyers WebSocket -300 'Please provide a valid symbol' errors (e.g. NSE:TATAMOTORS-EQ)
+    must quarantine the bad symbol and NEVER mark the valid Fyers token as expired.
+    """
+    from backend.services.fyers_stream import FyersStreamService
+
+    MarketDataService.reset_fyers_health()
+    stream = FyersStreamService()
+    try:
+        err_payload = {
+            "code": -300,
+            "message": "Please provide a valid symbol",
+            "s": "error",
+            "type": "sub",
+            "invalid_symbols": ["NSE:TATAMOTORS-EQ"],
+        }
+        stream._on_error(err_payload)
+
+        assert MarketDataService._fyers_token_valid is True
+        assert "NSE:TATAMOTORS-EQ" in stream._invalid_symbols
+        assert "NSE:TATAMOTORS-EQ" in MarketDataService._invalid_fyers_symbols
+    finally:
+        stream._invalid_symbols.clear()
+        MarketDataService.reset_fyers_health()
+
+
+@pytest.mark.asyncio
+async def test_bulk_quotes_quarantines_invalid_symbol_and_retries_valid_symbols():
+    """
+    When Fyers bulk quotes returns -300 invalid_symbols for one symbol in a chunk,
+    it must quarantine that symbol, keep token health intact, and retry valid symbols.
+    """
+    MarketDataService.reset_fyers_health()
+    mock_fyers = MagicMock()
+    calls = []
+
+    def mock_quotes(data):
+        syms = data.get("symbols", "")
+        calls.append(syms)
+        if "NSE:TATAMOTORS-EQ" in syms:
+            return {
+                "code": -300,
+                "message": "Please provide a valid symbol",
+                "s": "error",
+                "invalid_symbols": ["NSE:TATAMOTORS-EQ"],
+            }
+        return {
+            "s": "ok",
+            "d": [
+                {
+                    "n": "NSE:RELIANCE-EQ",
+                    "v": {
+                        "lp": 1350.0,
+                        "ch": 12.0,
+                        "chp": 0.9,
+                        "volume": 500000,
+                        "prev_close_price": 1338.0,
+                        "open_price": 1340.0,
+                        "high_price": 1355.0,
+                        "low_price": 1335.0,
+                    },
+                }
+            ],
+        }
+
+    mock_fyers.quotes.side_effect = mock_quotes
+
+    try:
+        with patch.object(MarketDataService, "check_credentials_changed", new_callable=AsyncMock), \
+             patch.object(MarketDataService, "check_and_record_fyers_rate_budget", new_callable=AsyncMock, return_value=True), \
+             patch.object(MarketDataService, "_get_fyers_client", new_callable=AsyncMock, return_value=mock_fyers), \
+             patch("backend.services.market_data.cache_get", new_callable=AsyncMock, return_value=None), \
+             patch("backend.services.market_data.cache_set", new_callable=AsyncMock):
+            quotes = await MarketDataService.fetch_quotes_bulk(["TATAMOTORS.NS", "RELIANCE.NS"], use_fallback=False)
+
+        assert MarketDataService._fyers_token_valid is True
+        assert "NSE:TATAMOTORS-EQ" in MarketDataService._invalid_fyers_symbols
+        assert len(calls) == 2
+        assert "NSE:TATAMOTORS-EQ" not in calls[1]
+        assert quotes["RELIANCE.NS"]["price"] == 1350.0
+    finally:
+        MarketDataService.reset_fyers_health()
+
+
+@pytest.mark.asyncio
+async def test_get_scan_job_status_omits_cached_data_and_fast_auth_skips_db_on_hit():
+    """
+    1. ScreenerService.get_scan_job_status must strip large cached_data payloads on poll calls.
+    2. get_current_user_fast must resolve cached JWT users without opening a Neon Postgres session.
+    """
+    from fastapi import Depends, FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from backend.core.auth import CachedAuthUser, _AUTH_USER_CACHE, create_access_token, get_current_user_fast
+    from backend.services.screener import ScreenerService
+
+    job_id = "job_lightweight_test_1"
+    ScreenerService._scan_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "running",
+        "progress": 2,
+        "total": 25,
+        "percent": 8,
+        "cached_data": {"buy_stocks": [{"symbol": "BIG.NS"}] * 50},
+    }
+    try:
+        status = await ScreenerService.get_scan_job_status(job_id)
+        assert status is not None
+        assert status["status"] == "running"
+        assert "cached_data" not in status
+    finally:
+        ScreenerService._scan_jobs.pop(job_id, None)
+
+    uid = "fast-cache-user-test"
+    token = create_access_token({"sub": uid})
+    cached_u = CachedAuthUser(
+        id=uid,
+        email="fast@example.com",
+        name="Fast User",
+        is_active=True,
+        is_admin=True,
+        subscription_tier="PRO",
+    )
+    _AUTH_USER_CACHE[uid] = (cached_u, time.monotonic() + 30.0)
+
+    mini_app = FastAPI()
+
+    @mini_app.get("/fast-check")
+    async def fast_check(user=Depends(get_current_user_fast)):
+        return {"email": user.email, "is_admin": user.is_admin}
+
+    try:
+        with patch("backend.core.database.AsyncSessionLocal", side_effect=AssertionError("DB must not be opened on fast auth cache hit")):
+            async with AsyncClient(transport=ASGITransport(app=mini_app), base_url="http://test") as client:
+                resp = await client.get("/fast-check", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+        assert resp.json()["email"] == "fast@example.com"
+    finally:
+        _AUTH_USER_CACHE.pop(uid, None)

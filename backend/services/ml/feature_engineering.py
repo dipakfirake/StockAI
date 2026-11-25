@@ -306,6 +306,29 @@ def build_sequences(
     )
 
 
+def build_latest_sequence(
+    df: pd.DataFrame,
+    features: list[str] | None = None,
+    window: int = SEQUENCE_LENGTH,
+) -> np.ndarray | None:
+    """
+    Fast O(1) slice extracting only the single latest (window, n_features) tensor
+    for real-time inference without iterating all historical sequence windows.
+    """
+    if features is None:
+        features = FEATURE_NAMES
+
+    valid_cols = [f for f in features if f in df.columns]
+    df_clean = df[valid_cols].dropna(subset=valid_cols)
+    if len(df_clean) < window:
+        return None
+
+    feat_arr = df_clean[valid_cols].iloc[-window:].values.astype(np.float32)
+    feat_arr = np.clip(feat_arr, -10.0, 10.0)
+    feat_arr = np.nan_to_num(feat_arr, nan=0.0, posinf=10.0, neginf=-10.0)
+    return feat_arr
+
+
 def build_tabular_features(
     df: pd.DataFrame,
     features: list[str] | None = None,

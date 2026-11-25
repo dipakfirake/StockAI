@@ -26,7 +26,7 @@ from backend.services.ml.lstm_model import lstm_predictor
 from backend.services.ml.transformer_model import transformer_predictor
 from backend.services.ml.feature_engineering import (
     FEATURE_NAMES, N_FEATURES, SEQUENCE_LENGTH,
-    engineer_features, compute_target_3class, build_sequences
+    engineer_features, compute_target_3class, build_sequences, build_latest_sequence
 )
 
 logger = get_logger(__name__)
@@ -401,13 +401,9 @@ class AIEngineService:
                 df = df.set_index("Date")
 
             df_feat = engineer_features(df)
-            df_feat = compute_target_3class(df_feat)
-            X_seq, _, _ = build_sequences(df_feat)
-
-            if len(X_seq) == 0:
+            last_seq = build_latest_sequence(df_feat)
+            if last_seq is None:
                 return None, None
-
-            last_seq = X_seq[-1]  # (60, 30)
 
             if lstm_predictor.is_ready():
                 lstm_probs = lstm_predictor.predict_proba(last_seq)

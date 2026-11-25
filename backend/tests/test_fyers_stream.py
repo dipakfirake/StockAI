@@ -265,6 +265,7 @@ async def test_restart_deduplication_in_market_data():
     """Verify that concurrent stream restart calls in check_credentials_changed are debounced."""
     MarketDataService._last_loaded_token = "OLD_TOKEN"
     MarketDataService._last_restart_dispatch_time = 0.0
+    MarketDataService._last_token_check_time = 0.0
 
     restart_calls = []
 

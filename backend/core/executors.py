@@ -33,14 +33,14 @@ fast_control_executor = ThreadPoolExecutor(
 # 2. External Scraper / Network I/O Executor: isolates blocking yfinance, RSS,
 #    and HTML parser calls so runaway external sockets cannot starve auth or health.
 scraper_io_executor = ThreadPoolExecutor(
-    max_workers=6,
+    max_workers=4 if _cpu_count <= 2 else 6,
     thread_name_prefix="scraper-io",
 )
 
-# 3. ML & Technical Compute Executor: bounds concurrent PyTorch/LightGBM work to
-#    avoid OpenMP/GIL thrashing on 1-2 vCPU hosts while keeping event loop responsive.
+# 3. ML & Technical Compute Executor: serialize heavy PyTorch/LightGBM work on 1-2 vCPU
+#    hosts (max_workers=1) to prevent parallel threads fighting over 1 CPU core + Python GIL.
 ml_compute_executor = ThreadPoolExecutor(
-    max_workers=2 if _cpu_count <= 2 else 4,
+    max_workers=1 if _cpu_count <= 2 else 3,
     thread_name_prefix="ml-cpu",
 )
 

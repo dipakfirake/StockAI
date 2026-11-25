@@ -306,6 +306,7 @@ class MarketDataService:
     _rate_budget_lock: Optional[asyncio.Lock] = None
     _rate_budget_lock_loop: Optional[asyncio.AbstractEventLoop] = None
     _mem_fyers_creds: Optional[tuple[str, str, float]] = None
+    _invalid_fyers_symbols: set[str] = set()
 
     @classmethod
     def _get_rate_budget_lock(cls) -> asyncio.Lock:
@@ -550,6 +551,7 @@ class MarketDataService:
         cls._circuit_state = "CLOSED"
         cls._canary_in_progress = False
         cls._mem_fyers_creds = None
+        cls._invalid_fyers_symbols.clear()
         if engage_warmup:
             cls.engage_warmup_governor(60.0)
         else:
@@ -581,7 +583,7 @@ class MarketDataService:
             norm_sym = cls._normalise_symbol(probe_symbol)
             from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_USER_ACTION
             response = await fyers_rate_governor.execute(
-                lambda: asyncio.to_thread(fyers.quotes, {"symbols": norm_sym}),
+                lambda: run_in_fast_executor(fyers.quotes, {"symbols": norm_sym}),
                 priority=PRIORITY_USER_ACTION,
                 coalescing_key=f"canary:{norm_sym}"
             )
@@ -618,40 +620,50 @@ class MarketDataService:
         from dotenv import dotenv_values
 
         now = time.time()
-        if now - cls._last_token_check_time < 2.0:
+        if now - cls._last_token_check_time < 15.0:
             return False
         cls._last_token_check_time = now
 
         discovered_token = None
         discovered_client_id = None
 
-        # 1. Check PostgreSQL SystemSettings (with timeout)
+        # 1. Check Redis cache ('fyers_creds') first to avoid Neon DB churn every call
         try:
-            from backend.core.database import AsyncSessionLocal
-            from backend.models.settings import SystemSettings
-            from sqlalchemy import select
-
-            async def _check_db():
-                db = AsyncSessionLocal()
-                try:
-                    fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
-                    fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
-                    cid = fyers_client_obj.value.strip() if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3 else None
-                    tok = fyers_token_obj.value.strip() if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10 else None
-                    return cid, tok
-                finally:
-                    await asyncio.shield(db.close())
-
-            db_cid, db_tok = await asyncio.wait_for(_check_db(), timeout=0.5)
-            if db_cid:
-                discovered_client_id = db_cid
-            if db_tok:
-                discovered_token = db_tok
+            from backend.core.cache import cache_get
+            cached = await asyncio.wait_for(cache_get("fyers_creds"), timeout=0.5)
+            if cached:
+                if cached.get("access_token"):
+                    discovered_token = str(cached["access_token"]).strip()
+                if cached.get("client_id"):
+                    discovered_client_id = str(cached["client_id"]).strip()
         except Exception:
             pass
 
-        # 2. Check Redis cache ('fyers_creds') (with timeout)
+        # 2. Check PostgreSQL SystemSettings only if Redis had no token
         if not discovered_token:
+            try:
+                from backend.core.database import AsyncSessionLocal
+                from backend.models.settings import SystemSettings
+                from sqlalchemy import select
+
+                async def _check_db():
+                    db = AsyncSessionLocal()
+                    try:
+                        fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
+                        fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
+                        cid = fyers_client_obj.value.strip() if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3 else None
+                        tok = fyers_token_obj.value.strip() if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10 else None
+                        return cid, tok
+                    finally:
+                        await asyncio.shield(db.close())
+
+                db_cid, db_tok = await asyncio.wait_for(_check_db(), timeout=0.8)
+                if db_cid:
+                    discovered_client_id = db_cid
+                if db_tok:
+                    discovered_token = db_tok
+            except Exception:
+                pass
             try:
                 from backend.core.cache import cache_get
                 cached_creds = await asyncio.wait_for(cache_get("fyers_creds"), timeout=0.5)
@@ -926,7 +938,7 @@ class MarketDataService:
             if not MarketDataService._canary_in_progress:
                 await MarketDataService.probe_fyers_canary(probe_symbol=fyers_symbol)
 
-        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
+        if fyers_symbol not in MarketDataService._invalid_fyers_symbols and MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbol}
@@ -989,6 +1001,7 @@ class MarketDataService:
                     if resp_code in (-15, -16, -17, 401, 403) or ("token" in err_msg.lower() and ("expire" in err_msg.lower() or "invalid" in err_msg.lower())):
                         MarketDataService.mark_fyers_token_expired(f"Token expired/rejected (code {resp_code})", cooldown_seconds=300.0)
                     elif resp_code == -300:
+                        MarketDataService._invalid_fyers_symbols.add(fyers_symbol)
                         logger.warning(f"Fyers reported invalid symbol for {fyers_symbol}: {response}")
                     elif resp_code in (500, 502, 503, 504) or "502" in err_msg or "503" in err_msg or "bad gateway" in err_msg.lower() or "gateway timeout" in err_msg.lower():
                         MarketDataService.record_fyers_rate_limit(f"Fyers server error (code {resp_code})", cooldown_seconds=15.0)
@@ -1110,7 +1123,7 @@ class MarketDataService:
                 nse_norm = norm.replace("BSE:", "NSE:")
                 fyers_to_orig.setdefault(nse_norm, []).append(s)
 
-        fyers_keys = list(fyers_to_orig.keys())
+        fyers_keys = [k for k in fyers_to_orig.keys() if k not in MarketDataService._invalid_fyers_symbols]
 
         # Check for dynamic credential updates in DB, Redis, or .env
         await MarketDataService.check_credentials_changed()
@@ -1122,7 +1135,7 @@ class MarketDataService:
                 probe_sym = fyers_keys[0] if fyers_keys else "NSE:NIFTY50-INDEX"
                 await MarketDataService.probe_fyers_canary(probe_symbol=probe_sym)
 
-        if MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
+        if fyers_keys and MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 # Fyers quotes API accepts maximum 50 symbols per request
@@ -1194,7 +1207,55 @@ class MarketDataService:
                             MarketDataService.mark_fyers_token_expired(f"Bulk quote token error (code {resp_code})", cooldown_seconds=300.0)
                             break
                         elif resp_code == -300:
-                            logger.warning(f"Fyers reported invalid symbol parameter in chunk: {chunk_keys[:5]}")
+                            bad_list = response.get("invalid_symbols") or []
+                            if isinstance(bad_list, list) and bad_list:
+                                for bad_s in bad_list:
+                                    MarketDataService._invalid_fyers_symbols.add(str(bad_s).strip())
+                                retry_keys = [k for k in chunk_keys if k not in MarketDataService._invalid_fyers_symbols]
+                                if retry_keys:
+                                    try:
+                                        retry_str = ",".join(retry_keys)
+                                        retry_resp = await fyers_rate_governor.execute(
+                                            lambda: run_in_fast_executor(fyers.quotes, {"symbols": retry_str}),
+                                            priority=PRIORITY_INTERACTIVE,
+                                            coalescing_key=f"bulk_retry:{retry_str}"
+                                        )
+                                        if retry_resp.get("s") == "ok" and "d" in retry_resp:
+                                            MarketDataService._last_fyers_tick_time = now
+                                            for item in retry_resp["d"]:
+                                                fyers_sym = item.get("n", "")
+                                                quote_data = item.get("v", {})
+                                                orig_symbols = fyers_to_orig.get(fyers_sym, [fyers_sym])
+                                                last_price = float(quote_data.get("lp", 0.0) or 0.0)
+                                                calc_change = float(quote_data.get("ch", 0.0) or 0.0)
+                                                calc_change_pct = float(quote_data.get("chp", 0.0) or 0.0)
+                                                prev_close = float(quote_data.get("prev_close_price", 0.0) or 0.0)
+                                                if calc_change != 0.0 and (prev_close <= 0.0 or abs(prev_close - last_price) < 1e-4):
+                                                    prev_close = last_price - calc_change
+                                                elif prev_close <= 0.0:
+                                                    prev_close = last_price
+                                                if calc_change == 0.0 and calc_change_pct != 0.0 and prev_close > 0.0:
+                                                    calc_change = last_price - prev_close
+                                                elif calc_change_pct == 0.0 and calc_change != 0.0 and prev_close > 0.0:
+                                                    calc_change_pct = (calc_change / prev_close) * 100.0
+                                                if last_price > 0:
+                                                    for orig_sym in orig_symbols:
+                                                        q_obj = {
+                                                            "symbol": orig_sym,
+                                                            "price": round(last_price, 2),
+                                                            "previous_close": round(prev_close, 2),
+                                                            "change": round(calc_change, 2),
+                                                            "change_pct": round(calc_change_pct, 2),
+                                                            "volume": int(quote_data.get("volume", 0)),
+                                                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                                                            "data_status": "realtime",
+                                                            "source": "Fyers API",
+                                                        }
+                                                        quotes_dict[orig_sym] = q_obj
+                                                        await cache_set(f"quote:{orig_sym}", q_obj, ttl=settings.CACHE_TTL_QUOTE)
+                                    except Exception:
+                                        pass
+                            logger.warning(f"Fyers reported invalid symbol parameter in chunk (quarantined {bad_list}): {chunk_keys[:5]}")
                         elif resp_code in (500, 502, 503, 504) or "502" in err_msg or "503" in err_msg or "bad gateway" in err_msg.lower() or "gateway timeout" in err_msg.lower():
                             MarketDataService.record_fyers_rate_limit(f"Fyers server error (code {resp_code}) in bulk quotes", cooldown_seconds=15.0)
                             break
@@ -1449,7 +1510,8 @@ class MarketDataService:
 
             try:
                 if (
-                    MarketDataService._fyers_token_valid
+                    fyers_symbol not in MarketDataService._invalid_fyers_symbols
+                    and MarketDataService._fyers_token_valid
                     and now >= MarketDataService._fyers_cooldown_until
                     and await MarketDataService.acquire_fyers_rate_budget_slot(max_wait_seconds=3.5)
                 ):
@@ -1520,6 +1582,15 @@ class MarketDataService:
                                 MarketDataService.record_fyers_rate_limit("Fyers history rate limited", cooldown_seconds=5.0)
                                 break
                             if response.get("code") in [-16, -300] or response.get("s") in ["no_data", "error"]:
+                                if response.get("code") == -300:
+                                    err_msg_hist = str(response.get("message") or "").lower()
+                                    if "token" in err_msg_hist and ("expire" in err_msg_hist or "invalid" in err_msg_hist):
+                                        MarketDataService.mark_fyers_token_expired(
+                                            "Token expired/rejected in history (code -300)", cooldown_seconds=300.0
+                                        )
+                                    else:
+                                        MarketDataService._invalid_fyers_symbols.add(fyers_symbol)
+                                        logger.warning(f"Fyers history reported invalid symbol for {fyers_symbol}: {response}")
                                 break
 
                             logger.warning(f"Fyers history failed for {fyers_symbol} ({chunk_start.date()} to {chunk_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")

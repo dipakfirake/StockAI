@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from backend.core.logging_config import get_logger
 from backend.core.config import settings
 from backend.core.cache import cache_get, cache_set
-from backend.core.auth import get_current_user, get_current_user_optional
+from backend.core.auth import get_current_user, get_current_user_fast, get_current_user_optional
 from backend.core.param_validator import sanitize_symbol, validate_timeframe
 from backend.services.market_data import market_data_service
 from backend.services.indicators import indicator_service
@@ -468,7 +468,7 @@ async def get_options_chain(
 async def start_screener_scan_job(
     sector: str = Query(None, description="Optional sector universe to scan asynchronously"),
     force_refresh: bool = Query(True, description="Bypass cache and run fresh market scan"),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_fast),
 ):
     """
     Launch a non-blocking async screener scan job in background (returns immediately with job_id
@@ -484,7 +484,7 @@ async def start_screener_scan_job(
 @router.get("/screener/scan/{job_id}")
 async def get_screener_scan_job(
     job_id: str,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_fast),
 ):
     """Poll status and completed payload of an async screener scan job."""
     job = await screener_service.get_scan_job_status(job_id)
@@ -497,7 +497,7 @@ async def get_screener_scan_job(
 async def get_swing_trade_screener(
     sector: str = Query(None, description="Optional sector universe to screen (e.g. NIFTY_50, BANKING, IT, AUTO, PHARMA, ENERGY, FMCG, METAL)"),
     force_refresh: bool = Query(False, description="Bypass cache and force fresh market scan"),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_user_fast)
 ):
     """
     Run the AI Swing Trade Screener across a universe.
@@ -511,7 +511,7 @@ async def get_swing_trade_screener(
         raise HTTPException(status_code=500, detail="Screener execution failed")
 
 @router.get("/bulk-screener")
-async def get_bulk_screener(current_user=Depends(get_current_user)):
+async def get_bulk_screener(current_user=Depends(get_current_user_fast)):
     """
     Returns the massive pre-calculated AI Screener results for the NIFTY 50/500.
     This data is calculated continuously in the background by Celery workers to prevent timeouts.
