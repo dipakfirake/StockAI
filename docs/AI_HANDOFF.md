@@ -14,6 +14,24 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25)
 
+- **FAST DIRECT YAHOO CHART CANDLES, FYERS CODE -15 EXPIRY & SCREENER 120s TIMEOUT ERADICATION (COMPLETE & VERIFIED - 2026-11-25):**
+  - **Issues Investigated & Resolved**:
+    1. User observed: `Failed to fetch screener: Error: Market scan timed out after 120s at fetchScreener (SwingScreenerPage.tsx:277:13)` and empty `BUY (0) SELL (0)` results on the live server while `/api/presence/heartbeat` succeeded.
+    2. Empirical profiling on 25-stock `NIFTY_50` pipeline revealed:
+       - Fyers history code `-15` (`"Please provide a valid token"`) was not checked to trigger failover, causing 2-chunk pagination retries for every symbol.
+       - Primary candle fallback in `backend/services/market_data.py` (`fetch_candles`) called slow blocking `yfinance.Ticker.history` (`20.44s/symbol`) and hung on delisted/restructured tickers like `TATAMOTORS.NS` (404).
+       - `get_stock_info` checked `result.get("sector") == "N/A"`, which was always true for Screener.in, causing an unnecessary 4.5s blocking Yahoo Finance info query on every stock.
+       - Frontend hardcoded a 60-attempt (120s) poll timeout, aborting at 120s when scan took 148s, wiping out LKG setups and rendering `BUY (0) SELL (0)`.
+    3. Remediations Applied:
+       - In `backend/services/market_data.py`: Promoted sub-250ms direct Yahoo Chart API (`httpx.AsyncClient`) to primary candle fallback; added instant 404 quarantine for delisted tickers (<200ms); added Fyers history code `-15` token expiry handling and break; prevented redundant 4.5s Yahoo info lookups when Screener.in fundamentals are present; inferred sector from predefined universes.
+       - In `frontend/src/pages/SwingScreenerPage.tsx`: Extended polling window to 90 attempts (180s); added graceful fallback to latest verified LKG setups on timeout instead of showing empty `BUY (0) SELL (0)`.
+  - **Verification Evidence**:
+    - `backend/tests/test_fast_direct_yahoo_candles.py`: **3 passed in 22.95s (100% green)**.
+    - Targeted backend regression suites (28 tests): **28 passed, 0 failed in 91.33s (100% green)**.
+    - Frontend production build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 12.28s (exit code 0)**.
+  - **Exact Next Safe Step**: Commit and push locally (`git add`, `git commit`, `git push origin main`), then have user execute `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
+
+
 - **CELERY WORKER DECOUPLING, BACKGROUND PRE-WARMING & SCREENER TIMEOUT ERADICATION (COMPLETE & VERIFIED - 2026-11-25):**
   - **Issues Investigated & Resolved**:
     1. Addressed user's core conceptual question: *"if you are forwarding the process to celery workers instead of ML doesnt it affects the system precision for profit booking?"* Confirmed and mathematically validated that Celery is strictly an asynchronous job queue / execution worker, NOT a substitute for Machine Learning. It runs the exact same PyTorch LSTM, Transformer, LightGBM, and 14 technical indicator models. Decoupling the heavy 25-stock AI screening pipeline into Celery worker (`stockcelery`) preserves and enhances profit booking precision because:

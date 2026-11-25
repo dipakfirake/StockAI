@@ -5598,3 +5598,36 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 - **Next Safe Step:**
   - Push changes from localhost (`git add`, `git commit`, `git push origin main`).
   - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
+
+
+---
+
+### Session Entry 94
+- **Timestamp:** 2026-11-25 19:26:00 UTC (2026-11-26 00:56:00 IST)
+- **User Prompt:**
+  `"installHook.js:1 Failed to fetch screener: Error: Market scan timed out after 120s at fetchScreener (SwingScreenerPage.tsx:277:13) ... BUY (0) SELL (0) HOLD (0) All (0) ... /goal /browser /plan /teamwork /agy-customizations /automation /generative_ui /migrate-agent-settings /migrate-workflows /neon /plugin /run-workflow /swarm"`
+- **Forensic Root Causes Diagnosed:**
+  1. **Fyers History Code `-15` Token Expiry Miss**: In `backend/services/market_data.py`, Fyers history errors checked for code `-16` and `-300`, but omitted code `-15` (`"Please provide a valid token"`). When Fyers token expired, `fetch_candles` attempted 2 pagination chunks per symbol before failing, compounding latency.
+  2. **Slow Blocking `yfinance` History Fallback (`20.44s/symbol`) & Delisted 404 Hang**: When Fyers was unavailable, `fetch_candles` called `_fetch_yf_candles_sync` via `yfinance.Ticker.history()`. Each symbol took 3–8 seconds. For restructured tickers like `TATAMOTORS.NS` (404 on Yahoo), `yfinance` hung for 15+ seconds in retry loops across multiple endpoints.
+  3. **Redundant 4.5s Blocking Yahoo Info Queries**: In `backend/services/market_data.py:2250`, `get_stock_info` checked `result.get("sector") == "N/A"`. Because Screener.in does not return a literal "sector" field, `_fetch_yf_info_sync` was triggered for every single symbol, adding 4.5 seconds of dead waiting per stock even when all fundamentals were present.
+  4. **Premature Frontend Hard Timeout (120s)**: In `frontend/src/pages/SwingScreenerPage.tsx:244`, polling was capped at `attempt < 60` (`60 * 2s = 120s`). When the scan completed at 148s (producing 17 BUY setups and 7 HOLD setups), the frontend had already given up at 120.0s, threw an unhandled error, and displayed `BUY (0) SELL (0)`.
+- **Architectural Remediations Implemented:**
+  1. **Direct Fast Yahoo Chart API as Primary Fallback (`backend/services/market_data.py`)**:
+     - Promoted async `httpx` direct Yahoo Chart API (`https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}`) to primary candle fallback, fetching candles in sub-250ms per symbol.
+     - Added instant 404 quarantine for restructured symbols like `TATAMOTORS.NS` (<200ms).
+     - Added detection of Fyers history code `-15` (`"Please provide a valid token"`) to immediately engage failover and break pagination loops on Chunk 1.
+  2. **Elimination of Redundant 4.5s Yahoo Info Waits (`backend/services/market_data.py`)**:
+     - Changed `get_stock_info` to only invoke `_fetch_yf_info_sync` if core valuation metrics (`pe_ratio`, `market_cap`) are completely missing and Screener.in failed.
+     - Inferred sector from predefined `SECTOR_UNIVERSES` if missing.
+  3. **180s Frontend Polling & Graceful LKG Fallback (`frontend/src/pages/SwingScreenerPage.tsx`)**:
+     - Extended polling window from 60 attempts (120s) to 90 attempts (180s).
+     - Added graceful fallback to latest verified LKG setups on timeout instead of showing empty `BUY (0) SELL (0)`.
+  4. **Regression Verification & Unit Tests (`backend/tests/test_fast_direct_yahoo_candles.py`)**:
+     - Added tests for direct Yahoo Chart API candle fallback, instant 404 quarantine, and Fyers code -15 token expiry handling.
+- **Verification Evidence:**
+  - `backend/tests/test_fast_direct_yahoo_candles.py`: **3 passed in 22.95s (100% green)**.
+  - Targeted backend regression suites (28 tests): **28 passed, 0 failed in 91.33s (100% green)**.
+  - Frontend production build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 12.28s (exit code 0)**.
+- **Next Safe Step:**
+  - Push changes from localhost (`git add`, `git commit`, `git push origin main`).
+  - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.

@@ -1568,6 +1568,7 @@ class MarketDataService:
                         }
 
                         max_retries = 2
+                        token_expired_break = False
                         for attempt in range(max_retries):
                             from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_BACKGROUND
                             response = await fyers_rate_governor.execute(
@@ -1578,24 +1579,30 @@ class MarketDataService:
                             if response.get("s") == "ok":
                                 break
 
-                            if response.get("code") in (-360, 429):
+                            resp_code = response.get("code")
+                            err_msg_hist = str(response.get("message") or "").lower()
+                            if resp_code in (-15, -16, -17, 401, 403) or ("token" in err_msg_hist and ("expire" in err_msg_hist or "invalid" in err_msg_hist)):
+                                MarketDataService.mark_fyers_token_expired(
+                                    f"Token expired/rejected in history (code {resp_code})", cooldown_seconds=300.0
+                                )
+                                token_expired_break = True
+                                break
+
+                            if resp_code in (-360, 429):
                                 MarketDataService.record_fyers_rate_limit("Fyers history rate limited", cooldown_seconds=5.0)
                                 break
-                            if response.get("code") in [-16, -300] or response.get("s") in ["no_data", "error"]:
-                                if response.get("code") == -300:
-                                    err_msg_hist = str(response.get("message") or "").lower()
-                                    if "token" in err_msg_hist and ("expire" in err_msg_hist or "invalid" in err_msg_hist):
-                                        MarketDataService.mark_fyers_token_expired(
-                                            "Token expired/rejected in history (code -300)", cooldown_seconds=300.0
-                                        )
-                                    else:
-                                        MarketDataService._invalid_fyers_symbols.add(fyers_symbol)
-                                        logger.warning(f"Fyers history reported invalid symbol for {fyers_symbol}: {response}")
+                            if resp_code in [-16, -300] or response.get("s") in ["no_data", "error"]:
+                                if resp_code == -300:
+                                    MarketDataService._invalid_fyers_symbols.add(fyers_symbol)
+                                    logger.warning(f"Fyers history reported invalid symbol for {fyers_symbol}: {response}")
                                 break
 
                             logger.warning(f"Fyers history failed for {fyers_symbol} ({chunk_start.date()} to {chunk_end.date()}): {response}. Attempt {attempt + 1}/{max_retries}")
                             await asyncio.sleep(0.5)
                         else:
+                            break
+
+                        if token_expired_break:
                             break
 
                         if "candles" in response and response["candles"]:
@@ -1647,68 +1654,24 @@ class MarketDataService:
             except Exception as e:
                 logger.error(f"Failed to fetch Fyers history for {original_symbol}: {e}")
 
-            # Secondary fallback via Yahoo Finance on isolated scraper executor with strict 8s timeout
-            try:
-                yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
-                clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
-                yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
-                interval = yf_timeframe_map.get(timeframe, "1d")
+            # Secondary fallback via Direct Yahoo Chart API (non-blocking async httpx, sub-250ms)
+            yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
+            clean_sym = original_symbol.replace(".BO", "").replace(".NS", "").replace("^", "").strip().upper()
+            yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
+            interval = yf_timeframe_map.get(timeframe, "1d")
 
-                if timeframe in ["1d", "1w", "1mo"]:
-                    if limit and limit >= 300:
-                        period = "10y"
-                    elif limit:
-                        period = "2y"
-                    else:
-                        period = "10y"
-                else:
-                    period = "60d"
-
-                fallback_candles = await asyncio.wait_for(
-                    run_in_scraper_executor(
-                        MarketDataService._fetch_yf_candles_sync,
-                        yf_sym,
-                        interval,
-                        period,
-                        original_symbol,
-                    ),
-                    timeout=8.0,
-                )
-                if fallback_candles:
-                    if len(fallback_candles) < 30 and original_symbol.endswith(".BO"):
-                        nse_candles = await MarketDataService.fetch_candles(
-                            f"{clean_sym}.NS", timeframe, limit, start_date, end_date, prefetched_quote=prefetched_quote
-                        )
-                        if len(nse_candles) > len(fallback_candles):
-                            await _store_candles(nse_candles)
-                            return nse_candles
-
-                    await _store_candles(fallback_candles)
-                    return fallback_candles
-                elif original_symbol.endswith(".BO"):
-                    nse_candles = await MarketDataService.fetch_candles(
-                        f"{clean_sym}.NS", timeframe, limit, start_date, end_date, prefetched_quote=prefetched_quote
-                    )
-                    if nse_candles:
-                        await _store_candles(nse_candles)
-                        return nse_candles
-            except Exception as e:
-                logger.debug(f"yfinance candle fetch failed for {original_symbol}: {e}")
-
-            # 3. Tertiary fallback via direct Yahoo Chart API (non-blocking async httpx)
+            # 1. Primary fallback: Direct Yahoo Chart API via httpx (async, sub-250ms, no crumb/cookie bottlenecks)
             try:
                 import httpx
-                yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
-
-                yf_timeframe_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d", "1w": "1wk", "1mo": "1mo"}
-                interval = yf_timeframe_map.get(timeframe, "1d")
-                chart_range = "1y" if interval == "1d" else ("60d" if "m" in interval or "h" in interval else "5y")
-
+                chart_range = "2y" if (limit and limit >= 300) else ("1y" if interval == "1d" else ("60d" if "m" in interval or "h" in interval else "5y"))
                 direct_chart_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval={interval}&range={chart_range}"
                 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-                async with httpx.AsyncClient(headers=headers, timeout=6.0) as client:
+                async with httpx.AsyncClient(headers=headers, timeout=4.0) as client:
                     resp = await client.get(direct_chart_url)
-                    if resp.status_code == 200:
+                    if resp.status_code == 404:
+                        logger.warning(f"Yahoo Chart API returned 404 for {yf_sym} (symbol possibly delisted/restructured). Bypassing.")
+                        return []
+                    elif resp.status_code == 200:
                         cdata = resp.json()
                         res_list = cdata.get("chart", {}).get("result", [])
                         if res_list:
@@ -1750,7 +1713,41 @@ class MarketDataService:
                                 await _store_candles(direct_candles)
                                 return direct_candles
             except Exception as e:
-                logger.debug(f"Direct Yahoo Chart candle fallback failed for {original_symbol}: {e}")
+                logger.debug(f"Direct Yahoo Chart candle fetch failed for {original_symbol}: {e}")
+
+            # 2. Secondary fallback: yfinance sync call on isolated scraper executor (last resort)
+            try:
+                period = "10y" if (limit and limit >= 300) else ("2y" if limit else "10y")
+                fallback_candles = await asyncio.wait_for(
+                    run_in_scraper_executor(
+                        MarketDataService._fetch_yf_candles_sync,
+                        yf_sym,
+                        interval,
+                        period,
+                        original_symbol,
+                    ),
+                    timeout=4.0,
+                )
+                if fallback_candles:
+                    if len(fallback_candles) < 30 and original_symbol.endswith(".BO"):
+                        nse_candles = await MarketDataService.fetch_candles(
+                            f"{clean_sym}.NS", timeframe, limit, start_date, end_date, prefetched_quote=prefetched_quote
+                        )
+                        if len(nse_candles) > len(fallback_candles):
+                            await _store_candles(nse_candles)
+                            return nse_candles
+
+                    await _store_candles(fallback_candles)
+                    return fallback_candles
+                elif original_symbol.endswith(".BO"):
+                    nse_candles = await MarketDataService.fetch_candles(
+                        f"{clean_sym}.NS", timeframe, limit, start_date, end_date, prefetched_quote=prefetched_quote
+                    )
+                    if nse_candles:
+                        await _store_candles(nse_candles)
+                        return nse_candles
+            except Exception as e:
+                logger.debug(f"yfinance candle fetch failed for {original_symbol}: {e}")
 
             return []
 
@@ -2249,12 +2246,20 @@ class MarketDataService:
             if screener_data:
                 result.update(screener_data)
 
-            # 2. Secondary fallback / enrichment: Yahoo Finance (if fields still missing)
-            if result.get("pe_ratio") is None or result.get("market_cap") == 0 or result.get("sector") == "N/A":
+            # 2. Infer sector from predefined sector universes if missing
+            if result.get("sector") in ("N/A", "", None):
+                from backend.services.screener import SECTOR_UNIVERSES
+                for sec, syms in SECTOR_UNIVERSES.items():
+                    if any(clean_sym in s for s in syms):
+                        result["sector"] = sec.replace("_", " ").title()
+                        break
+
+            # 3. Secondary fallback: Yahoo Finance ONLY if core valuation metrics are completely missing
+            if not screener_data and (result.get("pe_ratio") is None or result.get("market_cap") == 0):
                 try:
                     info = await asyncio.wait_for(
                         run_in_scraper_executor(MarketDataService._fetch_yf_info_sync, yf_symbol),
-                        timeout=4.5,
+                        timeout=3.5,
                     )
                     if isinstance(info, dict) and info.get("marketCap"):
                         if not result.get("name") or result["name"] == clean_sym:

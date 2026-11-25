@@ -239,9 +239,9 @@ export default function SwingScreenerPage() {
         return
       }
 
-      // Poll lightweight status endpoint every 2s (max ~120s) with transient error tolerance
+      // Poll lightweight status endpoint every 2s (max ~180s) with transient error tolerance
       let consecutiveErrors = 0
-      for (let attempt = 0; attempt < 60; attempt++) {
+      for (let attempt = 0; attempt < 90; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 2000))
         if (scanGenerationRef.current !== gen) return
 
@@ -274,7 +274,20 @@ export default function SwingScreenerPage() {
         }
       }
 
-      throw new Error('Market scan timed out after 120s')
+      // If background scan takes longer than 180s, gracefully hydrate latest verified setups rather than failing blank
+      try {
+        const fallbackRes = await marketApi.getScreener(sector, false)
+        if (scanGenerationRef.current !== gen) return
+        if (fallbackRes?.data && (fallbackRes.data.buy_stocks?.length || fallbackRes.data.hold_stocks?.length || fallbackRes.data.all_results?.length)) {
+          setData(fallbackRes.data)
+          toast.info('Market scan is finalizing in the background. Showing latest verified setups.')
+          return
+        }
+      } catch (fallbackErr) {
+        console.debug('LKG fallback retrieval skipped:', fallbackErr)
+      }
+
+      throw new Error('Market scan timed out after 180s')
     } catch (err: any) {
       if (scanGenerationRef.current !== gen) return
       console.error('Failed to fetch screener:', err)
