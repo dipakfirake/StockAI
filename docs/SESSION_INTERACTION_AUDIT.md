@@ -5602,6 +5602,50 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 ---
 
+### Session Entry 95
+- **Timestamp:** 2026-11-26 01:40:00 UTC (2026-11-26 07:10:00 IST)
+- **User Prompt:**
+  `"in this 1 i download from past audits means cycle #1 and another is current active cycle excel file so why it is same as 11 days are over then next want to be start ? and why there downside some pending are there is by that our analyze gives issue in total win rate and all calculations in file if it is then fix this ? because there are 242 entries though we means the swing screener didnt suggest this many stocks and duplicates of it are there also. so what you can suggest for this. ... and also before some time it suggests many stocks in swing screener and avg target gain also has decreased from previous 3-4 prompts so is all okay check that also and in excel sheet all buy signal suggestions want to be add but not duplicated any how and also has to add suggested buy signal stocks from all the sectors you include in dropdown menu like nifty 50,banking and financials,,it and technology ,automotive & ancullaries and so on all 10 groups you given want to add in that sheet is it happening correctly now also check once ?"`
+- **Forensic Root Causes Diagnosed:**
+  1. **Archive Download Collision**: In `backend/api/swing_audit.py:392`, `where((SwingTradeAuditCycle.excel_file_path.ilike(f"%{safe_name}%")) | (SwingTradeAuditCycle.status == "ACTIVE"))` evaluated to TRUE for Cycle #1 on any download request. Thus, clicking any archive file in the "Past Audits" modal dynamically generated and served the ACTIVE cycle workbook instead of the requested historical archive on disk.
+  2. **Cycle #1 Period & Rollover Condition**: Cycle #1 had `from_date = 2026-11-11` and `to_date = 2026-11-26`. The auto-rollover rule checked `ref_date > cycle.to_date`, which evaluated to FALSE on Day 11 (`2026-11-26`). Without an explicit rollover trigger, users had to wait until Day 12 (`2026-11-27`) for auto-rollover.
+  3. **Pending Downside Trades vs Win Rate**: Downside entries showed "Pending" because stocks recommended on Days 7–10 of Cycle #1 have only elapsed 3–5 trading days; Days 6–11 have not yet occurred on the calendar. Under `SwingAuditService.calculate_cycle_scorecard`, `win_rate = win_trades / (win_trades + loss_trades) * 100`. In-progress trades are strictly excluded from the denominator, so they do NOT drag down win rate.
+  4. **The 241-Entry Bloat & Duplicate Recommendation Churn**: In `track_swing_trade` and `track_batch_swing_trades`, deduplication only checked `status == "IN_PROGRESS"`. Whenever a stock stopped out or achieved target on Day 2 or 3, subsequent scans saw it was no longer `IN_PROGRESS` and re-recommended it repeatedly (e.g. Kotak 5x, Titan 5x, TCS 5x).
+  5. **Sector Attribution & Multi-Sector Coverage**: `SwingTradeAudit` lacked a `sector` column, so audits could not record originating sector metadata. EOD tasks only took the top 5 platform-wide setups, risking single-sector concentration.
+  6. **Avg Target Gain Compression**: In `screener.py`, target calculations enforce dynamic ATR-calibrated holding constraints (`1.8 * atr` to `4.5 * atr`, min 4.0% to 18%). When volatility compressed, target gains naturally calibrated from ~12–15% down to ~5–9% (which enabled 58 targets hit and a 67.4% win rate).
+- **Architectural Remediations Implemented:**
+  1. **Archive Download Isolation (`backend/api/swing_audit.py`)**:
+     - Check if requested file exists on disk in `audits/swing_trades/` and serve it directly without touching the active cycle.
+     - Removed the unconditional active fallback.
+  2. **Explicit Cycle Rollover Engine (`backend/services/swing_audit_service.py` & `backend/api/swing_audit.py`)**:
+     - Implemented `POST /api/swing-audit/cycle/rollover` and `SwingAuditService.rollover_to_next_cycle(db, square_off_remaining=True)`.
+     - Squares off any remaining `IN_PROGRESS` trades at latest candle closing prices (`DAY_11_EXIT`), sets `cycle.status = "COMPLETED"`, freezes the permanent archive workbook as `Swing_Trade_Audit_Cycle_{num}_(Final).xlsx`, and initializes Cycle #2 (`status = "ACTIVE"`).
+  3. **Cycle-Level Anti-Churn Deduplication (`backend/services/swing_audit_service.py`)**:
+     - In `track_swing_trade` and `track_batch_swing_trades`, canonicalized symbols (`clean_sym = sym.replace(".NS", "").replace(".BO", "").strip().upper()`).
+     - Query ALL trades already audited in the cycle (active or closed); if already present, skip adding. Guarantees 1 stock = at most 1 trade per 11-day cycle, capping total cycle size to a high-conviction basket of 25–40 setups.
+  4. **10-Sector Schema, Attribution & Auto-Cataloging (`backend/models/swing_audit.py`, `backend/services/screener.py`, `backend/tasks/swing_audit_tasks.py`)**:
+     - Added `sector VARCHAR(60)` column to `SwingTradeAudit` model and `ensure_swing_audit_schema`.
+     - Added `resolve_stock_sector` checking specific sectors before benchmark (`BANKING`, `IT`, `AUTO`, `PHARMA`, `ENERGY`, `FMCG`, `METAL`, `MID_CAP`, `SMALL_CAP`, `NIFTY_50`).
+     - In `run_eod_screener_and_audit_sync_async`, group setups by sector and take top 2 high-scoring setups per sector, guaranteeing cross-market sector diversity.
+     - In Excel generation, added "Sector" column to Sheet 2 ("11-Day Price Tracking") and Sheet 3 ("Booked Trades").
+  5. **Frontend UI Rollover Control (`frontend/src/pages/SwingScreenerPage.tsx` & `frontend/src/services/api.ts`)**:
+     - Added `rolloverCycle` to `swingAuditApi`.
+     - Added a "Complete & Start Cycle #2" button in the Active Audit Cycle Transparency Banner with confirmation modal and live toast feedback.
+- **Verification Evidence:**
+  - `backend/tests/test_audit_cycle_rollover_and_dedup.py`: **5 passed in 20.19s (100% green)**.
+  - `backend/tests/test_swing_audit.py`: **17 passed in 44.75s (100% green)**.
+  - `backend/tests/test_fast_direct_yahoo_candles.py`: **3 passed in 22.95s (100% green)**.
+  - `backend/tests/test_swing_screener_categorization.py`: **3 passed in 32.96s (100% green)**.
+  - Total backend test suite: **28 passed, 0 failed in 120.85s (100% green)**.
+  - Frontend production build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 11.76s (exit code 0)**.
+- **Next Safe Step:**
+  - Commit and push changes from localhost (`git add`, `git commit -m "...", `git push origin main`).
+  - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
+
+
+
+---
+
 ### Session Entry 94
 - **Timestamp:** 2026-11-25 19:26:00 UTC (2026-11-26 00:56:00 IST)
 - **User Prompt:**
@@ -5631,3 +5675,47 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 - **Next Safe Step:**
   - Push changes from localhost (`git add`, `git commit`, `git push origin main`).
   - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
+
+
+---
+
+### Session Entry 95
+- **Timestamp:** 2026-11-26 01:40:00 UTC (2026-11-26 07:10:00 IST)
+- **User Prompt:**
+  `"in this 1 i download from past audits means cycle #1 and another is current active cycle excel file so why it is same as 11 days are over then next want to be start ? and why there downside some pending are there is by that our analyze gives issue in total win rate and all calculations in file if it is then fix this ? because there are 242 entries though we means the swing screener didnt suggest this many stocks and duplicates of it are there also. so what you can suggest for this. ... and also before some time it suggests many stocks in swing screener and avg target gain also has decreased from previous 3-4 prompts so is all okay check that also and in excel sheet all buy signal suggestions want to be add but not duplicated any how and also has to add suggested buy signal stocks from all the sectors you include in dropdown menu like nifty 50,banking and financials,,it and technology ,automotive & ancullaries and so on all 10 groups you given want to add in that sheet is it happening correctly now also check once ?"`
+- **Forensic Root Causes Diagnosed:**
+  1. **Archive Download Collision**: In `backend/api/swing_audit.py:392`, `where((SwingTradeAuditCycle.excel_file_path.ilike(f"%{safe_name}%")) | (SwingTradeAuditCycle.status == "ACTIVE"))` evaluated to TRUE for Cycle #1 on any download request. Thus, clicking any archive file in the "Past Audits" modal dynamically generated and served the ACTIVE cycle workbook instead of the requested historical archive on disk.
+  2. **Cycle #1 Period & Rollover Condition**: Cycle #1 had `from_date = 2026-11-11` and `to_date = 2026-11-26`. The auto-rollover rule checked `ref_date > cycle.to_date`, which evaluated to FALSE on Day 11 (`2026-11-26`). Without an explicit rollover trigger, users had to wait until Day 12 (`2026-11-27`) for auto-rollover.
+  3. **Pending Downside Trades vs Win Rate**: Downside entries showed "Pending" because stocks recommended on Days 7–10 of Cycle #1 have only elapsed 3–5 trading days; Days 6–11 have not yet occurred on the calendar. Under `SwingAuditService.calculate_cycle_scorecard`, `win_rate = win_trades / (win_trades + loss_trades) * 100`. In-progress trades are strictly excluded from the denominator, so they do NOT drag down win rate.
+  4. **The 241-Entry Bloat & Duplicate Recommendation Churn**: In `track_swing_trade` and `track_batch_swing_trades`, deduplication only checked `status == "IN_PROGRESS"`. Whenever a stock stopped out or achieved target on Day 2 or 3, subsequent scans saw it was no longer `IN_PROGRESS` and re-recommended it repeatedly (e.g. Kotak 5x, Titan 5x, TCS 5x).
+  5. **Sector Attribution & Multi-Sector Coverage**: `SwingTradeAudit` lacked a `sector` column, so audits could not record originating sector metadata. EOD tasks only took the top 5 platform-wide setups, risking single-sector concentration.
+  6. **Avg Target Gain Compression**: In `screener.py`, target calculations enforce dynamic ATR-calibrated holding constraints (`1.8 * atr` to `4.5 * atr`, min 4.0% to 18%). When volatility compressed, target gains naturally calibrated from ~12–15% down to ~5–9% (which enabled 58 targets hit and a 67.4% win rate).
+- **Architectural Remediations Implemented:**
+  1. **Archive Download Isolation (`backend/api/swing_audit.py`)**:
+     - Check if requested file exists on disk in `audits/swing_trades/` and serve it directly without touching the active cycle.
+     - Removed the unconditional active fallback.
+  2. **Explicit Cycle Rollover Engine (`backend/services/swing_audit_service.py` & `backend/api/swing_audit.py`)**:
+     - Implemented `POST /api/swing-audit/cycle/rollover` and `SwingAuditService.rollover_to_next_cycle(db, square_off_remaining=True)`.
+     - Squares off any remaining `IN_PROGRESS` trades at latest candle closing prices (`DAY_11_EXIT`), sets `cycle.status = "COMPLETED"`, freezes the permanent archive workbook as `Swing_Trade_Audit_Cycle_{num}_(Final).xlsx`, and initializes Cycle #2 (`status = "ACTIVE"`).
+  3. **Cycle-Level Anti-Churn Deduplication (`backend/services/swing_audit_service.py`)**:
+     - In `track_swing_trade` and `track_batch_swing_trades`, canonicalized symbols (`clean_sym = sym.replace(".NS", "").replace(".BO", "").strip().upper()`).
+     - Query ALL trades already audited in the cycle (active or closed); if already present, skip adding. Guarantees 1 stock = at most 1 trade per 11-day cycle, capping total cycle size to a high-conviction basket of 25–40 setups.
+  4. **10-Sector Schema, Attribution & Auto-Cataloging (`backend/models/swing_audit.py`, `backend/services/screener.py`, `backend/tasks/swing_audit_tasks.py`)**:
+     - Added `sector VARCHAR(60)` column to `SwingTradeAudit` model and `ensure_swing_audit_schema`.
+     - Added `resolve_stock_sector` checking specific sectors before benchmark (`BANKING`, `IT`, `AUTO`, `PHARMA`, `ENERGY`, `FMCG`, `METAL`, `MID_CAP`, `SMALL_CAP`, `NIFTY_50`).
+     - In `run_eod_screener_and_audit_sync_async`, group setups by sector and take top 2 high-scoring setups per sector, guaranteeing cross-market sector diversity.
+     - In Excel generation, added "Sector" column to Sheet 2 ("11-Day Price Tracking") and Sheet 3 ("Booked Trades").
+  5. **Frontend UI Rollover Control (`frontend/src/pages/SwingScreenerPage.tsx` & `frontend/src/services/api.ts`)**:
+     - Added `rolloverCycle` to `swingAuditApi`.
+     - Added a "Complete & Start Cycle #2" button in the Active Audit Cycle Transparency Banner with confirmation modal and live toast feedback.
+- **Verification Evidence:**
+  - `backend/tests/test_audit_cycle_rollover_and_dedup.py`: **5 passed in 20.19s (100% green)**.
+  - `backend/tests/test_swing_audit.py`: **17 passed in 44.75s (100% green)**.
+  - `backend/tests/test_fast_direct_yahoo_candles.py`: **3 passed in 22.95s (100% green)**.
+  - `backend/tests/test_swing_screener_categorization.py`: **3 passed in 32.96s (100% green)**.
+  - Total backend test suite: **28 passed, 0 failed in 120.85s (100% green)**.
+  - Frontend production build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 11.76s (exit code 0)**.
+- **Next Safe Step:**
+  - Commit and push changes from localhost (`git add`, `git commit -m "...", `git push origin main`).
+  - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
+

@@ -41,26 +41,37 @@ async def run_eod_screener_and_audit_sync_async():
 
     cataloged_count = 0
     async with AsyncSessionLocal() as db:
-        # Phase 2: Auto-catalog elite high-conviction recommendations (score >= 78.0, top 5 platform-wide)
-        logger.info("EOD Pipeline Step 2/3: Cataloging elite high-conviction trades (score >= 78) into active audit cycle...")
-        eligible_candidates = [
-            item for item in buy_candidates
-            if float(item.get("total_score", 0.0) or 0.0) >= 78.0 and item.get("trade_plan") and item.get("symbol")
-        ]
-        eligible_candidates.sort(key=lambda x: float(x.get("total_score", 0.0) or 0.0), reverse=True)
-        top_candidates = eligible_candidates[:5]  # Strict limit: max 5 highest-conviction trades per day
+        # Phase 2: Auto-catalog elite high-conviction recommendations across all sectors into active audit cycle
+        logger.info("EOD Pipeline Step 2/3: Cataloging high-conviction trades across all 10 sectors into active audit cycle...")
+        by_sector = {}
+        for item in buy_candidates:
+            score_val = float(item.get("total_score", 0.0) or 0.0)
+            if score_val >= 70.0 and item.get("trade_plan") and item.get("symbol"):
+                sec = item.get("sector") or "Nifty 50 (Benchmark)"
+                by_sector.setdefault(sec, []).append(item)
+
+        # Select top 2 highest-scoring setups per sector to ensure balanced multi-sector coverage
+        top_candidates = []
+        for sec_name, candidates in by_sector.items():
+            candidates.sort(key=lambda x: float(x.get("total_score", 0.0) or 0.0), reverse=True)
+            top_candidates.extend(candidates[:2])
+
+        # Sort overall list by score descending
+        top_candidates.sort(key=lambda x: float(x.get("total_score", 0.0) or 0.0), reverse=True)
 
         for item in top_candidates:
             try:
                 score = float(item.get("total_score", 0.0) or 0.0)
                 plan = item.get("trade_plan")
                 sym = item.get("symbol")
+                sec = item.get("sector")
                 await swing_audit_service.track_swing_trade(
                     db=db,
                     symbol=sym,
                     trade_plan=plan,
                     company_name=item.get("name") or sym,
-                    total_score=score
+                    total_score=score,
+                    sector=sec
                 )
                 cataloged_count += 1
             except Exception as cat_err:

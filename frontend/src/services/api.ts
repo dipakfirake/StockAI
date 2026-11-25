@@ -413,6 +413,8 @@ export const swingAuditApi = {
       }),
       filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`
     ),
+  rolloverCycle: (squareOffRemaining: boolean = true) =>
+    api.post('/swing-audit/cycle/rollover', null, { params: { square_off_remaining: squareOffRemaining } }),
 }
 
 /**

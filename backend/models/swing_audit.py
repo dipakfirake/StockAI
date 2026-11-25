@@ -45,6 +45,7 @@ class SwingTradeAudit(Base):
     
     symbol: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     company_name: Mapped[str] = mapped_column(String(120), default="")
+    sector: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
     recommendation_date: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
     
     buy_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)

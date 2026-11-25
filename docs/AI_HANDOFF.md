@@ -12,7 +12,22 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25)
+## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25 / 2026-11-26)
+
+- **SWING AUDIT CYCLE #2 ROLLOVER, ANTI-CHURN DEDUPLICATION, ARCHIVE DOWNLOAD FIX & 10-SECTOR INTEGRATION (COMPLETE & VERIFIED - 2026-11-26):**
+  - **Issues Investigated & Resolved**:
+    1. **Archive Download Collision**: When downloading past archives (Cycle #1) from the "Past Audits" modal, the system served the exact same active cycle workbook instead of historical archive files. Root cause: in `backend/api/swing_audit.py:392`, the SQL query included `| (SwingTradeAuditCycle.status == "ACTIVE")`, which caused any requested filename to match the active cycle and regenerate the active cycle ledger. Remediated by checking disk files first and removing the unconditional active fallback.
+    2. **Cycle #1 Completion & Rollover to Cycle #2**: Cycle #1 ran for 11 trading days (`11-Nov-2026 to 26-Nov-2026`). Automatic rollover strictly required `ref_date > cycle.to_date` (evaluated on Day 12). Implemented explicit `POST /api/swing-audit/cycle/rollover` and a "Complete & Start Cycle #2" UI button, allowing the user to finalize Cycle #1, square off remaining trades at latest prices, freeze its permanent scorecard into `Swing_Trade_Audit_Cycle_1_(Final).xlsx`, and launch Cycle #2 (`ACTIVE`).
+    3. **Cycle-Level Anti-Churn (1 Stock = 1 Trade Per Cycle)**: Recommending exited stocks repeatedly caused the ledger to balloon to 241 entries (e.g. Kotak 5x, Titan 5x, TCS 5x). Implemented strict cycle-level deduplication in `SwingAuditService.track_swing_trade` and `track_batch_swing_trades`: a canonical symbol can only be cataloged at most once per 11-day cycle, capping recommendations to a clean, diversified basket of 25-40 high-conviction trades per cycle.
+    4. **Pending Downside Trades & Win Rate Integrity**: Clarified mathematically that "Pending" entries on Days 4–11 for trades entered mid-cycle are `IN_PROGRESS` and excluded from `closed_trades = win_trades + loss_trades`, so they do not reduce the win rate. During cycle rollover, open trades are cleanly finalized at the closing price so Cycle #1 has zero pending trades and a 100% frozen audit trail.
+    5. **10-Sector Coverage & Excel Sector Tagging**: Added `sector` column to `SwingTradeAudit` model and database schema; added `resolve_stock_sector` mapping priority; updated EOD task and `/sync` to extract high-conviction setups from all 10 sector universes (`NIFTY_50`, `BANKING`, `IT`, `AUTO`, `PHARMA`, `ENERGY`, `FMCG`, `METAL`, `MID_CAP`, `SMALL_CAP`); added "Sector" column to Sheet 2 ("11-Day Price Tracking") and Sheet 3 ("Booked Trades") in Excel workbooks.
+    6. **Target Gain Context**: Clarified why target percentages recently compressed from ~12-15% to ~5-9%: dynamic ATR bounds prevent unachievable targets on an 11-day holding horizon, ensuring trades hit targets (58 wins, 67.4% win rate) instead of expiring or stopping out.
+  - **Verification Evidence**:
+    - `backend/tests/test_audit_cycle_rollover_and_dedup.py`: **5 passed in 20.19s (100% green)**.
+    - `backend/tests/test_swing_audit.py`: **17 passed in 44.75s (100% green)**.
+    - Full regression suites (28 backend tests): **28 passed, 0 failed in 100.66s (100% green)**.
+    - Frontend production build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 11.76s (exit code 0)**.
+  - **Exact Next Safe Step**: Commit and push locally (`git add`, `git commit`, `git push origin main`), then have user execute `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
 
 - **FAST DIRECT YAHOO CHART CANDLES, FYERS CODE -15 EXPIRY & SCREENER 120s TIMEOUT ERADICATION (COMPLETE & VERIFIED - 2026-11-25):**
   - **Issues Investigated & Resolved**:

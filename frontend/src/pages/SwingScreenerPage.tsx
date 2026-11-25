@@ -118,6 +118,7 @@ export default function SwingScreenerPage() {
   const [archiveFiles, setArchiveFiles] = useState<any[]>([])
   const [loadingArchives, setLoadingArchives] = useState(false)
   const [downloadingExcel, setDownloadingExcel] = useState(false)
+  const [rollingOver, setRollingOver] = useState(false)
   const [cycleData, setCycleData] = useState<any>(null)
   const [orderModalStock, setOrderModalStock] = useState<SwingStock | null>(null)
   const [orderModalOpen, setOrderModalOpen] = useState(false)
@@ -154,6 +155,29 @@ export default function SwingScreenerPage() {
     } catch (err: any) {
       console.error('Archive download failed:', err)
       toast.error('Download Failed', err.message || 'Could not download archive file')
+    }
+  }
+
+  const handleRolloverCycle = async () => {
+    const cycleNum = cycleData?.cycle_number || 1
+    const confirmMsg = `Finalize and archive Audit Cycle #${cycleNum} (freezing its scorecard into a permanent .xlsx file) and initialize Cycle #${cycleNum + 1}?`
+    if (!window.confirm(confirmMsg)) return
+
+    setRollingOver(true)
+    try {
+      const res = await swingAuditApi.rolloverCycle(true)
+      const data = res.data
+      toast.success(
+        `Cycle #${cycleNum} Finalized!`,
+        `Scorecard frozen into ${data?.completed_cycle?.archive_file || 'archive'}. Cycle #${data?.active_cycle?.cycle_number || cycleNum + 1} is now ACTIVE.`
+      )
+      await fetchCurrentCycle()
+      await fetchArchiveFiles()
+    } catch (err: any) {
+      console.error('Cycle rollover failed:', err)
+      toast.error('Rollover Failed', err?.response?.data?.message || err.message)
+    } finally {
+      setRollingOver(false)
     }
   }
 
@@ -515,6 +539,27 @@ export default function SwingScreenerPage() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={handleRolloverCycle}
+              disabled={rollingOver}
+              className="btn btn-secondary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                height: 32,
+                fontSize: 12,
+                padding: '0 12px',
+                borderColor: 'rgba(52, 211, 153, 0.4)',
+                background: 'rgba(52, 211, 153, 0.12)',
+                color: '#34d399',
+                cursor: 'pointer'
+              }}
+              title="Finalize current cycle (freeze scorecard into permanent archive) and start the next cycle"
+            >
+              <RefreshCw size={14} className={rollingOver ? 'spin' : ''} />
+              <span>{rollingOver ? 'Rolling Over...' : `Complete & Start Cycle #${(cycleData?.cycle_number || 1) + 1}`}</span>
+            </button>
             <button
               onClick={handleDownloadLatestExcel}
               disabled={downloadingExcel}

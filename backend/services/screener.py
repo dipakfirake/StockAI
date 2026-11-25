@@ -77,6 +77,34 @@ SECTOR_UNIVERSES: dict[str, list[str]] = {
 # Default highly liquid Nifty universe
 NIFTY_UNIVERSE = SECTOR_UNIVERSES["NIFTY_50"]
 
+SECTOR_DISPLAY_NAMES: dict[str, str] = {
+    "NIFTY_50": "Nifty 50 (Benchmark)",
+    "BANKING": "Banking & Financials",
+    "IT": "IT & Technology",
+    "AUTO": "Automotive & Ancillaries",
+    "PHARMA": "Pharma & Healthcare",
+    "ENERGY": "Energy & Utilities",
+    "FMCG": "FMCG & Consumer",
+    "METAL": "Metals & Mining",
+    "MID_CAP": "Midcap Growth",
+    "SMALL_CAP": "Smallcap Momentum",
+}
+
+
+def resolve_stock_sector(symbol: str, raw_sector: Optional[str] = None) -> str:
+    """Maps a stock symbol to its canonical display sector from SECTOR_UNIVERSES."""
+    clean = symbol.replace(".NS", "").replace(".BO", "").strip().upper()
+    # Check specific industry sectors first so e.g. HDFCBANK maps to Banking & Financials before generic Nifty 50
+    priority_order = [k for k in SECTOR_UNIVERSES.keys() if k != "NIFTY_50"] + ["NIFTY_50"]
+    for sec_key in priority_order:
+        sym_list = SECTOR_UNIVERSES[sec_key]
+        for s in sym_list:
+            if s.replace(".NS", "").replace(".BO", "").strip().upper() == clean:
+                return SECTOR_DISPLAY_NAMES.get(sec_key, sec_key)
+    if raw_sector and raw_sector.strip() and raw_sector != "N/A":
+        return raw_sector.strip()
+    return "Nifty 50 (Benchmark)"
+
 
 class ScreenerService:
     _scan_jobs: dict[str, dict] = {}
@@ -967,6 +995,7 @@ class ScreenerService:
             result = {
                 "symbol": symbol,
                 "name": info.get("name", symbol),
+                "sector": resolve_stock_sector(symbol, info.get("sector")),
                 "action": action,
                 "total_score": round(total_score, 1),
                 "scores": {

@@ -144,7 +144,8 @@ async def sync_audit_prices(
                                 symbol=sym,
                                 trade_plan=plan,
                                 company_name=item.get("name") or sym,
-                                total_score=score
+                                total_score=score,
+                                sector=item.get("sector")
                             )
                             cataloged_count += 1
                         except Exception:
@@ -386,20 +387,27 @@ async def download_specific_audit_excel(
         except Exception:
             raise HTTPException(status_code=403, detail="Invalid path.")
 
-        # Check if requested file matches an active cycle in DB; if active, always regenerate freshly
-        cycle_stmt = select(SwingTradeAuditCycle).where(
-            (SwingTradeAuditCycle.excel_file_path.ilike(f"%{safe_name}%")) |
-            (SwingTradeAuditCycle.status == "ACTIVE")
-        )
-        matching_cycle = (await db.execute(cycle_stmt)).scalars().first()
-        if matching_cycle and matching_cycle.status == "ACTIVE":
-            gen_path = await swing_audit_service.generate_excel_workbook(db, matching_cycle.id)
-            if gen_path and gen_path.exists():
-                file_path = gen_path
-        elif not file_path.exists() and matching_cycle:
-            gen_path = await swing_audit_service.generate_excel_workbook(db, matching_cycle.id)
-            if gen_path and gen_path.exists():
-                file_path = gen_path
+        # 1. If file already exists on disk (archived past audit or previously generated), serve it directly
+        if file_path.exists():
+            pass
+        else:
+            # 2. Check if requested file matches a cycle in DB that needs to be generated on demand
+            cycle_stmt = select(SwingTradeAuditCycle).where(
+                SwingTradeAuditCycle.excel_file_path.ilike(f"%{safe_name}%")
+            )
+            matching_cycle = (await db.execute(cycle_stmt)).scalars().first()
+            if matching_cycle:
+                gen_path = await swing_audit_service.generate_excel_workbook(db, matching_cycle.id)
+                if gen_path and gen_path.exists():
+                    file_path = gen_path
+            elif any(k in safe_name.lower() for k in ("active", "current", "latest")):
+                # Explicit fallback only if client requested active/current/latest
+                active_cycle_stmt = select(SwingTradeAuditCycle).where(SwingTradeAuditCycle.status == "ACTIVE").order_by(SwingTradeAuditCycle.cycle_number.desc())
+                active_cycle = (await db.execute(active_cycle_stmt)).scalars().first()
+                if active_cycle:
+                    gen_path = await swing_audit_service.generate_excel_workbook(db, active_cycle.id)
+                    if gen_path and gen_path.exists():
+                        file_path = gen_path
 
         if not file_path.exists():
             raise HTTPException(status_code=404, detail=f"Audit file '{safe_name}' not found.")
@@ -427,4 +435,26 @@ async def download_specific_audit_excel(
             status_code=500,
             detail=f"Failed to download audit file: {str(e)}"
         )
+
+
+@router.post("/cycle/rollover")
+async def rollover_audit_cycle(
+    square_off_remaining: bool = Query(True, description="If True, squares off remaining IN_PROGRESS trades at latest close prices"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional)
+):
+    """
+    Formally completes and archives the active 11-day audit cycle (e.g. Cycle #1),
+    freezes the final audited scorecard into a permanent .xlsx archive file,
+    and initializes the next cycle (e.g. Cycle #2) with status 'ACTIVE'.
+    """
+    try:
+        res = await swing_audit_service.rollover_to_next_cycle(db, square_off_remaining=square_off_remaining)
+        return res
+    except Exception as e:
+        logger.error(f"Failed to rollover audit cycle: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Cycle rollover error: {str(e)}"
+        }
 

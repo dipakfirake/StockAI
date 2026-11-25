@@ -5,6 +5,7 @@ target/stoploss execution rules, and multi-sheet Excel generation.
 import os
 import math
 import uuid
+import shutil
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timezone, date, timedelta
@@ -12,7 +13,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 
-from sqlalchemy import select, and_, func, text, update
+from sqlalchemy import select, and_, or_, func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -115,6 +116,7 @@ async def ensure_swing_audit_schema(db: AsyncSession):
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_bought BOOLEAN DEFAULT FALSE;
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_price NUMERIC(12, 4);
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_time TIMESTAMPTZ;
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS sector VARCHAR(60);
                     END IF;
                     IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audit_prices') THEN
                         ALTER TABLE swing_trade_audit_prices ADD COLUMN IF NOT EXISTS dynamic_sl_day NUMERIC(12, 4);
@@ -129,6 +131,12 @@ async def ensure_swing_audit_schema(db: AsyncSession):
                 END $$;
             """))
             await db.commit()
+        elif "sqlite" in dialect_name.lower():
+            try:
+                await db.execute(text("ALTER TABLE swing_trade_audits ADD COLUMN sector VARCHAR(60);"))
+                await db.commit()
+            except Exception:
+                pass
         _schema_ensured = True
     except Exception as e:
         logger.warning(f"Schema check for swing audit skipped/deferred: {e}")
@@ -220,53 +228,32 @@ class SwingAuditService:
         allocated_capital: float = 100000.0,
         user_bought: bool = False,
         user_buy_price: Optional[float] = None,
-        notes: Optional[str] = None
+        notes: Optional[str] = None,
+        sector: Optional[str] = None
     ) -> SwingTradeAudit:
         """
         Catalogs a stock recommendation into the active 11-day audit ledger.
-        Idempotent: prevents duplicate entries for the same symbol on the same day,
+        Cycle Anti-Churn: ensures each canonical symbol is tracked at most once per 11-day cycle,
         while seamlessly updating user_bought status if the user decides to enter.
         """
         rec_date = recommendation_date or date.today()
         cycle = await SwingAuditService.get_or_create_active_cycle(db, rec_date)
 
-        norm_symbol = symbol.strip().upper()
-        if not norm_symbol.endswith(".NS") and not norm_symbol.endswith(".BO") and not norm_symbol.startswith("^"):
-            norm_symbol = f"{norm_symbol}.NS"
+        clean_sym = symbol.replace(".NS", "").replace(".BO", "").strip().upper()
+        norm_symbol = f"{clean_sym}.NS"
 
-        # Check for duplicate recommendation on same date OR active trade already in progress
-        active_existing_stmt = select(SwingTradeAudit).where(
+        # Check if symbol is already audited in this cycle (active or closed)
+        cycle_existing_stmt = select(SwingTradeAudit).where(
             and_(
                 SwingTradeAudit.cycle_id == cycle.id,
-                SwingTradeAudit.symbol == norm_symbol,
-                SwingTradeAudit.status == "IN_PROGRESS"
+                or_(
+                    SwingTradeAudit.symbol == norm_symbol,
+                    SwingTradeAudit.symbol == clean_sym
+                )
             )
         )
-        active_existing = (await db.execute(active_existing_stmt)).scalars().first()
-        if active_existing:
-            if user_bought and not active_existing.user_bought:
-                active_existing.user_bought = True
-                u_price = user_buy_price if (user_buy_price and user_buy_price > 0) else float(active_existing.buy_price)
-                active_existing.user_buy_price = Decimal(str(round(u_price, 2)))
-                active_existing.user_buy_time = datetime.now(timezone.utc)
-                await db.commit()
-                await db.refresh(active_existing)
-                await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
-                logger.info(f"Updated user execution for active audit {norm_symbol} @ ₹{active_existing.user_buy_price}")
-            else:
-                logger.info(f"Active swing trade already in progress for {norm_symbol} in Cycle #{cycle.cycle_number}. Skipping duplicate.")
-            return active_existing
-
-        existing_stmt = select(SwingTradeAudit).where(
-            and_(
-                SwingTradeAudit.cycle_id == cycle.id,
-                SwingTradeAudit.symbol == norm_symbol,
-                SwingTradeAudit.recommendation_date == rec_date
-            )
-        )
-        existing = (await db.execute(existing_stmt)).scalars().first()
+        existing = (await db.execute(cycle_existing_stmt)).scalars().first()
         if existing:
-            # If user explicitly bought this stock after initial auto-cataloging, update user buy state
             if user_bought and not existing.user_bought:
                 existing.user_bought = True
                 u_price = user_buy_price if (user_buy_price and user_buy_price > 0) else float(existing.buy_price)
@@ -277,7 +264,7 @@ class SwingAuditService:
                 await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
                 logger.info(f"Updated user execution for existing audit {norm_symbol} @ ₹{existing.user_buy_price}")
             else:
-                logger.info(f"Audit entry already exists for {norm_symbol} on {rec_date}. Preserving record {existing.id}.")
+                logger.info(f"Symbol {clean_sym} already tracked in Cycle #{cycle.cycle_number} (status: {existing.status}). Skipping duplicate recommendation.")
             return existing
 
         buy_price = Decimal(str(round(float(trade_plan.get("best_buy_price") or trade_plan.get("optimal_entry_price") or trade_plan.get("entry_price") or trade_plan.get("current_price") or 0.0), 2)))
@@ -299,6 +286,7 @@ class SwingAuditService:
             cycle_id=cycle.id,
             symbol=norm_symbol,
             company_name=company_name or norm_symbol.replace(".NS", ""),
+            sector=sector,
             recommendation_date=rec_date,
             buy_price=buy_price,
             target_price=target_price,
@@ -319,7 +307,7 @@ class SwingAuditService:
         await db.commit()
         await db.refresh(audit)
 
-        logger.info(f"Audited new swing recommendation: {norm_symbol} @ ₹{buy_price} (User Bought: {user_bought}, Target: ₹{target_price}, SL: ₹{stop_loss})")
+        logger.info(f"Audited new swing recommendation: {norm_symbol} @ ₹{buy_price} (Sector: {sector}, User Bought: {user_bought}, Target: ₹{target_price}, SL: ₹{stop_loss})")
 
         # Immediately update daily prices for the active cycle and generate Excel
         await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
@@ -333,7 +321,8 @@ class SwingAuditService:
     ) -> int:
         """
         Catalogs a batch of recommended swing trade setups into the active 11-day audit cycle.
-        Idempotent: skips existing recommendations for the same symbol on the same date.
+        Cycle Anti-Churn: ensures each canonical symbol is tracked at most once per 11-day cycle,
+        completely eliminating duplicate entries and churn across the 11-day holding window.
         Updates daily prices and generates Excel report once after the batch is added.
         """
         if not stocks:
@@ -342,14 +331,15 @@ class SwingAuditService:
         rec_date = recommendation_date or date.today()
         cycle = await SwingAuditService.get_or_create_active_cycle(db, rec_date)
 
-        # Pre-query all currently active symbols in this cycle to prevent duplicate positions
-        active_symbols_stmt = select(SwingTradeAudit.symbol).where(
-            and_(
-                SwingTradeAudit.cycle_id == cycle.id,
-                SwingTradeAudit.status == "IN_PROGRESS"
-            )
+        # Pre-query ALL symbols already audited in this cycle (both active and closed)
+        cycle_symbols_stmt = select(SwingTradeAudit.symbol).where(
+            SwingTradeAudit.cycle_id == cycle.id
         )
-        active_symbols = set((await db.execute(active_symbols_stmt)).scalars().all())
+        existing_raw_symbols = (await db.execute(cycle_symbols_stmt)).scalars().all()
+        existing_clean_symbols = {
+            s.replace(".NS", "").replace(".BO", "").strip().upper()
+            for s in existing_raw_symbols if s
+        }
 
         added_count = 0
         for stock_data in stocks:
@@ -358,26 +348,15 @@ class SwingAuditService:
             if not symbol or not trade_plan or not isinstance(trade_plan, dict):
                 continue
 
-            norm_symbol = symbol.strip().upper()
-            if not norm_symbol.endswith(".NS") and not norm_symbol.endswith(".BO") and not norm_symbol.startswith("^"):
-                norm_symbol = f"{norm_symbol}.NS"
+            clean_sym = symbol.replace(".NS", "").replace(".BO", "").strip().upper()
+            norm_symbol = f"{clean_sym}.NS"
 
-            # Check if active position already exists in this cycle
-            if norm_symbol in active_symbols:
-                logger.info(f"Skipping batch catalog for {norm_symbol}: active position already in progress in Cycle #{cycle.cycle_number}.")
+            # Check if symbol has already been audited in this cycle
+            if clean_sym in existing_clean_symbols:
+                logger.info(f"Skipping batch catalog for {clean_sym}: already audited in Cycle #{cycle.cycle_number}.")
                 continue
 
-            # Check for duplicate on same date
-            existing_stmt = select(SwingTradeAudit).where(
-                and_(
-                    SwingTradeAudit.cycle_id == cycle.id,
-                    SwingTradeAudit.symbol == norm_symbol,
-                    SwingTradeAudit.recommendation_date == rec_date
-                )
-            )
-            existing = (await db.execute(existing_stmt)).scalars().first()
-            if existing:
-                continue
+            existing_clean_symbols.add(clean_sym)
 
             buy_price = Decimal(str(round(float(trade_plan.get("best_buy_price") or trade_plan.get("optimal_entry_price") or trade_plan.get("entry_price") or trade_plan.get("current_price") or 0.0), 2)))
             target_price = Decimal(str(round(float(trade_plan.get("target_price") or trade_plan.get("target_2") or (float(buy_price) * 1.06)), 2)))
@@ -389,11 +368,13 @@ class SwingAuditService:
             rr = Decimal(str(round(float(trade_plan.get("reward_to_risk") or 2.0), 2)))
             total_sc = stock_data.get("total_score")
             score_dec = Decimal(str(round(float(total_sc), 1))) if total_sc is not None else None
+            sector_name = stock_data.get("sector")
 
             audit = SwingTradeAudit(
                 cycle_id=cycle.id,
                 symbol=norm_symbol,
                 company_name=stock_data.get("name") or norm_symbol.replace(".NS", ""),
+                sector=sector_name,
                 recommendation_date=rec_date,
                 buy_price=buy_price,
                 target_price=target_price,
@@ -413,6 +394,8 @@ class SwingAuditService:
 
         if added_count > 0:
             await db.commit()
+            logger.info(f"Batch cataloged {added_count} unique swing recommendations into Cycle #{cycle.cycle_number}")
+            await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
             logger.info(f"Batch cataloged {added_count} swing recommendations into Cycle #{cycle.cycle_number}")
             await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
 
@@ -1016,6 +999,154 @@ class SwingAuditService:
         return await SwingAuditService.update_daily_prices(db, cycle_id=cycle_id)
 
     @staticmethod
+    async def rollover_to_next_cycle(
+        db: AsyncSession,
+        square_off_remaining: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Formally completes and archives the active 11-day audit cycle (e.g. Cycle #1),
+        squares off any remaining IN_PROGRESS positions at latest close prices,
+        freezes the final audited scorecard into a permanent .xlsx archive file,
+        and initializes the next cycle (e.g. Cycle #2) with status 'ACTIVE'.
+        """
+        await ensure_swing_audit_schema(db)
+        
+        stmt = (
+            select(SwingTradeAuditCycle)
+            .where(SwingTradeAuditCycle.status == "ACTIVE")
+            .order_by(SwingTradeAuditCycle.cycle_number.desc())
+            .options(selectinload(SwingTradeAuditCycle.audits))
+        )
+        cycle = (await db.execute(stmt)).scalars().first()
+        if not cycle:
+            cycle = await SwingAuditService.get_or_create_active_cycle(db)
+
+        # 1. First run daily price sync to ensure latest candle prices are recorded
+        await SwingAuditService.update_daily_prices(db, cycle_id=cycle.id)
+
+        # 2. Square off any remaining IN_PROGRESS trades
+        audits_stmt = (
+            select(SwingTradeAudit)
+            .where(SwingTradeAudit.cycle_id == cycle.id)
+            .options(selectinload(SwingTradeAudit.daily_prices))
+        )
+        cycle_audits = (await db.execute(audits_stmt)).scalars().all()
+
+        today_val = date.today()
+        for a in cycle_audits:
+            if a.status == "IN_PROGRESS" and square_off_remaining:
+                dps = sorted(a.daily_prices, key=lambda p: p.day_number)
+                last_dp = dps[-1] if dps else None
+                buy_val = float(a.buy_price or 0.0)
+                exit_price_val = float(last_dp.close_price) if last_dp and last_dp.close_price else buy_val
+                exit_day = last_dp.day_number if last_dp else 11
+                candle_date = last_dp.trade_date if last_dp else today_val
+
+                pnl_pct = round(((exit_price_val - buy_val) / buy_val) * 100, 2) if buy_val > 0 else 0.0
+                capital_val = float(a.allocated_capital or 100000.0)
+                pnl_val = round((pnl_pct / 100.0) * capital_val, 2)
+
+                a.status = "DAY_11_EXIT"
+                a.ratchet_stage = "DAY_11_EXIT"
+                a.exit_date = candle_date
+                a.exit_price = Decimal(str(round(exit_price_val, 2)))
+                a.exit_day_number = exit_day
+                a.profit_loss_pct = Decimal(str(pnl_pct))
+                a.realized_pnl_rupees = Decimal(str(pnl_val))
+                a.notes = f"Cycle #{cycle.cycle_number} concluded on {candle_date}. Position finalized at CMP ₹{exit_price_val:.2f}."
+
+        # 3. Compute final frozen scorecard
+        win_trades = 0
+        loss_trades = 0
+        total_gain_loss = 0.0
+        total_pnl = 0.0
+
+        for a in cycle_audits:
+            pnl_pct = float(a.profit_loss_pct or 0.0)
+            pnl_rs = float(a.realized_pnl_rupees or 0.0)
+            if a.status in ("TARGET_ACHIEVED", "TARGET_1_ACHIEVED", "TARGET_2_ACHIEVED", "TARGET_3_ACHIEVED", "STOPPED_IN_PROFIT") or (a.status == "DAY_11_EXIT" and pnl_pct > 0):
+                win_trades += 1
+            elif a.status == "STOPLOSS_HIT" or (a.status == "DAY_11_EXIT" and pnl_pct < 0):
+                loss_trades += 1
+            total_gain_loss += pnl_pct
+            total_pnl += pnl_rs
+
+        closed_trades = win_trades + loss_trades
+        win_rate = round((win_trades / closed_trades) * 100, 2) if closed_trades > 0 else 0.0
+
+        cycle.status = "COMPLETED"
+        cycle.total_trades = len(cycle_audits)
+        cycle.win_trades = win_trades
+        cycle.loss_trades = loss_trades
+        cycle.win_rate = Decimal(str(win_rate))
+        cycle.total_gain_loss_pct = Decimal(str(round(total_gain_loss, 2)))
+        cycle.total_pnl_rupees = Decimal(str(round(total_pnl, 2)))
+
+        # 4. Generate final permanent archive Excel workbook
+        archive_filename = f"Swing_Trade_Audit_Cycle_{cycle.cycle_number}_(Final).xlsx"
+        archive_path = get_audit_dir() / archive_filename
+        
+        gen_path = await SwingAuditService.generate_excel_workbook(db, cycle.id)
+        if gen_path and gen_path.exists():
+            shutil.copyfile(gen_path, archive_path)
+            cycle.excel_file_path = str(archive_path)
+
+        await db.commit()
+        await db.refresh(cycle)
+        logger.info(f"Finalized and archived Audit Cycle #{cycle.cycle_number}: {win_trades} Wins / {loss_trades} Losses ({win_rate}%), PnL: ₹{total_pnl:,.2f}")
+
+        # 5. Initialize Next Cycle
+        new_cycle_number = cycle.cycle_number + 1
+        new_from_date = today_val
+        new_to_date = add_trading_days(new_from_date, 11)
+        new_filename = f"Swing_Trade_Audit_{new_from_date.isoformat()}_to_{new_to_date.isoformat()}.xlsx"
+        new_file_path = str(get_audit_dir() / new_filename)
+
+        new_cycle = SwingTradeAuditCycle(
+            cycle_number=new_cycle_number,
+            from_date=new_from_date,
+            to_date=new_to_date,
+            status="ACTIVE",
+            excel_file_path=new_file_path,
+            total_trades=0,
+            win_trades=0,
+            loss_trades=0,
+            win_rate=Decimal("0.00"),
+            total_gain_loss_pct=Decimal("0.00"),
+            total_pnl_rupees=Decimal("0.00")
+        )
+        db.add(new_cycle)
+        await db.commit()
+        await db.refresh(new_cycle)
+        logger.info(f"Successfully initialized Audit Cycle #{new_cycle_number} ({new_from_date} to {new_to_date})")
+
+        return {
+            "status": "success",
+            "message": f"Cycle #{cycle.cycle_number} finalized and archived. Cycle #{new_cycle_number} is now ACTIVE.",
+            "completed_cycle": {
+                "id": str(cycle.id),
+                "cycle_number": cycle.cycle_number,
+                "from_date": cycle.from_date.isoformat(),
+                "to_date": cycle.to_date.isoformat(),
+                "status": "COMPLETED",
+                "total_trades": cycle.total_trades,
+                "win_trades": cycle.win_trades,
+                "loss_trades": cycle.loss_trades,
+                "win_rate": float(cycle.win_rate),
+                "total_pnl_rupees": float(cycle.total_pnl_rupees),
+                "archive_file": archive_filename
+            },
+            "active_cycle": {
+                "id": str(new_cycle.id),
+                "cycle_number": new_cycle.cycle_number,
+                "from_date": new_cycle.from_date.isoformat(),
+                "to_date": new_cycle.to_date.isoformat(),
+                "status": "ACTIVE",
+                "excel_file_path": new_file_path
+            }
+        }
+
+    @staticmethod
     async def generate_excel_workbook(db: AsyncSession, cycle_id: uuid.UUID) -> Optional[Path]:
         """
         Creates or updates an institutional-grade multi-sheet Excel file (.xlsx)
@@ -1197,6 +1328,7 @@ class SwingAuditService:
                 "Rec #",
                 "Symbol",
                 "Company Name",
+                "Sector",
                 "Date Recommended",
                 "Buy Price (₹)",
                 "User Bought",
@@ -1289,6 +1421,7 @@ class SwingAuditService:
                     f"SW-{c_cycle_number:02d}-{r_idx - 1:03d}",
                     audit.symbol.replace(".NS", ""),
                     audit.company_name or audit.symbol,
+                    getattr(audit, "sector", None) or "Nifty 50 (Benchmark)",
                     rec_dt_str,
                     float(audit.buy_price or 0.0),
                     "YES" if audit.user_bought else "NO",
@@ -1314,7 +1447,7 @@ class SwingAuditService:
                 exit_dt_str = audit.exit_date.strftime("%d-%m-%Y") if (audit.exit_date and hasattr(audit.exit_date, 'strftime')) else (str(audit.exit_date) if audit.exit_date else "—")
                 exit_p_val = float(audit.exit_price) if audit.exit_price is not None else "—"
 
-                # Dynamic Ratchet and Outcome columns (22 to 31)
+                # Dynamic Ratchet and Outcome columns (23 to 32)
                 row_data.extend([
                     dyn_sl,
                     t2_buy_str,
@@ -1332,54 +1465,54 @@ class SwingAuditService:
                     cell = ws_ledger.cell(row=r_idx, column=c_idx, value=val)
                     cell.fill = r_fill
                     cell.border = thin_border
-                    cell.alignment = Alignment(vertical="center", horizontal="center" if c_idx in (1, 4, 6, 10, 25, 26, 27, 31) else "right" if c_idx in (5, 7, 8, 9, 22, 28, 29, 30) else "left")
+                    cell.alignment = Alignment(vertical="center", horizontal="center" if c_idx in (1, 5, 7, 11, 26, 27, 28, 32) else "right" if c_idx in (6, 8, 9, 10, 23, 29, 30, 31) else "left")
 
                     # Highlight user bought status
-                    if c_idx == 6:
+                    if c_idx == 7:
                         cell.font = Font(name="Calibri", size=10, bold=True, color="166534" if audit.user_bought else "64748B")
-                    elif c_idx == 7 and audit.user_buy_price is not None:
+                    elif c_idx == 8 and audit.user_buy_price is not None:
                         cell.number_format = '₹#,##0.00'
-                    elif c_idx == 22:
+                    elif c_idx == 23:
                         cell.number_format = '₹#,##0.00'
-                    elif c_idx == 26: # Audit Status
+                    elif c_idx == 27: # Audit Status
                         cell.font = status_colors.get(audit.status, Font(name="Calibri", size=10, bold=True))
-                    elif c_idx == 29: # Gain/Loss %
+                    elif c_idx == 30: # Gain/Loss %
                         cell.font = Font(name="Calibri", size=10, bold=True, color="166534" if a_pnl_pct >= 0 else "991B1B")
-                    elif c_idx == 30: # Realized PnL ₹
+                    elif c_idx == 31: # Realized PnL ₹
                         cell.number_format = '₹#,##0.00;[Red]-₹#,##0.00'
 
             # Total summary row in Ledger
             if audits:
                 sum_row = len(audits) + 2
                 ws_ledger.row_dimensions[sum_row].height = 24
-                ws_ledger.merge_cells(start_row=sum_row, start_column=1, end_row=sum_row, end_column=28)
+                ws_ledger.merge_cells(start_row=sum_row, start_column=1, end_row=sum_row, end_column=29)
                 lbl = ws_ledger.cell(row=sum_row, column=1, value="TOTAL 11-DAY CYCLE GAIN / REALIZED PROFIT:")
                 lbl.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
                 lbl.fill = navy_fill
                 lbl.alignment = Alignment(horizontal="right", vertical="center")
 
                 # Apply fill across merged range
-                for col_c in range(1, 29):
+                for col_c in range(1, 30):
                     ws_ledger.cell(row=sum_row, column=col_c).fill = navy_fill
                     ws_ledger.cell(row=sum_row, column=col_c).border = thin_border
 
                 # Total Gain/Loss % formula or direct value
-                sum_pct_cell = ws_ledger.cell(row=sum_row, column=29, value=f"{c_ret:+.2f}%")
+                sum_pct_cell = ws_ledger.cell(row=sum_row, column=30, value=f"{c_ret:+.2f}%")
                 sum_pct_cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
                 sum_pct_cell.fill = emerald_fill if c_ret >= 0 else rose_fill
                 sum_pct_cell.alignment = Alignment(horizontal="right", vertical="center")
                 sum_pct_cell.border = thin_border
 
                 # Total Realized PnL ₹ formula or value
-                sum_pnl_cell = ws_ledger.cell(row=sum_row, column=30, value=c_pnl)
+                sum_pnl_cell = ws_ledger.cell(row=sum_row, column=31, value=c_pnl)
                 sum_pnl_cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
                 sum_pnl_cell.fill = emerald_fill if c_pnl >= 0 else rose_fill
                 sum_pnl_cell.alignment = Alignment(horizontal="right", vertical="center")
                 sum_pnl_cell.number_format = '₹#,##0.00;[Red]-₹#,##0.00'
                 sum_pnl_cell.border = thin_border
 
-                ws_ledger.cell(row=sum_row, column=31).fill = navy_fill
-                ws_ledger.cell(row=sum_row, column=31).border = thin_border
+                ws_ledger.cell(row=sum_row, column=32).fill = navy_fill
+                ws_ledger.cell(row=sum_row, column=32).border = thin_border
 
             # Auto-adjust column widths
             for col in ws_ledger.columns:
@@ -1395,7 +1528,7 @@ class SwingAuditService:
             ws_closed = wb.create_sheet(title="Booked Trades")
             ws_closed.views.sheetView[0].showGridLines = True
 
-            closed_headers = ["Trade #", "Symbol", "Company", "Entry Date", "Rec Price (₹)", "User Bought", "Buy Price (₹)", "Exit Date", "Exit (₹)", "Holding Days", "Outcome", "Gain / Loss %", "Realized P&L (₹)"]
+            closed_headers = ["Trade #", "Symbol", "Company", "Sector", "Entry Date", "Rec Price (₹)", "User Bought", "Buy Price (₹)", "Exit Date", "Exit (₹)", "Holding Days", "Outcome", "Gain / Loss %", "Realized P&L (₹)"]
             for c_idx, h in enumerate(closed_headers, 1):
                 cell = ws_closed.cell(row=1, column=c_idx, value=h)
                 cell.font = th_font
@@ -1426,6 +1559,7 @@ class SwingAuditService:
                     f"SW-{c_cycle_number:02d}-{r_i - 1:03d}",
                     c_trade.symbol.replace(".NS", ""),
                     c_trade.company_name or c_trade.symbol,
+                    getattr(c_trade, "sector", None) or "Nifty 50 (Benchmark)",
                     c_rec_dt_str,
                     float(c_trade.buy_price or 0.0),
                     "YES" if c_trade.user_bought else "NO",
@@ -1441,13 +1575,13 @@ class SwingAuditService:
                     cell = ws_closed.cell(row=r_i, column=c_i, value=v)
                     cell.fill = row_f
                     cell.border = thin_border
-                    cell.alignment = Alignment(vertical="center", horizontal="center" if c_i in (1, 4, 6, 8, 10, 11) else "right" if c_i in (5, 7, 9, 12, 13) else "left")
-                    if c_i == 6:
+                    cell.alignment = Alignment(vertical="center", horizontal="center" if c_i in (1, 5, 7, 9, 11, 12) else "right" if c_i in (6, 8, 10, 13, 14) else "left")
+                    if c_i == 7:
                         cell.font = Font(name="Calibri", size=10, bold=True, color="166534" if c_trade.user_bought else "64748B")
-                    elif c_i in (5, 7, 9):
+                    elif c_i in (6, 8, 10):
                         if isinstance(v, (int, float)):
                             cell.number_format = '₹#,##0.00'
-                    elif c_i == 13:
+                    elif c_i == 14:
                         cell.number_format = '₹#,##0.00;[Red]-₹#,##0.00'
 
             for col in ws_closed.columns:

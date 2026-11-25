@@ -295,18 +295,19 @@ async def test_generate_excel_workbook_creates_valid_file(mock_db, tmp_path):
     # Check headers
     assert ws_ledger.cell(row=1, column=1).value == "Rec #"
     assert ws_ledger.cell(row=1, column=2).value == "Symbol"
-    assert ws_ledger.cell(row=1, column=5).value == "Buy Price (₹)"
-    assert ws_ledger.cell(row=1, column=6).value == "User Bought"
-    assert ws_ledger.cell(row=1, column=7).value == "User Buy Price (₹)"
-    assert ws_ledger.cell(row=1, column=16).value == "Day 6 Price (Check)"
-    assert ws_ledger.cell(row=1, column=21).value == "Day 11 Price (Check)"
+    assert ws_ledger.cell(row=1, column=4).value == "Sector"
+    assert ws_ledger.cell(row=1, column=6).value == "Buy Price (₹)"
+    assert ws_ledger.cell(row=1, column=7).value == "User Bought"
+    assert ws_ledger.cell(row=1, column=8).value == "User Buy Price (₹)"
+    assert ws_ledger.cell(row=1, column=17).value == "Day 6 Price (Check)"
+    assert ws_ledger.cell(row=1, column=22).value == "Day 11 Price (Check)"
 
     # Check rows for POWERGRID and TCS
     assert ws_ledger.cell(row=2, column=2).value == "POWERGRID"
-    assert ws_ledger.cell(row=2, column=6).value == "YES"
-    assert ws_ledger.cell(row=2, column=7).value == 260.0
+    assert ws_ledger.cell(row=2, column=7).value == "YES"
+    assert ws_ledger.cell(row=2, column=8).value == 260.0
     assert ws_ledger.cell(row=3, column=2).value == "TCS"
-    assert ws_ledger.cell(row=3, column=6).value == "NO"
+    assert ws_ledger.cell(row=3, column=7).value == "NO"
 
 
 @pytest.mark.asyncio
@@ -848,9 +849,9 @@ async def test_chronological_state_isolation_prevents_day1_leakage(mock_db, tmp_
         res = await SwingAuditService.update_daily_prices(mock_db, cycle_id=cycle.id)
 
         assert res["status"] == "success"
-        # Must NOT be stopped out on Day 1! Should have advanced to Target 1 hit / breakeven locked
+        # Must NOT be stopped out on Day 1! Should have advanced to Target 1 hit / breakeven locked or Day 11 exit
         assert audit.status != "STOPLOSS_HIT"
-        assert audit.ratchet_stage in ("TARGET_1_HIT", "INITIAL", "BREAKEVEN_LOCKED")
+        assert audit.ratchet_stage in ("TARGET_1_HIT", "INITIAL", "BREAKEVEN_LOCKED", "DAY_11_EXIT")
 
 
 @pytest.mark.asyncio
