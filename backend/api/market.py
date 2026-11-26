@@ -322,7 +322,8 @@ async def get_market_indices(current_user=Depends(get_current_user_optional)):
 
     result = {"indices": indices}
     if any(i.get("price", 0) > 0 for i in indices):
-        await cache_set(cache_key, result, ttl=settings.CACHE_TTL_INDEX_QUOTE)
+        live_index_ttl = getattr(settings, "effective_live_index_ttl", max(1, min(int(settings.CACHE_TTL_INDEX_QUOTE), 3)))
+        await cache_set(cache_key, result, ttl=live_index_ttl)
     return result
 
 

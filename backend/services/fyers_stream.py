@@ -9,6 +9,7 @@ connected React clients in real time (<100ms latency).
 import asyncio
 import os
 import sys
+import time
 import types
 from datetime import datetime, timezone
 from typing import Optional, Set, Dict, List, Any
@@ -58,7 +59,19 @@ _HSM_TOKEN_MEMORY_CACHE: Dict[str, dict] = {}
 
 # In-memory quote cache populated on every tick (zero Redis overhead)
 _MEMORY_QUOTES: Dict[str, dict] = {}
+_MEMORY_QUOTE_TIMES: Dict[str, float] = {}
 _LAST_REDIS_QUOTE_SYNC: Dict[str, float] = {}
+
+
+def get_fresh_memory_quote(symbol: str, max_age_seconds: float = 5.0) -> Optional[dict]:
+    """Return an in-memory streaming quote only if still fresh (or legacy test-injected without timestamp)."""
+    q = _MEMORY_QUOTES.get(symbol)
+    if not q or q.get("price", 0) <= 0:
+        return None
+    ts_mono = _MEMORY_QUOTE_TIMES.get(symbol)
+    if ts_mono is not None and (time.monotonic() - ts_mono) > max_age_seconds:
+        return None
+    return q
 
 
 def _patch_fyers_symbol_conversion():
@@ -98,7 +111,7 @@ def _patch_fyers_symbol_conversion():
 
     def patched_symbol_to_hsmtoken(self, symbols: list):
         if not symbols:
-            return ({}, [], False)
+            return ({}, [], False, "")
 
         try:
             # Check which symbols need network resolution
@@ -179,7 +192,7 @@ def _patch_fyers_symbol_conversion():
                 if update_dict:
                     datadict[sub_symbol] = sym
 
-            return (datadict, wrong_symbol, dp_index_flag)
+            return (datadict, wrong_symbol, dp_index_flag, "")
         except Exception as e:
             logger.warning(f"Error in patched symbol_to_hsmtoken: {e}")
             if original_method:
@@ -187,7 +200,7 @@ def _patch_fyers_symbol_conversion():
                     return original_method(self, symbols)
                 except Exception:
                     pass
-            return ({}, symbols, False)
+            return ({}, symbols, False, "")
 
     data_ws.SymbolConversion.symbol_to_hsmtoken = patched_symbol_to_hsmtoken
     data_ws.SymbolConversion._is_stockai_patched = True
@@ -222,6 +235,11 @@ class FyersStreamService:
         self._client_id: Optional[str] = None
         self._access_token: Optional[str] = None
         self._invalid_symbols: Set[str] = set()
+        self._connected_at: float = 0.0
+        self._last_tick_at: float = 0.0
+        self._last_auto_start_attempt: float = 0.0
+        self._last_stalled_restart_at: float = 0.0
+        self._last_error: str = ""
 
         # Pre-seed default core indices and high-activity equity symbols
         self._default_indices = [
@@ -303,6 +321,40 @@ class FyersStreamService:
     def is_running(self) -> bool:
         """Returns True if the Fyers WebSocket stream runner is active."""
         return self._is_running
+
+    def is_stream_stalled(self, max_idle_seconds: float = 15.0) -> bool:
+        """True only when a live connected socket has produced zero ticks beyond max_idle_seconds during market hours."""
+        if not self.is_connected or self._socket is None or self._connected_at <= 0 or not self._subscribed_symbols:
+            return False
+        from backend.core.market_hours import is_indian_market_open
+        if not is_indian_market_open():
+            return False
+        newest_activity = max(self._connected_at, self._last_tick_at)
+        return (time.monotonic() - newest_activity) > max_idle_seconds
+
+    def can_auto_start(self, cooldown_seconds: float = 30.0) -> bool:
+        return (time.monotonic() - self._last_auto_start_attempt) >= cooldown_seconds
+
+    def mark_auto_start_attempt(self) -> None:
+        self._last_auto_start_attempt = time.monotonic()
+
+    def can_restart_stalled(self, cooldown_seconds: float = 60.0) -> bool:
+        return (time.monotonic() - self._last_stalled_restart_at) >= cooldown_seconds
+
+    def mark_stalled_restart_attempt(self) -> None:
+        self._last_stalled_restart_at = time.monotonic()
+
+    def get_stream_telemetry(self) -> dict:
+        last_tick_age_s = round(time.monotonic() - self._last_tick_at, 1) if self._last_tick_at > 0 else None
+        return {
+            "stream_connected": self.is_connected,
+            "stream_running": self._is_running,
+            "subscribed_count": len(self._subscribed_symbols),
+            "invalid_symbols_count": len(self._invalid_symbols),
+            "last_tick_age_s": last_tick_age_s,
+            "stream_stalled": self.is_stream_stalled(),
+            "last_error": self._last_error,
+        }
 
     async def start(self) -> bool:
         """
@@ -392,30 +444,34 @@ class FyersStreamService:
                 on_error=self._on_error,
                 on_message=self._on_tick
             )
-            # Offload socket connect to worker thread guarded by strict 3.0s timeout
+            # Offload socket connect to worker thread guarded by 8.0s timeout (connect() sleeps 2.0s internally)
             if hasattr(self._socket, "connect"):
                 from backend.core.executors import run_in_fast_executor
                 await asyncio.wait_for(
                     run_in_fast_executor(self._socket.connect),
-                    timeout=3.0
+                    timeout=8.0
                 )
             self._is_running = True
             logger.info("Fyers Data Socket initialization dispatched.")
             return True
         except asyncio.TimeoutError:
-            logger.warning("Fyers Data Socket connect timed out after 3.0s. Falling back to autonomous polling mode.")
+            logger.warning("Fyers Data Socket connect timed out after 8.0s. Falling back to autonomous polling mode.")
             self._is_connected = False
             self._is_running = False
+            self._last_error = "connect timeout (8.0s)"
             return False
         except Exception as err:
             logger.warning(f"Fyers Data Socket connection failed: {err}. Falling back to 1-second poller.")
             self._is_connected = False
             self._is_running = False
+            self._last_error = str(err)[:200]
             return False
 
     def _on_open(self) -> None:
         """Callback when Fyers WebSocket handshake completes."""
         self._is_connected = True
+        self._connected_at = time.monotonic()
+        self._last_error = ""
         logger.info("Fyers Data Socket CONNECTED successfully. Restoring primary feed status and subscribing to active market symbols...")
         try:
             from backend.services.market_data import MarketDataService
@@ -489,6 +545,8 @@ class FyersStreamService:
     def _on_close(self, message: Any) -> None:
         """Callback when Fyers WebSocket closes."""
         self._is_connected = False
+        self._connected_at = 0.0
+        self._last_error = str(message)[:200]
         logger.warning(f"Fyers Data Socket closed: {message}")
         if self._handle_invalid_symbol_message(message):
             return
@@ -502,6 +560,7 @@ class FyersStreamService:
 
     def _on_error(self, message: Any) -> None:
         """Callback when Fyers WebSocket encounters an error."""
+        self._last_error = str(message)[:200]
         logger.warning(f"Fyers Data Socket error: {message}")
         if self._handle_invalid_symbol_message(message):
             return
@@ -530,10 +589,11 @@ class FyersStreamService:
             if ltp is None or float(ltp) <= 0:
                 return
 
-            import time
             from backend.services.market_data import MarketDataService
 
             now_ts = time.time()
+            now_mono = time.monotonic()
+            self._last_tick_at = now_mono
             MarketDataService._last_fyers_tick_time = now_ts
             MarketDataService._fyers_token_valid = True
             MarketDataService._active_engine = "PRIMARY_FYERS"
@@ -603,26 +663,29 @@ class FyersStreamService:
                     "data_status": "realtime"
                 }
 
-                # Update in-memory quote store immediately for 0ms sub-microsecond REST lookups (0 Redis queries)
+                # Update in-memory quote store immediately with monotonic freshness timestamps
                 _MEMORY_QUOTES[target_symbol] = cached_quote
                 _MEMORY_QUOTES[fyers_sym] = cached_quote
                 _MEMORY_QUOTES[clean_symbol] = cached_quote
+                _MEMORY_QUOTE_TIMES[target_symbol] = now_mono
+                _MEMORY_QUOTE_TIMES[fyers_sym] = now_mono
+                _MEMORY_QUOTE_TIMES[clean_symbol] = now_mono
 
                 # Throttle Redis writes to max 1 operation per 3.0s per symbol to eliminate Redis connection pool exhaustion
-                now_mono = time.monotonic()
                 if now_mono - _LAST_REDIS_QUOTE_SYNC.get(target_symbol, 0.0) >= 3.0:
                     _LAST_REDIS_QUOTE_SYNC[target_symbol] = now_mono
+                    live_ttl = max(3, min(int(getattr(settings, "CACHE_TTL_QUOTE", 3) or 3), 10))
 
-                    async def _sync_redis_quote_batch(quote_snap, aliases):
+                    async def _sync_redis_quote_batch(quote_snap, aliases, ttl_sec):
                         try:
                             for key_alias in aliases:
-                                await cache_set(f"quote:{key_alias}", quote_snap, ttl=15)
+                                await cache_set(f"quote:{key_alias}", quote_snap, ttl=ttl_sec)
                         except Exception:
                             pass
 
                     if self._loop and self._loop.is_running():
                         asyncio.run_coroutine_threadsafe(
-                            _sync_redis_quote_batch(cached_quote, (target_symbol, fyers_sym, clean_symbol)),
+                            _sync_redis_quote_batch(cached_quote, (target_symbol, fyers_sym, clean_symbol), live_ttl),
                             self._loop
                         )
 
@@ -719,10 +782,10 @@ class FyersStreamService:
                 if hasattr(self._socket, "subscribe"):
                     await asyncio.wait_for(
                         run_in_fast_executor(self._socket.subscribe, symbols=chunk, data_type="SymbolUpdate"),
-                        timeout=3.0
+                        timeout=6.0
                     )
             except asyncio.TimeoutError:
-                logger.warning(f"Socket subscribe chunk timed out after 3.0s for chunk {idx + 1}/{total_chunks}")
+                logger.warning(f"Socket subscribe chunk timed out after 6.0s for chunk {idx + 1}/{total_chunks}")
             except Exception as e:
                 logger.warning(f"Error subscribing chunk {chunk}: {e}")
 
@@ -768,6 +831,7 @@ class FyersStreamService:
     async def _stop_internal(self) -> None:
         self._is_running = False
         self._is_connected = False
+        self._connected_at = 0.0
         sock = self._socket
         self._socket = None
         if sock:

@@ -40,6 +40,7 @@ interface MarketDepthWidgetProps {
   symbol: string;
   onClose?: () => void;
   onTrade?: (direction: 'BUY' | 'SELL', price?: number) => void;
+  onDepthTick?: (depth: MarketDepthData) => void;
   compact?: boolean;
   inline?: boolean;
 }
@@ -48,6 +49,7 @@ export default function MarketDepthWidget({
   symbol,
   onClose,
   onTrade,
+  onDepthTick,
   compact = false,
   inline = false,
 }: MarketDepthWidgetProps) {
@@ -72,6 +74,7 @@ export default function MarketDepthWidget({
     try {
       const res = await stocksApi.getDepth(symbol);
       setDepth(res.data);
+      onDepthTick?.(res.data);
       setError(null);
       consecutiveErrorsRef.current = 0;
     } catch (err: any) {

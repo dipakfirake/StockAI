@@ -81,6 +81,16 @@ class Settings(BaseSettings):
     # Google OAuth2 Authentication (100% Free Web Client)
     GOOGLE_CLIENT_ID: str | None = None
 
+    @property
+    def effective_live_quote_ttl(self) -> int:
+        """Cap live quote Redis TTL at <=3s so legacy .env overrides cannot freeze prices."""
+        return max(1, min(int(getattr(self, "CACHE_TTL_QUOTE", 3) or 3), 3))
+
+    @property
+    def effective_live_index_ttl(self) -> int:
+        """Cap live index Redis TTL at <=3s so legacy .env overrides cannot freeze indices."""
+        return max(1, min(int(getattr(self, "CACHE_TTL_INDEX_QUOTE", 3) or 3), 3))
+
 
 
 settings = Settings()

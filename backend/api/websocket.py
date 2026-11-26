@@ -245,15 +245,24 @@ async def general_websocket(websocket: WebSocket, token: str = ""):
 async def poll_market_data():
     """
     Autonomous Dual-Engine real-time market data streaming loop.
-    - If Fyers WebSocket push stream is active: operates as an auxiliary synchronizer (every 4s).
-    - If Fyers is expired / disconnected: operates as the primary live ticker using Yahoo Finance
-      Backup Engine (every 3s), broadcasting live ticking prices to charts and dashboards.
+    - If Fyers WebSocket push stream is active and ticks are flowing: zero REST calls (every 4s sync).
+    - If Fyers stream is disconnected or stalled: self-heals Fyers WS when token is valid, and
+      falls back to fresh uncached REST/Yahoo polling (bypass_cache=True) so prices never freeze.
     """
     from backend.services.fyers_stream import fyers_stream_service
     from backend.services.market_data import MarketDataService, market_data_service
 
+    last_sent_sig: dict[str, tuple] = {}
+    prev_conn_sig: tuple[str, ...] = ()
+
     while True:
         try:
+            curr_conn_sig = tuple(sorted(_market_connections.keys()))
+            if curr_conn_sig != prev_conn_sig:
+                # Reset echo dedup when a client joins/changes subscriptions so it receives an immediate baseline
+                last_sent_sig.clear()
+                prev_conn_sig = curr_conn_sig
+
             # Collect all active subscribed symbols across all connections
             symbols = set()
             for conn in _market_connections.values():
@@ -263,19 +272,32 @@ async def poll_market_data():
             if _market_connections and not symbols:
                 symbols.update(["^NSEI", "^NSEBANK"])
 
-            fyers_connected = fyers_stream_service.is_connected and MarketDataService._fyers_token_valid
+            import time as _time_mod
+            token_ready = MarketDataService._fyers_token_valid and _time_mod.time() >= MarketDataService._fyers_cooldown_until
+            stream_stalled = fyers_stream_service.is_stream_stalled(max_idle_seconds=15.0)
+            fyers_connected = fyers_stream_service.is_connected and MarketDataService._fyers_token_valid and not stream_stalled
+
+            # Self-heal Fyers WebSocket stream if token is active yet WS disconnected/stalled
+            if _market_connections and not MarketDataService._is_celery_worker_process():
+                if token_ready and not fyers_stream_service.is_connected and fyers_stream_service.can_auto_start(cooldown_seconds=30.0):
+                    fyers_stream_service.mark_auto_start_attempt()
+                    asyncio.create_task(fyers_stream_service.start())
+                elif token_ready and stream_stalled and fyers_stream_service.can_restart_stalled(cooldown_seconds=60.0):
+                    fyers_stream_service.mark_stalled_restart_attempt()
+                    logger.warning("[WebSocket] Fyers Data Socket stalled (>15s without market ticks); scheduling background restart.")
+                    asyncio.create_task(fyers_stream_service.restart())
 
             if symbols:
                 if fyers_connected:
                     # ZERO REST CALLS: Fyers Data Socket (WebSocket V3) is connected & streaming
                     await fyers_stream_service.subscribe_symbols(list(symbols))
                 else:
-                    # Autonomous Dual Failover Engine: Active ONLY when Fyers is expired / disconnected.
+                    # Autonomous Dual Failover / Fresh Poller: bypass Redis cache so ticks never freeze
                     quotes_map = {}
                     try:
                         quotes_map = await asyncio.wait_for(
-                            market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=True),
-                            timeout=2.5
+                            market_data_service.fetch_quotes_bulk(list(symbols), use_fallback=True, bypass_cache=True),
+                            timeout=4.0
                         )
                     except (asyncio.TimeoutError, Exception) as fetch_err:
                         logger.debug(f"[WebSocket] Dual-engine bulk quote poll notice: {fetch_err}")
@@ -306,26 +328,35 @@ async def poll_market_data():
                                     low_price=quote.get("low"),
                                     source=quote.get("source", "Backup (Yahoo Finance)"),
                                 )
+                                last_sent_sig[symbol] = (q_price, quote.get("timestamp"), quote.get("source"), now)
                             else:
+                                q_ts = quote.get("timestamp")
+                                q_src = quote.get("source", "Backup (Yahoo Finance)")
+                                prev_sig = last_sent_sig.get(symbol)
+                                # Skip back-to-back identical stale echoes unless keepalive (>15s) or payload changed
+                                if prev_sig and prev_sig[0] == q_price and prev_sig[1] == q_ts and prev_sig[2] == q_src and (now - prev_sig[3]) < 15.0:
+                                    continue
                                 await broadcast_market_update(
                                     symbol=symbol,
                                     price=q_price,
                                     change=quote.get("change", 0.0),
                                     change_pct=quote.get("change_pct", 0.0),
                                     volume=quote.get("volume", 0),
-                                    timestamp=quote.get("timestamp"),
+                                    timestamp=q_ts,
                                     open_price=quote.get("open"),
                                     high_price=quote.get("high"),
                                     low_price=quote.get("low"),
-                                    source=quote.get("source", "Backup (Yahoo Finance)"),
+                                    source=q_src,
                                     data_status=quote.get("data_status", "live_backup"),
                                     auto_interpolate=False,
                                 )
+                                last_sent_sig[symbol] = (q_price, q_ts, q_src, now)
         except Exception as e:
             logger.error(f"Error in dual-engine market data streaming poller: {e}")
 
         try:
-            fyers_connected = fyers_stream_service.is_connected and MarketDataService._fyers_token_valid
+            stream_stalled = fyers_stream_service.is_stream_stalled(max_idle_seconds=15.0)
+            fyers_connected = fyers_stream_service.is_connected and MarketDataService._fyers_token_valid and not stream_stalled
             if not is_indian_market_open():
                 poll_interval = 8.0  # Conserve VM resources when NSE is closed
             elif fyers_connected:

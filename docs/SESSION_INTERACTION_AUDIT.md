@@ -5741,3 +5741,39 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Commit and push changes from localhost (`git add -A`, `git commit`, `git push origin main`).
   - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
 
+---
+
+### Session Entry 97
+- **Timestamp:** 2026-11-26 12:32:00 IST (07:02:00 UTC)
+- **User Prompt:**
+  `"now price continuous price value ticker stopped? check by all end points and with all limitations also. /goal /browser /plan /teamwork ..."`
+- **Forensic Root Causes & Endpoints/Limits Diagnosed:**
+  1. **Live Browser & Stream Forensics (`https://stockai-live.duckdns.org`, 12:06–12:13 IST)**:
+     - WebSocket `/ws/?token=...` stayed open (`readyState: 1`) emitting `market_update` every ~3s, and Fyers REST (`/api/settings/fyers/status`) was `ACTIVE` (`ping_ms: 42.9–60.0 ms`, `circuit_state: CLOSED`), yet **0 ticks** originated from `"Fyers WebSocket Stream"`. Prices froze across ~60s windows while `/api/stocks/{sym}/depth` advanced on real Fyers Level 2 ticks.
+  2. **`FyersDataSocket` Subscription `IndexError` & Disconnect Recovery (`backend/services/fyers_stream.py`)**:
+     - `patched_symbol_to_hsmtoken` returned 3-tuples instead of the 4-tuple `(datadict, wrong_symbol, dp_index_flag, "")` indexed at `symbol_value[3]` by `fyers-apiv3==3.0.5`, silently dropping all symbol subscriptions.
+     - `connect()`/`subscribe()` `3.0s` timeouts clashed with SDK's internal `time.sleep(2)`, and no auto-start or stalled-stream watchdog existed during live hours.
+  3. **60s `.env` Cache TTL Override & Non-Bypassable Poller Cache (`.env.example`, `backend/core/config.py`, `backend/services/market_data.py`, `backend/api/market.py`, `backend/api/websocket.py`)**:
+     - `.env.example` specified `CACHE_TTL_QUOTE=60` and `CACHE_TTL_INDEX_QUOTE=15`, overriding `config.py` defaults via `env_file: - .env`, while `poll_market_data()` called `fetch_quotes_bulk()` without `bypass_cache=True` and `_MEMORY_QUOTES` lacked a freshness guard.
+  4. **Unnecessary 60s Warmup Re-Trigger & Concurrent Budget Contention (`backend/api/settings.py`, `backend/services/market_data.py`, `backend/services/market_depth_service.py`)**:
+     - Viewing `/admin` unconditionally called `reset_fyers_health(engage_warmup=True)` even when already healthy (`warmup_active: true, warmup_remaining: 59`), and quote/depth calls rejected immediately on tight spacing instead of acquiring via `acquire_fyers_rate_budget_slot()`.
+  5. **Frontend Stale-Tick & Flash Bugs (`frontend/src/pages/ChartPage.tsx`, `frontend/src/components/MarketDepthWidget.tsx`, `frontend/src/pages/AdminPage.tsx`)**:
+     - `ChartPage` suppressed REST `/quote` polling when duplicate frozen WS ticks arrived and briefly retained the previous symbol's LTP on symbol change; `AdminPage` flashed `EXPIRED` while loading and lacked real `websocket_stream` state.
+  6. **Endpoints & Limitations Inventoried**:
+     - `/ws` & `/ws/` (`MAX_SUBSCRIPTIONS_PER_CONNECTION=50`, `4096` byte frame limit, `3s/4s/8s` poll cycle, `HighFrequencyFluidityEngine` `3 x 0.1s` ₹0.05 tick steps), `FyersDataSocket` (`5000` symbols, chunks of `20`, `06:00 AM IST` expiry, `8s`/`6s` timeouts, `15s` stall watchdog), Fyers REST + `FyersRateGovernor` (`50` symbols/call, `40 req/60s`, `4 req/s`, `250ms` spacing, warmup `1.5s/0.8s/0.4s`, `5s/15-60s/300s` cooldowns), HTTP gateway token bucket tiers (`GENERAL 100 burst / 120/min`, `TRADING 20/30min`, `AI 15/30min`, `AUTH 10/min`, `PRESENCE 200/240min`), Yahoo fallback (`6s`/`5s` timeout, `data_status: "delayed"`), REST price endpoints (`/api/market/indices`, `/api/market/heatmap`, `/api/market/vix|sectors|regime`, `/api/stocks/{sym}/quote|depth|candles|insight`, `/api/watchlist`, `/api/portfolio`, `/api/settings/fyers/status`), including `sanitize_symbol` rejecting spaces like `NIFTY 50` -> `400 Bad Request`.
+- **Architectural Remediations Implemented:**
+  - `backend/services/fyers_stream.py`: 4-tuple HSM fix, `8s`/`6s` connect/subscribe timeouts, `_MEMORY_QUOTE_TIMES` (`get_fresh_memory_quote(5.0)`), stall/auto-start/telemetry tracking (`is_stream_stalled`, `can_auto_start`, `get_stream_telemetry`), capped Redis `_on_tick` TTL.
+  - `.env.example` & `backend/core/config.py`: `CACHE_TTL_QUOTE=3`, `CACHE_TTL_INTRADAY=5`, `CACHE_TTL_INDEX_QUOTE=3` + `effective_live_quote_ttl` / `effective_live_index_ttl` (`<= 3s`).
+  - `backend/services/market_data.py`, `backend/api/market.py`, `backend/services/market_depth_service.py`: Fresh memory-quote guard, `bypass_cache=True` option in `fetch_quotes_bulk`, capped `/indices` TTL, `acquire_fyers_rate_budget_slot` smoothing.
+  - `backend/api/websocket.py` & `backend/api/settings.py`: `poll_market_data` bypasses Redis cache on REST poll, auto-starts/restarts Fyers WS stream cleanly, deduplicates unchanged echoes (`<15s` keepalive); `/fyers/status` only warms up on recovery, auto-starts healthy stream, exposes `dual_engine.websocket_stream`.
+  - `frontend/src/components/MarketDepthWidget.tsx`, `frontend/src/pages/ChartPage.tsx`, `frontend/src/pages/AdminPage.tsx`: L2 depth `onDepthTick` callback, symbol-switch clear + advancing-WS-signature check, `CHECKING LIVE STATE...` guard and `websocket_stream` display + TypeScript definitions.
+  - Added `backend/tests/test_live_ticker_continuity.py` (`6` tests).
+- **Verification Evidence:**
+  - `py_compile` across all modified/new Python modules: **exit code 0**.
+  - `pytest` across 14 backend suites: **125 passed, 0 failed in 107.19s (100% green)**.
+  - Frontend production build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 15.03s (exit code 0)**.
+- **Next Safe Step:**
+  - Commit and push changes from localhost (`git add -A`, `git commit`, `git push origin main`).
+  - Instruct user to update live `.env` TTL keys (`CACHE_TTL_QUOTE=3`, `CACHE_TTL_INDEX_QUOTE=3`, `CACHE_TTL_INTRADAY=5`) and run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend`.
+
+

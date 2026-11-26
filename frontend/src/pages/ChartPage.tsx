@@ -169,6 +169,8 @@ export default function ChartPage() {
   const compareSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const isWsConnectedRef = useRef(false)
   const lastWsTickTimeRef = useRef<number>(0)
+  const lastFreshWsTickTimeRef = useRef<number>(0)
+  const lastWsPayloadSigRef = useRef<string>('')
   
   const tradePriceLinesRef = useRef<any[]>([])
 
@@ -289,9 +291,16 @@ export default function ChartPage() {
     }
   }, [location.state, location.pathname])
 
-  // Bug Fix: Clear selectedPattern when symbol changes (old pattern of TCS shouldn't show on RELIANCE)
+  // Bug Fix: Clear selectedPattern & stale quote/info when symbol changes so old stock price never flashes
   useEffect(() => {
     setSelectedPattern(null)
+    setQuote(null)
+    quoteRef.current = null
+    setInfo(null)
+    setSwingTrade(null)
+    lastWsTickTimeRef.current = 0
+    lastFreshWsTickTimeRef.current = 0
+    lastWsPayloadSigRef.current = ''
   }, [symbol])
 
   // Keyboard Shortcuts: G = go to search, Esc = clear pattern, I = toggle indicators, E = toggle events
@@ -1174,9 +1183,9 @@ export default function ChartPage() {
     if (!symbol) return
 
     const pollTimer = setInterval(async () => {
-      // Skip REST polling if client is offline or WebSocket has actively received real-time ticks
+      // Skip REST polling if client is offline or WebSocket has delivered fresh advancing ticks recently
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
-      if (isWsConnectedRef.current && Date.now() - lastWsTickTimeRef.current < 8000) return
+      if (isWsConnectedRef.current && Date.now() - lastFreshWsTickTimeRef.current < 8000) return
 
       try {
         const res = await stocksApi.getQuote(symbol)
@@ -1306,6 +1315,11 @@ export default function ChartPage() {
               lastWsTickTimeRef.current = Date.now()
               const newPrice = Number(data.price)
               if (Number.isFinite(newPrice) && newPrice > 0) {
+                const payloadSig = `${newPrice}|${data.volume ?? ''}|${data.timestamp ?? ''}`
+                if (payloadSig !== lastWsPayloadSigRef.current) {
+                  lastWsPayloadSigRef.current = payloadSig
+                  lastFreshWsTickTimeRef.current = Date.now()
+                }
                 quoteRef.current = {
                   ...(quoteRef.current || {}),
                   price: newPrice,
@@ -2261,6 +2275,40 @@ export default function ChartPage() {
         <MarketDepthWidget 
           symbol={symbol} 
           inline={true}
+          onDepthTick={(depth) => {
+            if (!depth?.is_realtime || !(depth.ltp > 0)) return
+            const livePrice = Number(depth.ltp)
+            const prevPrice = Number(quoteRef.current?.price || 0)
+            if (prevPrice === livePrice) return
+            if (Date.now() - lastFreshWsTickTimeRef.current < 1500) return
+            const prevClose = Number(quoteRef.current?.previous_close || depth.previous_close || 0)
+            const derivedChange = prevClose > 0 ? Number((livePrice - prevClose).toFixed(2)) : quoteRef.current?.change
+            const derivedPct = prevClose > 0 ? Number((((livePrice - prevClose) / prevClose) * 100).toFixed(2)) : quoteRef.current?.change_pct
+            const depthTick = {
+              symbol,
+              price: livePrice,
+              change: derivedChange,
+              change_pct: derivedPct,
+              volume: depth.volume > 0 ? depth.volume : quoteRef.current?.volume,
+              timestamp: depth.timestamp,
+              source: depth.data_source || 'Fyers Level 2 Market Depth',
+              data_status: 'realtime',
+            }
+            quoteRef.current = { ...(quoteRef.current || {}), ...depthTick }
+            tickListenersRef.current.forEach(listener => listener(depthTick))
+            if (candleSeriesRef.current && lastCandleRef.current) {
+              const cur = lastCandleRef.current
+              const updatedCandle: CandlestickData = {
+                time: cur.time,
+                open: cur.open,
+                high: Math.max(Number(cur.high), livePrice),
+                low: Math.min(Number(cur.low), livePrice),
+                close: livePrice,
+              }
+              lastCandleRef.current = updatedCandle
+              try { candleSeriesRef.current.update(updatedCandle) } catch (_) {}
+            }
+          }}
           onTrade={(direction, price) => {
             navigate('/paper-trading', { state: { symbol, direction, price } })
           }}

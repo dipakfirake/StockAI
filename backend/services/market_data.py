@@ -939,10 +939,14 @@ class MarketDataService:
         clean_symbol = original_symbol.replace(".NS", "").replace(".BO", "").replace("^", "").strip().upper()
         cache_key = f"quote:{original_symbol}"
         
-        # 0. Check in-memory fast quote store for instantaneous zero-overhead resolution (0 Redis queries)
+        # 0. Check in-memory fast quote store for instantaneous zero-overhead resolution (guarded against stale disconnects)
         try:
-            from backend.services.fyers_stream import _MEMORY_QUOTES
-            mem_quote = _MEMORY_QUOTES.get(original_symbol) or _MEMORY_QUOTES.get(fyers_symbol) or _MEMORY_QUOTES.get(clean_symbol)
+            from backend.services.fyers_stream import get_fresh_memory_quote
+            mem_quote = (
+                get_fresh_memory_quote(original_symbol, max_age_seconds=5.0)
+                or get_fresh_memory_quote(fyers_symbol, max_age_seconds=5.0)
+                or get_fresh_memory_quote(clean_symbol, max_age_seconds=5.0)
+            )
             if mem_quote and mem_quote.get("price", 0) > 0:
                 return mem_quote
         except Exception:
@@ -980,7 +984,9 @@ class MarketDataService:
             if not MarketDataService._canary_in_progress:
                 await MarketDataService.probe_fyers_canary(probe_symbol=fyers_symbol)
 
-        if fyers_symbol not in MarketDataService._invalid_fyers_symbols and MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
+        live_quote_ttl = getattr(settings, "effective_live_quote_ttl", max(1, min(int(settings.CACHE_TTL_QUOTE), 3)))
+
+        if fyers_symbol not in MarketDataService._invalid_fyers_symbols and MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.acquire_fyers_rate_budget_slot(max_wait_seconds=1.2):
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 data = {"symbols": fyers_symbol}
@@ -1027,7 +1033,7 @@ class MarketDataService:
 
                     if float(last_price) > 0:
                         MarketDataService._last_fyers_tick_time = now
-                        await cache_set(cache_key, quote, ttl=settings.CACHE_TTL_QUOTE)
+                        await cache_set(cache_key, quote, ttl=live_quote_ttl)
                         return quote
                     elif fyers_symbol.startswith("BSE:"):
                         return await MarketDataService.fetch_quote(original_symbol.replace(".BO", ".NS"))
@@ -1096,7 +1102,7 @@ class MarketDataService:
                     "data_status": "delayed",
                     "source": "Backup",
                 }
-                await cache_set(cache_key, fallback_quote, ttl=settings.CACHE_TTL_QUOTE)
+                await cache_set(cache_key, fallback_quote, ttl=live_quote_ttl)
                 return fallback_quote
         except Exception:
             pass
@@ -1117,7 +1123,7 @@ class MarketDataService:
                         meta = res_list[0].get("meta", {})
                         fallback_quote = MarketDataService._parse_yahoo_chart_meta(meta, original_symbol)
                         if fallback_quote:
-                            await cache_set(cache_key, fallback_quote, ttl=settings.CACHE_TTL_QUOTE)
+                            await cache_set(cache_key, fallback_quote, ttl=live_quote_ttl)
                             return fallback_quote
         except Exception as e:
             logger.debug(f"Direct chart API quote fallback failed for {original_symbol}: {e}")
@@ -1125,7 +1131,7 @@ class MarketDataService:
         return None
 
     @staticmethod
-    async def fetch_quotes_bulk(symbols: list[str], use_fallback: bool = True) -> dict[str, dict]:
+    async def fetch_quotes_bulk(symbols: list[str], use_fallback: bool = True, bypass_cache: bool = False) -> dict[str, dict]:
         """
         Fetch real-time quotes for multiple symbols in a single sub-100ms request via Fyers.
         """
@@ -1134,18 +1140,22 @@ class MarketDataService:
 
         import time
         now = time.time()
+        live_quote_ttl = getattr(settings, "effective_live_quote_ttl", max(1, min(int(settings.CACHE_TTL_QUOTE), 3)))
 
         quotes_dict = {}
         missing_symbols = []
-        for s in symbols:
-            try:
-                cached = await cache_get(f"quote:{s}")
-                if cached and cached.get("price", 0) > 0:
-                    quotes_dict[s] = cached
-                else:
+        if bypass_cache:
+            missing_symbols = list(symbols)
+        else:
+            for s in symbols:
+                try:
+                    cached = await cache_get(f"quote:{s}")
+                    if cached and cached.get("price", 0) > 0:
+                        quotes_dict[s] = cached
+                    else:
+                        missing_symbols.append(s)
+                except Exception:
                     missing_symbols.append(s)
-            except Exception:
-                missing_symbols.append(s)
 
         # If all symbols are already fresh in cache (from WebSocket push ticks or recent reads), return immediately!
         if not missing_symbols:
@@ -1182,7 +1192,7 @@ class MarketDataService:
                 probe_sym = fyers_keys[0] if fyers_keys else "NSE:NIFTY50-INDEX"
                 await MarketDataService.probe_fyers_canary(probe_symbol=probe_sym)
 
-        if fyers_keys and MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.check_and_record_fyers_rate_budget():
+        if fyers_keys and MarketDataService._fyers_token_valid and now >= MarketDataService._fyers_cooldown_until and await MarketDataService.acquire_fyers_rate_budget_slot(max_wait_seconds=1.0):
             try:
                 fyers = await MarketDataService._get_fyers_client()
                 # Fyers quotes API accepts maximum 50 symbols per request
@@ -1241,7 +1251,7 @@ class MarketDataService:
                                     }
                                     quotes_dict[orig_sym] = q_obj
                                     try:
-                                        await cache_set(f"quote:{orig_sym}", q_obj, ttl=settings.CACHE_TTL_QUOTE)
+                                        await cache_set(f"quote:{orig_sym}", q_obj, ttl=live_quote_ttl)
                                     except Exception:
                                         pass
                     elif response.get("code") in (429, -360):
@@ -1299,7 +1309,7 @@ class MarketDataService:
                                                             "source": "Fyers API",
                                                         }
                                                         quotes_dict[orig_sym] = q_obj
-                                                        await cache_set(f"quote:{orig_sym}", q_obj, ttl=settings.CACHE_TTL_QUOTE)
+                                                        await cache_set(f"quote:{orig_sym}", q_obj, ttl=live_quote_ttl)
                                     except Exception:
                                         pass
                             logger.warning(f"Fyers reported invalid symbol parameter in chunk (quarantined {bad_list}): {chunk_keys[:5]}")
@@ -1358,7 +1368,7 @@ class MarketDataService:
                             quotes_dict[sym] = quote_data
                             MarketDataService._last_yahoo_tick_time = now
                             try:
-                                await cache_set(f"quote:{sym}", quote_data, ttl=settings.CACHE_TTL_QUOTE)
+                                await cache_set(f"quote:{sym}", quote_data, ttl=live_quote_ttl)
                             except Exception:
                                 pass
             except Exception as e:
@@ -1420,7 +1430,7 @@ class MarketDataService:
                                         }
                                         quotes_dict[orig_sym] = q
                                         try:
-                                            await cache_set(f"quote:{orig_sym}", q, ttl=settings.CACHE_TTL_QUOTE)
+                                            await cache_set(f"quote:{orig_sym}", q, ttl=live_quote_ttl)
                                         except Exception:
                                             pass
                             except Exception:

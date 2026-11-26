@@ -70,6 +70,18 @@ interface FyersStatus {
     fyers_expiry_schedule: string;
     source_label: string;
     dual_connection_active: boolean;
+    warmup_active?: boolean;
+    warmup_remaining?: number;
+    rate_budget_available?: number;
+    websocket_stream?: {
+      stream_connected?: boolean;
+      stream_running?: boolean;
+      subscribed_count?: number;
+      invalid_symbols_count?: number;
+      last_tick_age_s?: number | null;
+      stream_stalled?: boolean;
+      last_error?: string;
+    };
   };
 }
 
@@ -1318,9 +1330,12 @@ export default function AdminPage() {
 
           {/* Live Diagnostic & Telemetry Grid */}
           {(() => {
+            const isLoadingInitial = fyersLoading && !fyersStatus;
             const isRateLimited = fyersStatus?.token_status === 'RATE_LIMITED';
             const isConnected = Boolean(fyersStatus?.connected);
             const cooldownSec = fyersStatus?.dual_engine?.fyers_cooldown_remaining || 0;
+            const wsStream = fyersStatus?.dual_engine?.websocket_stream;
+            const wsStreamConnected = wsStream ? Boolean(wsStream.stream_connected && !wsStream.stream_stalled) : isConnected;
 
             return (
               <>
@@ -1337,12 +1352,12 @@ export default function AdminPage() {
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                       Fyers API V3 Live State
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 800, color: isRateLimited ? '#fbbf24' : (isConnected ? '#4ade80' : '#fde047') }}>
-                      <span style={{ width: 10, height: 10, borderRadius: '50%', background: isRateLimited ? '#f59e0b' : (isConnected ? '#22c55e' : '#eab308'), display: 'inline-block', boxShadow: isRateLimited ? '0 0 10px #f59e0b' : (isConnected ? '0 0 10px #22c55e' : '0 0 10px #eab308') }} />
-                      {isRateLimited ? 'RATE-LIMITED (COOLDOWN)' : (isConnected ? 'LIVE & ACTIVE' : 'EXPIRED (06:00 AM)')}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 800, color: isLoadingInitial ? '#94a3b8' : (isRateLimited ? '#fbbf24' : (isConnected ? '#4ade80' : '#fde047')) }}>
+                      <span style={{ width: 10, height: 10, borderRadius: '50%', background: isLoadingInitial ? '#94a3b8' : (isRateLimited ? '#f59e0b' : (isConnected ? '#22c55e' : '#eab308')), display: 'inline-block', boxShadow: isLoadingInitial ? 'none' : (isRateLimited ? '0 0 10px #f59e0b' : (isConnected ? '0 0 10px #22c55e' : '0 0 10px #eab308')) }} />
+                      {isLoadingInitial ? 'CHECKING LIVE STATE...' : (isRateLimited ? 'RATE-LIMITED (COOLDOWN)' : (isConnected ? 'LIVE & ACTIVE' : 'EXPIRED (06:00 AM)'))}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                      {isRateLimited ? `Resuming Fyers in ${cooldownSec}s` : (fyersStatus?.name ? `Trader: ${fyersStatus.name}` : 'Awaiting daily renewal')}
+                      {isLoadingInitial ? 'Pinging broker profile...' : (isRateLimited ? `Resuming Fyers in ${cooldownSec}s` : (fyersStatus?.name ? `Trader: ${fyersStatus.name}` : 'Awaiting daily renewal'))}
                     </div>
                   </div>
 
@@ -1356,7 +1371,7 @@ export default function AdminPage() {
                       {fyersStatus?.ping_ms != null ? `${fyersStatus.ping_ms} ms` : (fyersLoading ? 'Measuring...' : 'Standby')}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                      {isRateLimited ? 'Throttled by Fyers (50 req/min cap)' : (isConnected ? 'Ultra-low WebSocket push latency' : 'Yahoo backup poller active')}
+                      {isLoadingInitial ? 'Checking feed mode...' : (isRateLimited ? 'Throttled by Fyers (50 req/min cap)' : (isConnected ? (wsStreamConnected ? 'Ultra-low WebSocket push latency' : 'REST feed active (reconnecting WS...)') : 'Yahoo backup poller active'))}
                     </div>
                   </div>
 
@@ -1365,11 +1380,11 @@ export default function AdminPage() {
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                       Active Market Feed
                     </div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: (isConnected && !isRateLimited) ? '#4ade80' : '#fbbf24' }}>
-                      {isRateLimited ? 'Backup: Yahoo Finance (Throttled)' : (isConnected ? 'Primary: Fyers WebSocket' : 'Backup: Yahoo Finance')}
+                    <div style={{ fontSize: 14, fontWeight: 800, color: isLoadingInitial ? '#94a3b8' : ((isConnected && !isRateLimited) ? '#4ade80' : '#fbbf24') }}>
+                      {isLoadingInitial ? 'Connecting...' : (isRateLimited ? 'Backup: Yahoo Finance (Throttled)' : (isConnected ? (wsStreamConnected ? 'Primary: Fyers WebSocket' : 'Primary: Fyers REST + WS Sync') : 'Backup: Yahoo Finance'))}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                      {isRateLimited ? `Hot-swaps to Fyers in ${cooldownSec}s` : (isConnected ? 'Real-time (<100ms push stream)' : 'Live ticker (smooth 3s polling)')}
+                      {isLoadingInitial ? 'Fetching telemetry' : (isRateLimited ? `Hot-swaps to Fyers in ${cooldownSec}s` : (isConnected ? (wsStreamConnected ? 'Real-time (<100ms push stream)' : 'Live Fyers 3s REST quotes') : 'Live ticker (smooth 3s polling)'))}
                     </div>
                   </div>
 

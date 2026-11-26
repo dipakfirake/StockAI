@@ -319,8 +319,8 @@ class MarketDepthService:
                 except Exception as e:
                     logger.debug(f"Fyers depth socket subscription notice: {e}")
 
-            # 3. Check Fyers REST rate budget
-            can_call_fyers = await MarketDataService.check_and_record_fyers_rate_budget()
+            # 3. Check Fyers REST rate budget (briefly wait for spacing slot instead of dropping to synthetic)
+            can_call_fyers = await MarketDataService.acquire_fyers_rate_budget_slot(max_wait_seconds=0.8)
             if can_call_fyers:
                 try:
                     fyers_instance = await MarketDataService._get_fyers_client()

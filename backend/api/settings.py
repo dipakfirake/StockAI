@@ -354,8 +354,24 @@ async def get_fyers_status(
         ping_ms = round((time.perf_counter() - start_t) * 1000, 1)
 
         if prof.get("s") == "ok":
-            MarketDataService.reset_fyers_health(engage_warmup=True)
+            was_healthy = (
+                MarketDataService._fyers_token_valid
+                and time.time() >= MarketDataService._fyers_cooldown_until
+            )
+            MarketDataService.reset_fyers_health(engage_warmup=not was_healthy)
+            stream_telemetry = {}
+            if not MarketDataService._is_celery_worker_process():
+                try:
+                    from backend.services.fyers_stream import fyers_stream_service
+                    if not fyers_stream_service.is_connected and fyers_stream_service.can_auto_start(cooldown_seconds=15.0):
+                        fyers_stream_service.mark_auto_start_attempt()
+                        asyncio.create_task(fyers_stream_service.start())
+                    stream_telemetry = fyers_stream_service.get_stream_telemetry()
+                except Exception:
+                    pass
             feed_info = MarketDataService.get_feed_status()
+            if stream_telemetry:
+                feed_info["websocket_stream"] = stream_telemetry
             data = prof.get("data", {})
             raw_fy_id = data.get("fy_id", client_id)
             result = {
