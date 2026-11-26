@@ -97,6 +97,7 @@ export default function AdminPage() {
   const [auditFiles, setAuditFiles] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditSyncing, setAuditSyncing] = useState(false);
+  const [rollingOverAudit, setRollingOverAudit] = useState(false);
 
   const fetchAuditData = async () => {
     setAuditLoading(true);
@@ -111,6 +112,24 @@ export default function AdminPage() {
       console.error('Failed to load audit data in admin:', err);
     } finally {
       setAuditLoading(false);
+    }
+  };
+
+  const handleAdminRolloverCycle = async () => {
+    const currNum = auditCycle?.cycle_number || 1;
+    if (!window.confirm(`Complete Cycle #${currNum}, archive final Excel ledger, square off remaining open picks at latest CMP, and start Cycle #${currNum + 1}?`)) {
+      return;
+    }
+    setRollingOverAudit(true);
+    try {
+      const res = await swingAuditApi.rolloverCycle(true);
+      const nextNum = res.data?.active_cycle?.cycle_number || currNum + 1;
+      alert(`Cycle #${currNum} archived! Cycle #${nextNum} is now ACTIVE.`);
+      await fetchAuditData();
+    } catch (err: any) {
+      alert(`Cycle rollover failed: ${err?.response?.data?.detail || err.message}`);
+    } finally {
+      setRollingOverAudit(false);
     }
   };
 
@@ -2426,6 +2445,16 @@ export default function AdminPage() {
                 </button>
 
                 <button
+                  onClick={handleAdminRolloverCycle}
+                  disabled={rollingOverAudit}
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38, padding: '0 16px', color: '#a78bfa', borderColor: 'rgba(167, 139, 250, 0.35)', background: 'rgba(167, 139, 250, 0.1)' }}
+                >
+                  <RefreshCw size={15} className={rollingOverAudit ? 'spin' : ''} />
+                  <span>{rollingOverAudit ? 'Rolling Over...' : `Complete & Start Cycle #${(auditCycle?.cycle_number || 1) + 1}`}</span>
+                </button>
+
+                <button
                   onClick={handleAdminSyncAudit}
                   disabled={auditSyncing}
                   className="btn btn-secondary"
@@ -2482,7 +2511,27 @@ export default function AdminPage() {
                     ₹{(auditCycle.total_pnl_rupees || 0).toLocaleString('en-IN')}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                    Total Setups: {auditCycle.total_trades || 0}
+                    Setups: {auditCycle.total_trades || 0} ({auditCycle.closed_trades ?? 0} closed / {auditCycle.in_progress_trades ?? 0} open)
+                  </div>
+                </div>
+
+                <div style={{ padding: 14, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Profit Factor & Ratchet</div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 800, color: (auditCycle.profit_factor || 0) >= 1.2 ? '#34d399' : '#fbbf24', marginTop: 4 }}>
+                    {auditCycle.profit_factor ?? 0}x PF
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                    Targets: {auditCycle.target_win_trades ?? 0} · Ratchet Locks: {auditCycle.ratchet_profit_trades ?? 0}
+                  </div>
+                </div>
+
+                <div style={{ padding: 14, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Net After Charges / My Buys</div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 800, color: (auditCycle.net_after_charges_pnl ?? auditCycle.total_pnl_rupees ?? 0) >= 0 ? '#34d399' : '#f87171', marginTop: 4 }}>
+                    ₹{((auditCycle.net_after_charges_pnl ?? auditCycle.total_pnl_rupees) || 0).toLocaleString('en-IN')}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#a78bfa', marginTop: 4 }}>
+                    Executed: {auditCycle.user_executed_trades ?? 0} ({auditCycle.user_executed_win_rate ?? 0}% WR)
                   </div>
                 </div>
               </div>

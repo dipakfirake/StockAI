@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from sqlalchemy import String, Integer, DateTime, Numeric, ForeignKey
+from sqlalchemy import String, Integer, Boolean, DateTime, Numeric, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -34,6 +34,16 @@ class PaperTrade(Base):
     stop_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     target_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     stop_loss: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    
+    # Progressive Coupled Ratchet T1 -> T2 -> T3 Trailing Stop-Loss tracking
+    target_1: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    target_2: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    target_3: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    initial_stop_loss: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    highest_price_recorded: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    lowest_price_recorded: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    ratchet_stage: Mapped[str] = mapped_column(String(40), default="INITIAL")  # INITIAL, BREAKEVEN_LOCKED, T2_RATCHET_ACTIVE, T3_RATCHET_ACTIVE, TARGET_1_ACHIEVED, TARGET_2_ACHIEVED, TARGET_3_ACHIEVED, STOPPED_IN_PROFIT
+    trailing_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     
     # Execution details
     entry_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)

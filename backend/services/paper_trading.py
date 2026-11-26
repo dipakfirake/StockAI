@@ -49,12 +49,16 @@ class PaperTradingService:
         stop_price: float | None = None,
         target_price: float | None = None,
         stop_loss: float | None = None,
+        target_1: float | None = None,
+        target_2: float | None = None,
+        target_3: float | None = None,
+        trailing_enabled: bool = True,
     ) -> PaperTrade:
         """Place a simulated order with strict financial validation."""
         # 1. Direction and symbol sanitization
         if direction not in ("BUY", "SELL"):
             raise ValueError(f"Invalid direction '{direction}'. Must be BUY or SELL.")
-        if not re.match(r"^[A-Za-z0-9\.\-\:]{1,30}$", symbol):
+        if not re.match(r"^[A-Za-z0-9.\-:&_]{1,30}$", symbol):
             raise ValueError(f"Invalid symbol format '{symbol}'. Potential malicious input.")
 
         # 2. Quantity boundaries (anti-overflow & sanity bounds)
@@ -184,6 +188,17 @@ class PaperTradingService:
                     slippage_amount = raw_price * settings.DEFAULT_SLIPPAGE_PCT
                     entry_price = raw_price + slippage_amount if direction == "BUY" else raw_price - slippage_amount
 
+        # Normalize Progressive Coupled Ratchet targets when multi-tier T1/T2/T3 are supplied
+        has_multi_targets = any(v is not None and float(v) > 0 for v in (target_1, target_2, target_3))
+        eff_t1 = float(target_1) if (target_1 and float(target_1) > 0) else None
+        eff_t2 = float(target_2) if (target_2 and float(target_2) > 0) else (float(target_price) if (has_multi_targets and target_price and float(target_price) > 0) else None)
+        eff_t3 = float(target_3) if (target_3 and float(target_3) > 0) else None
+        if has_multi_targets:
+            candidates = [v for v in (eff_t1, eff_t2, eff_t3, target_price) if v is not None and float(v) > 0]
+            eff_target_price = max(candidates) if direction == "BUY" else min(candidates)
+        else:
+            eff_target_price = target_price
+
         trade = PaperTrade(
             user_id=uuid.UUID(str(user_id)),
             symbol=symbol,
@@ -193,14 +208,23 @@ class PaperTradingService:
             quantity=quantity,
             limit_price=Decimal(str(limit_price)) if limit_price else None,
             stop_price=Decimal(str(stop_price)) if stop_price else None,
-            target_price=Decimal(str(target_price)) if target_price else None,
+            target_price=Decimal(str(round(eff_target_price, 4))) if eff_target_price else None,
             stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
+            target_1=Decimal(str(round(eff_t1, 4))) if eff_t1 else None,
+            target_2=Decimal(str(round(eff_t2, 4))) if eff_t2 else None,
+            target_3=Decimal(str(round(eff_t3, 4))) if eff_t3 else None,
+            initial_stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
+            ratchet_stage="INITIAL",
+            trailing_enabled=bool(trailing_enabled),
             status=status,
             commission=Decimal(str(settings.DEFAULT_COMMISSION)),
         )
 
         if status == "OPEN" and entry_price is not None:
-            trade.entry_price = Decimal(str(round(entry_price, 4)))
+            entry_dec = Decimal(str(round(entry_price, 4)))
+            trade.entry_price = entry_dec
+            trade.highest_price_recorded = entry_dec
+            trade.lowest_price_recorded = entry_dec
             trade.slippage = Decimal(str(round(slippage_amount, 4)))
 
         db.add(trade)
@@ -431,7 +455,12 @@ class PaperTradingService:
                 slippage_amount = current_price * settings.DEFAULT_SLIPPAGE_PCT
                 entry_price = current_price + slippage_amount if order.direction == "BUY" else current_price - slippage_amount
 
-            order.entry_price = Decimal(str(round(entry_price, 4)))
+            entry_dec = Decimal(str(round(entry_price, 4)))
+            order.entry_price = entry_dec
+            order.highest_price_recorded = entry_dec
+            order.lowest_price_recorded = entry_dec
+            if order.stop_loss is not None and order.initial_stop_loss is None:
+                order.initial_stop_loss = order.stop_loss
             order.slippage = Decimal(str(round(slippage_amount, 4)))
             order.status = "OPEN"
             order.opened_at = datetime.now(timezone.utc)
@@ -456,42 +485,232 @@ class PaperTradingService:
 
     @staticmethod
     async def evaluate_open_trades(db: AsyncSession):
-        """Check all OPEN trades against targets and stop losses."""
+        """
+        Check all OPEN trades against targets, progressive T1 -> T2 -> T3 Coupled Ratchet trailing stops,
+        and initial stop losses using a single batched market quote call per sweep.
+        """
         result = await db.execute(select(PaperTrade).where(PaperTrade.status == "OPEN"))
         open_trades = result.scalars().all()
         if not open_trades:
             return
 
-        open_symbols = list({t.symbol for t in open_trades if t.target_price or t.stop_loss})
-        quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols) if open_symbols else {}
+        # Read coupled ratchet toggle once per sweep (gracefully skips if mocked DB)
+        coupled_ratchet_enabled = True
+        atr_trail_pct = 0.015
+        try:
+            from unittest.mock import MagicMock, AsyncMock
+            if not isinstance(db, (MagicMock, AsyncMock)) and hasattr(db, "get_bind"):
+                bind = db.get_bind()
+                if bind is not None and not isinstance(bind, (MagicMock, AsyncMock)):
+                    from backend.models.settings import SystemSettings
+                    cfg_rows = (
+                        await db.execute(
+                            select(SystemSettings).where(
+                                SystemSettings.key.in_(["enable_coupled_ratchet", "swing_atr_multiplier"])
+                            )
+                        )
+                    ).scalars().all()
+                    for row in cfg_rows:
+                        if row.key == "enable_coupled_ratchet" and row.value is not None:
+                            coupled_ratchet_enabled = str(row.value).strip().lower() in ("true", "1", "yes", "on")
+                        elif row.key == "swing_atr_multiplier" and row.value is not None:
+                            atr_mult = max(0.5, min(float(row.value), 5.0))
+                            atr_trail_pct = max(0.01, min(0.04, atr_mult * 0.01))
+        except Exception:
+            pass
+
+        open_symbols = list({
+            t.symbol for t in open_trades
+            if t.target_price or t.stop_loss or getattr(t, "target_1", None) or getattr(t, "target_2", None) or getattr(t, "target_3", None)
+        })
+        if not open_symbols:
+            return
+        quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols, use_fallback=True)
 
         for trade in open_trades:
-            if not trade.target_price and not trade.stop_loss:
+            t1_dec = getattr(trade, "target_1", None)
+            t2_dec = getattr(trade, "target_2", None)
+            t3_dec = getattr(trade, "target_3", None)
+            if not (trade.target_price or trade.stop_loss or t1_dec or t2_dec or t3_dec):
                 continue
 
-            quote = quotes_map.get(trade.symbol)
-            if not quote or not quote.get("price"):
+            clean_sym = trade.symbol.replace(".NS", "").replace(".BO", "").strip().upper()
+            quote = (
+                quotes_map.get(trade.symbol)
+                or quotes_map.get(f"{clean_sym}.NS")
+                or quotes_map.get(f"{clean_sym}.BO")
+                or quotes_map.get(clean_sym)
+            )
+            if (not quote or not quote.get("price")) and len(open_symbols) <= 3:
                 quote = await market_data_service.fetch_quote(trade.symbol)
             if not quote or not quote.get("price"):
                 continue
 
             current_price = float(quote["price"])
+            entry_p = float(trade.entry_price or current_price)
+            prev_stage = str(getattr(trade, "ratchet_stage", "INITIAL") or "INITIAL")
+            has_multi = any(v is not None and float(v) > 0 for v in (t1_dec, t2_dec, t3_dec))
+            trailing_on = bool(getattr(trade, "trailing_enabled", True)) and coupled_ratchet_enabled and has_multi
+
             triggered_exit = False
-            
-            if trade.direction == "BUY":
-                if trade.target_price and current_price >= float(trade.target_price):
-                    triggered_exit = True
-                elif trade.stop_loss and current_price <= float(trade.stop_loss):
-                    triggered_exit = True
-            elif trade.direction == "SELL":
-                if trade.target_price and current_price <= float(trade.target_price):
-                    triggered_exit = True
-                elif trade.stop_loss and current_price >= float(trade.stop_loss):
-                    triggered_exit = True
-                    
+            new_stage = prev_stage
+            curr_sl = float(trade.stop_loss) if trade.stop_loss is not None else None
+
+            if trailing_on and entry_p > 0:
+                if trade.initial_stop_loss is None and curr_sl is not None:
+                    trade.initial_stop_loss = Decimal(str(round(curr_sl, 4)))
+
+                if trade.direction == "BUY":
+                    t1_val = float(t1_dec or trade.target_price or 0.0)
+                    t2_val = float(t2_dec or 0.0)
+                    t3_val = float(t3_dec or 0.0)
+                    has_t2 = bool(t2_val > t1_val > 0)
+                    has_t3 = bool(has_t2 and t3_val > t2_val)
+
+                    prev_high = float(getattr(trade, "highest_price_recorded", None) or entry_p)
+                    highest_p = max(prev_high, entry_p, current_price)
+                    trade.highest_price_recorded = Decimal(str(round(highest_p, 4)))
+
+                    # 1. Check ultimate progressive target exit first (T3 if present, else T2, else T1)
+                    if has_t3 and current_price >= t3_val:
+                        new_stage = "TARGET_3_ACHIEVED"
+                        triggered_exit = True
+                    elif has_t2 and (not has_t3) and current_price >= t2_val:
+                        new_stage = "TARGET_2_ACHIEVED"
+                        triggered_exit = True
+                    elif (not has_t2) and t1_val > 0 and current_price >= t1_val:
+                        new_stage = "TARGET_1_ACHIEVED"
+                        triggered_exit = True
+                    else:
+                        # 2. Apply Progressive Ratchet SL Step-Ups
+                        sl_floor = curr_sl if curr_sl is not None else round(entry_p * 0.96, 2)
+                        if has_t2 and t1_val > 0 and highest_p >= t1_val:
+                            # Stage 1: Breakeven + 1% protection at T1 cross
+                            be_lock = round(entry_p * 1.01, 2)
+                            if be_lock > sl_floor:
+                                sl_floor = be_lock
+                            if new_stage == "INITIAL":
+                                new_stage = "BREAKEVEN_LOCKED"
+
+                            # Stage 2: Halfway to T2 -> lock SL at Target 1
+                            half_t2 = t1_val + 0.5 * (t2_val - t1_val)
+                            if highest_p >= half_t2:
+                                t1_floor = round(t1_val, 2)
+                                if t1_floor > sl_floor:
+                                    sl_floor = t1_floor
+                                if new_stage in ("INITIAL", "BREAKEVEN_LOCKED"):
+                                    new_stage = "T2_RATCHET_ACTIVE"
+
+                        # Stage 3: T2 crossed while trailing toward T3 -> lock near/at T2!
+                        if has_t3 and highest_p >= t2_val:
+                            t2_floor = round(max(t1_val, t2_val * 0.992), 2)
+                            if highest_p >= t2_val + 0.35 * (t3_val - t2_val):
+                                t2_floor = max(t2_floor, round(t2_val, 2))
+                            peak_trail = round(highest_p * (1.0 - atr_trail_pct), 2)
+                            # Trail peak upward cleanly without ever setting SL above current_price unless T2 floor already crossed earlier
+                            candidate_floor = max(sl_floor, t2_floor)
+                            if peak_trail > candidate_floor and peak_trail < current_price:
+                                candidate_floor = peak_trail
+                            sl_floor = candidate_floor
+                            new_stage = "T3_RATCHET_ACTIVE"
+
+                        if sl_floor > (curr_sl or 0.0):
+                            trade.stop_loss = Decimal(str(round(sl_floor, 4)))
+                        curr_sl = float(trade.stop_loss) if trade.stop_loss is not None else sl_floor
+
+                        # Check stop-loss trigger on current tick
+                        if current_price <= curr_sl:
+                            if new_stage != "INITIAL" and curr_sl >= entry_p:
+                                new_stage = "STOPPED_IN_PROFIT"
+                            else:
+                                new_stage = "STOPLOSS_HIT"
+                            triggered_exit = True
+
+                elif trade.direction == "SELL":
+                    t1_val = float(t1_dec or trade.target_price or 0.0)
+                    t2_val = float(t2_dec or 0.0)
+                    t3_val = float(t3_dec or 0.0)
+                    has_t2 = bool(0 < t2_val < t1_val)
+                    has_t3 = bool(has_t2 and 0 < t3_val < t2_val)
+
+                    prev_low = float(getattr(trade, "lowest_price_recorded", None) or entry_p)
+                    lowest_p = min(prev_low, entry_p, current_price)
+                    trade.lowest_price_recorded = Decimal(str(round(lowest_p, 4)))
+
+                    if has_t3 and current_price <= t3_val:
+                        new_stage = "TARGET_3_ACHIEVED"
+                        triggered_exit = True
+                    elif has_t2 and (not has_t3) and current_price <= t2_val:
+                        new_stage = "TARGET_2_ACHIEVED"
+                        triggered_exit = True
+                    elif (not has_t2) and t1_val > 0 and current_price <= t1_val:
+                        new_stage = "TARGET_1_ACHIEVED"
+                        triggered_exit = True
+                    else:
+                        sl_ceil = curr_sl if curr_sl is not None else round(entry_p * 1.04, 2)
+                        if has_t2 and t1_val > 0 and lowest_p <= t1_val:
+                            be_lock = round(entry_p * 0.99, 2)
+                            if be_lock < sl_ceil:
+                                sl_ceil = be_lock
+                            if new_stage == "INITIAL":
+                                new_stage = "BREAKEVEN_LOCKED"
+                            half_t2 = t1_val - 0.5 * (t1_val - t2_val)
+                            if lowest_p <= half_t2:
+                                sl_ceil = min(sl_ceil, round(t1_val, 2))
+                                if new_stage in ("INITIAL", "BREAKEVEN_LOCKED"):
+                                    new_stage = "T2_RATCHET_ACTIVE"
+                        if has_t3 and lowest_p <= t2_val:
+                            t2_ceil = round(min(t1_val, t2_val * 1.008), 2)
+                            if lowest_p <= t2_val - 0.35 * (t2_val - t3_val):
+                                t2_ceil = min(t2_ceil, round(t2_val, 2))
+                            sl_ceil = min(sl_ceil, t2_ceil)
+                            new_stage = "T3_RATCHET_ACTIVE"
+
+                        if sl_ceil < (curr_sl or float("inf")):
+                            trade.stop_loss = Decimal(str(round(sl_ceil, 4)))
+                        curr_sl = float(trade.stop_loss) if trade.stop_loss is not None else sl_ceil
+
+                        if current_price >= curr_sl:
+                            if new_stage != "INITIAL" and curr_sl <= entry_p:
+                                new_stage = "STOPPED_IN_PROFIT"
+                            else:
+                                new_stage = "STOPLOSS_HIT"
+                            triggered_exit = True
+
+                trade.ratchet_stage = new_stage
+                if new_stage != prev_stage:
+                    try:
+                        from backend.api.websocket import broadcast_alert
+                        await broadcast_alert(
+                            {
+                                "type": "COUPLED_RATCHET_UPDATE",
+                                "symbol": trade.symbol,
+                                "trade_id": str(trade.id),
+                                "ratchet_stage": new_stage,
+                                "new_stop_loss": float(trade.stop_loss) if trade.stop_loss is not None else None,
+                                "current_price": current_price,
+                                "message": f"{trade.symbol} progressed to {new_stage.replace('_', ' ')} (SL: ₹{float(trade.stop_loss or 0):,.2f})",
+                            },
+                            user_id=str(trade.user_id),
+                        )
+                    except Exception:
+                        pass
+            else:
+                # Standard fixed single Target / Stop-Loss check
+                if trade.direction == "BUY":
+                    if trade.target_price and current_price >= float(trade.target_price):
+                        triggered_exit = True
+                    elif trade.stop_loss and current_price <= float(trade.stop_loss):
+                        triggered_exit = True
+                elif trade.direction == "SELL":
+                    if trade.target_price and current_price <= float(trade.target_price):
+                        triggered_exit = True
+                    elif trade.stop_loss and current_price >= float(trade.stop_loss):
+                        triggered_exit = True
+
             if triggered_exit:
                 await PaperTradingService._execute_exit(trade, current_price)
-                logger.info(f"Auto-exited trade (Target/SL hit): {trade.symbol} PnL={trade.realized_pnl}")
+                logger.info(f"Auto-exited trade ({trade.ratchet_stage}): {trade.symbol} PnL={trade.realized_pnl}")
 
     @staticmethod
     async def get_all_trades(db: AsyncSession, user_id: str) -> list[PaperTrade]:

@@ -528,13 +528,22 @@ export default function SwingScreenerPage() {
               {cycleData.from_date} to {cycleData.to_date}
             </span>
             <span style={{ fontSize: 12, color: '#94a3b8' }}>
-              Tracked Stocks: <strong style={{ color: '#38bdf8' }}>{cycleData.total_trades || 0}</strong>
+              Tracked: <strong style={{ color: '#38bdf8' }}>{cycleData.total_trades || 0}</strong>
+              {cycleData.closed_trades !== undefined && (
+                <> ({cycleData.closed_trades} closed / {cycleData.in_progress_trades ?? 0} open)</>
+              )}
             </span>
             <span style={{ fontSize: 12, color: '#94a3b8' }}>
               Win Rate: <strong style={{ color: (cycleData.win_rate || 0) >= 50 ? '#34d399' : '#fbbf24' }}>{cycleData.win_rate || 0}%</strong>
+              {cycleData.profit_factor !== undefined && (
+                <> · PF: <strong style={{ color: (cycleData.profit_factor || 0) >= 1.2 ? '#34d399' : '#94a3b8' }}>{cycleData.profit_factor}x</strong></>
+              )}
             </span>
             <span style={{ fontSize: 12, color: '#94a3b8' }}>
-              Realized P&L: <strong style={{ color: (cycleData.total_pnl_rupees || 0) >= 0 ? '#34d399' : '#f87171' }}>₹{(cycleData.total_pnl_rupees || 0).toLocaleString('en-IN')}</strong>
+              Gross P&L: <strong style={{ color: (cycleData.total_pnl_rupees || 0) >= 0 ? '#34d399' : '#f87171' }}>₹{(cycleData.total_pnl_rupees || 0).toLocaleString('en-IN')}</strong>
+              {cycleData.user_executed_trades > 0 && (
+                <> · My Buys: <strong style={{ color: '#a78bfa' }}>{cycleData.user_executed_trades} ({cycleData.user_executed_win_rate ?? 0}% WR)</strong></>
+              )}
             </span>
           </div>
 
@@ -1380,9 +1389,37 @@ export default function SwingScreenerPage() {
           currentPrice={orderModalStock.trade_plan?.current_price || orderModalStock.trade_plan?.cmp || orderModalStock.trade_plan?.entry_price || 100}
           bestBuyPrice={orderModalStock.trade_plan?.best_buy_price || orderModalStock.trade_plan?.optimal_entry_price}
           targetPrice={orderModalStock.trade_plan?.target_price}
+          target1={orderModalStock.trade_plan?.target_1}
+          target2={orderModalStock.trade_plan?.target_2 || orderModalStock.trade_plan?.target_price}
+          target3={orderModalStock.trade_plan?.target_3}
           stopLoss={orderModalStock.trade_plan?.stop_loss}
           defaultDirection={orderModalStock.action === 'SELL' ? 'SELL' : 'BUY'}
           isGttMode={isGttMode}
+          onOrderSuccess={async (tradeData) => {
+            if (String(tradeData?.direction || orderModalStock.action).toUpperCase() === 'BUY') {
+              try {
+                await swingAuditApi.track({
+                  symbol: orderModalStock.symbol,
+                  buy_price: Number(orderModalStock.trade_plan?.best_buy_price || orderModalStock.trade_plan?.current_price || tradeData?.entry_price || 0),
+                  target_price: Number(orderModalStock.trade_plan?.target_price || 0),
+                  stop_loss: Number(orderModalStock.trade_plan?.stop_loss || 0),
+                  target_1: orderModalStock.trade_plan?.target_1,
+                  target_2: orderModalStock.trade_plan?.target_2,
+                  target_3: orderModalStock.trade_plan?.target_3,
+                  reward_to_risk: orderModalStock.trade_plan?.reward_to_risk,
+                  total_score: orderModalStock.total_score,
+                  company_name: orderModalStock.name,
+                  user_bought: true,
+                  user_buy_price: Number(tradeData?.entry_price || orderModalStock.trade_plan?.current_price || 0),
+                  notes: 'Executed via Swing Screener Coupled Ratchet modal',
+                })
+                const cycleRes = await swingAuditApi.getCurrentCycle()
+                if (cycleRes.data?.cycle) setCycleData(cycleRes.data.cycle)
+              } catch {
+                // Non-blocking audit sync
+              }
+            }
+          }}
         />
       )}
     </div>

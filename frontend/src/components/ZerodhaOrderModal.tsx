@@ -11,6 +11,9 @@ export interface ZerodhaOrderModalProps {
   currentPrice: number
   bestBuyPrice?: number
   targetPrice?: number
+  target1?: number
+  target2?: number
+  target3?: number
   stopLoss?: number
   defaultDirection?: 'BUY' | 'SELL'
   isGttMode?: boolean
@@ -25,6 +28,9 @@ export default function ZerodhaOrderModal({
   currentPrice,
   bestBuyPrice,
   targetPrice: initialTarget,
+  target1,
+  target2,
+  target3,
   stopLoss: initialStopLoss,
   defaultDirection = 'BUY',
   isGttMode = false,
@@ -177,6 +183,12 @@ export default function ZerodhaOrderModal({
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
+      const effT2 = target2 && target2 > 0 ? Number(target2.toFixed(2)) : targetPrice
+      const effT1 = target1 && target1 > 0
+        ? Number(target1.toFixed(2))
+        : Number((activePrice + 0.55 * (effT2 - activePrice)).toFixed(2))
+      const effT3 = target3 && target3 > 0 ? Number(target3.toFixed(2)) : undefined
+
       const payload: any = {
         symbol: symbol.toUpperCase(),
         direction: direction,
@@ -187,6 +199,10 @@ export default function ZerodhaOrderModal({
         stop_price: orderType === 'SL' || orderType === 'SL_M' ? triggerPrice : undefined,
         target_price: enableGtt ? targetPrice : undefined,
         stop_loss: enableGtt ? stopLoss : undefined,
+        target_1: enableGtt ? effT1 : undefined,
+        target_2: enableGtt ? effT2 : undefined,
+        target_3: enableGtt ? effT3 : undefined,
+        trailing_enabled: enableGtt,
         idempotency_key: submissionKey,
       }
 

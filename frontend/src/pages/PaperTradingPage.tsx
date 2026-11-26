@@ -234,7 +234,28 @@ export default function PaperTradingPage() {
                     title="Click to view detailed holding duration & P&L"
                   >
                     <td><span className="badge badge-secondary">{t.product_type}</span></td>
-                    <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
+                    <td>
+                      <div className="mono" style={{ fontWeight: 600 }}>{t.symbol}</div>
+                      {(t.stop_loss || t.target_1 || t.target_price || t.ratchet_stage) && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3, fontSize: 10 }}>
+                          {t.ratchet_stage && t.ratchet_stage !== 'INITIAL' && (
+                            <span style={{ padding: '1px 6px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.16)', color: '#34d399', fontWeight: 700 }}>
+                              {String(t.ratchet_stage).replace(/_/g, ' ')}
+                            </span>
+                          )}
+                          {t.stop_loss && (
+                            <span style={{ color: '#f87171' }}>SL: ₹{Number(t.stop_loss).toFixed(2)}</span>
+                          )}
+                          {(t.target_3 || t.target_2 || t.target_price) && (
+                            <span style={{ color: '#34d399' }}>
+                              {t.target_1 ? `T1: ₹${Number(t.target_1).toFixed(0)}` : ''}
+                              {t.target_2 ? ` · T2: ₹${Number(t.target_2).toFixed(0)}` : ''}
+                              {t.target_3 ? ` · T3: ₹${Number(t.target_3).toFixed(0)}` : (!t.target_1 && t.target_price ? `T: ₹${Number(t.target_price).toFixed(2)}` : '')}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <span 
                         className="badge" 

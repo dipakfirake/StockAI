@@ -43,6 +43,15 @@ interface HoldingData {
   is_bought_today?: boolean
   day_baseline?: number
   day_baseline_type?: string
+  stop_loss?: number | null
+  target_price?: number | null
+  target_1?: number | null
+  target_2?: number | null
+  target_3?: number | null
+  initial_stop_loss?: number | null
+  highest_price_recorded?: number | null
+  ratchet_stage?: string
+  trailing_enabled?: boolean
 }
 
 interface HoldingDetailModalProps {
@@ -285,6 +294,48 @@ export default function HoldingDetailModal({
               </div>
             </div>
           </div>
+
+          {/* Coupled Ratchet Trailing Stop-Loss Progression (T1 -> T2 -> T3) */}
+          {(holding.stop_loss || holding.target_1 || holding.target_2 || holding.target_3 || holding.target_price) && (
+            <div style={{
+              marginBottom: 16,
+              padding: '12px 16px',
+              borderRadius: 12,
+              background: 'rgba(16, 185, 129, 0.06)',
+              border: '1px solid rgba(16, 185, 129, 0.22)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#34d399' }}>
+                  Coupled Ratchet Risk & Targets ({String(holding.ratchet_stage || 'INITIAL').replace(/_/g, ' ')})
+                </span>
+                {holding.highest_price_recorded && (
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                    Peak Tracked: {formatINR(holding.highest_price_recorded)}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12 }} className="mono">
+                {holding.initial_stop_loss && (
+                  <div><span style={{ color: 'var(--color-text-muted)' }}>Init SL:</span> {formatINR(holding.initial_stop_loss)}</div>
+                )}
+                {holding.stop_loss && (
+                  <div style={{ color: '#f87171', fontWeight: 700 }}>Active Trailing SL: {formatINR(holding.stop_loss)}</div>
+                )}
+                {holding.target_1 && (
+                  <div style={{ color: '#34d399' }}>T1: {formatINR(holding.target_1)}</div>
+                )}
+                {holding.target_2 && (
+                  <div style={{ color: '#34d399' }}>T2: {formatINR(holding.target_2)}</div>
+                )}
+                {holding.target_3 && (
+                  <div style={{ color: '#34d399', fontWeight: 700 }}>T3 Runner: {formatINR(holding.target_3)}</div>
+                )}
+                {!holding.target_1 && holding.target_price && (
+                  <div style={{ color: '#34d399' }}>Target: {formatINR(holding.target_price)}</div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Breakdown Details Table */}
           <div style={{

@@ -3060,21 +3060,33 @@ docker compose restart backend frontend
    - **Live API Probe:** `GET /api/market/screener?sector=IT` -> **HTTP 200 OK** returning real classified trade plans with staged targets, stop losses, and ML ensemble scores.
    - **Frontend Route Probe:** `curl.exe -s -I http://localhost:5173/screener` -> **HTTP 200 OK**.
 
+### Phase 20: High-Precision Screener ML Veto, 11-Day Audit Cycle Lifecycle Fix, T1→T2→T3 Coupled Ratchet & API Rate Audit (2026-11-26)
+1. 🔍 **Problems Resolved**:
+   - `GET /api/swing-audit/current-cycle` crashed inside `SwingAuditService.get_cycle_summary()` with SQLAlchemy async `MissingGreenlet` when accessing lazy `a.daily_prices`, hiding the Active Cycle Banner and Cycle Rollover button in `/screener` and `/admin`.
+   - Expired audit cycles (`date.today() > cycle.to_date`) previously marked `status="COMPLETED"` inside `get_or_create_active_cycle()` without squaring off `IN_PROGRESS` trades, generating `Cycle_{N}_(Final).xlsx`, removing orphan working `.xlsx` files, or creating Cycle `#N+1`'s initial workbook; DB lacked unique index protection `(cycle_id, symbol)` and `track_batch_swing_trades()` had a duplicate `update_daily_prices()` call.
+   - `add_trading_days()` only skipped weekends (not NSE holidays) and used `+11` instead of `+10` inclusive bounds; same-bar morning SL breaches were checked optimistically after T1 upgrades.
+   - `SystemSettings` algo toggles (`enable_coupled_ratchet`, `enable_t2_pyramiding`, `swing_atr_multiplier`, `swing_capital_per_trade`) were unused, `target_3` was ignored in `SwingAuditService`, and `PaperTradingService` / `PaperTrade` had no `target_1/2/3` or progressive trailing stop-loss ratchet (`INITIAL -> BREAKEVEN_LOCKED -> T2_RATCHET_ACTIVE -> T3_RATCHET_ACTIVE -> TARGET_3_ACHIEVED / STOPPED_IN_PROFIT`). `PaperTradingService.place_order` also rejected NSE tickers containing `&` (like `M&M.NS`).
+   - `ScreenerService` ML ensemble bearish predictions (`SELL >= 58%`) and chronic SL losers did not veto weak/falling-knife `BUY` signals.
+2. ✅ **Implemented Upgrades**:
+   - **Audit Lifecycle & Scorecard ([`swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py), [`swing_audit.py`](file:///d:/Stock%20Prediction%20System/backend/models/swing_audit.py), [`market_hours.py`](file:///d:/Stock%20Prediction%20System/backend/core/market_hours.py), [`database.py`](file:///d:/Stock%20Prediction%20System/backend/core/database.py))**: Eliminated lazy-load crash with `instance_state` + batched SQL counts; wired expired cycles through full `rollover_to_next_cycle()` cleanup; enforced `(cycle_id, symbol)` uniqueness + `fill_confirmed`; skipped NSE holidays & snapped weekend auto-picks; added `profit_factor`, `expectancy_rupees`, `closed_trades`, `in_progress_trades`, `target_win_trades`, `ratchet_profit_trades`, `estimated_charges_rupees`, `net_after_charges_pnl`, and `user_executed_*` metrics to API & Excel Scorecard; extended `SwingAuditService` Ratchet to support `T3_RATCHET_ACTIVE -> TARGET_3_ACHIEVED` alongside same-bar morning SL tie-break.
+   - **Screener ML Veto & Cooldown ([`screener.py`](file:///d:/Stock%20Prediction%20System/backend/services/screener.py), [`swing_audit_tasks.py`](file:///d:/Stock%20Prediction%20System/backend/tasks/swing_audit_tasks.py))**: Added ML bearish veto (`SELL >= 58%`), low-ADX trendless filter (`ADX < 18` without ML BUY), intraday breakdown filter (`CMP < 21-EMA` & `<= -2.5%`), consecutive-SL cooldown (`filter_cooldown_symbols`), and deferred EOD loop price sync (`defer_price_sync=True`) so 20-candidate cataloging performs 1 sync instead of 20.
+   - **Live T1→T2→T3 Paper Trading Ratchet ([`paper_trade.py`](file:///d:/Stock%20Prediction%20System/backend/models/paper_trade.py), [`paper_trading.py`](file:///d:/Stock%20Prediction%20System/backend/services/paper_trading.py), [`api/paper_trading.py`](file:///d:/Stock%20Prediction%20System/backend/api/paper_trading.py), [`api/portfolio.py`](file:///d:/Stock%20Prediction%20System/backend/api/portfolio.py))**: Added `target_1/2/3`, `initial_stop_loss`, `highest/lowest_price_recorded`, `ratchet_stage`, `trailing_enabled`; fixed `M&M.NS` symbol regex (`^[A-Za-z0-9.\-:&_]{1,30}$`); implemented single-bulk-fetch `evaluate_open_trades()` progressive trailing SL + transition-only WebSocket alerts (`COUPLED_RATCHET_UPDATE`).
+   - **Frontend UI ([`AdminPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/AdminPage.tsx), [`SwingScreenerPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/SwingScreenerPage.tsx), [`ZerodhaOrderModal.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/components/ZerodhaOrderModal.tsx), [`PaperTradingPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/PaperTradingPage.tsx), [`PortfolioPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/PortfolioPage.tsx), [`HoldingDetailModal.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/components/HoldingDetailModal.tsx), [`ChartPage.tsx`](file:///d:/Stock%20Prediction%20System/frontend/src/pages/ChartPage.tsx), [`api.ts`](file:///d:/Stock%20Prediction%20System/frontend/src/services/api.ts))**: Added Admin `"Complete & Start Cycle #N+1"` rollover button + KPI cards, passed `T1/T2/T3` through order modals with Screener `user_bought` tracking, and surfaced live `Ratchet Stage` + trailing `SL` in Orders/Positions & Holdings.
+3. 🧪 **Verification Evidence**:
+   - `py_compile` across all modified/new Python modules: **exit code 0**.
+   - `pytest` across 14 backend suites (`backend/tests/test_high_precision_ratchet_and_cycle_fix.py` + audit + screener + paper trading + live ticker + Fyers governor + rate limiter + cybersecurity + system design): **108 passed, 0 failed in 108.54s**.
+   - `npm --prefix frontend run build` (`tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 12.65s**.
+
 ## Running Services & Public URLs
 - GitHub Repository: `https://github.com/dipakfirake/StockAI`
 - Neon PostgreSQL Project: `lively-voice-35713029` (Branch: `production`)
-- Local Dev Stack: Frontend on `http://localhost:5173`, Backend on `http://localhost:8000`
-- Oracle Cloud Always Free VM: `stockai-server` (`VM.Standard.A1.Flex`, 1 OCPU, 6 GB RAM, Region: `ap-mumbai-1`)
-  - Public IP: `92.4.71.210`
-  - Ingress Rules: TCP `80-8000` from `0.0.0.0/0`
-  - Active Services: `stockbackend` (FastAPI), `stockdb` (TimescaleDB), `stockredis` (Redis), `stockcelery` (Celery worker), `stockbeat` (Celery beat), `stockflower` (Flower dashboard on :5555)
-  - Operations Cheat Sheet: `docs/SERVER_MANAGEMENT_CHEAT_SHEET.md`
-- Vercel Frontend: `https://stock-ai-iota-seven.vercel.app` (Proxy rewrites mapped to `http://92.4.71.210:8000`)
+- Live Public URL: `https://stockai-live.duckdns.org` (Oracle VM `92.4.71.210`: `stockbackend`, `stockdb`, `stockredis`, `stockcelery`, `stockbeat`, `stockflower`, `stockfrontend`)
 
 ## Exact Next Safe Steps
-1. Run `git push origin main` from Windows PowerShell to sync all commits to GitHub and trigger Vercel build.
-2. In Oracle VM, run `git pull origin main` to pull latest documentation and cheat sheet.
-3. Use `docs/SERVER_MANAGEMENT_CHEAT_SHEET.md` for daily operations (start, pause, logs, daily Fyers token sync).
+1. Commit & push changes from localhost (`git add -A`, `git commit`, `git push origin main`).
+2. On the live Oracle server, run `cd /home/opc/StockAI && git pull origin main && docker compose build backend celery_worker celery_beat frontend && docker compose up -d backend celery_worker celery_beat frontend` (required so DB migration `ALTER TABLE ...` + new React bundle + backend Ratchet engine take effect).
+3. In the live UI (`/screener` or `/admin`), verify Active Cycle Banner shows `Cycle #1`, click **`Complete & Start Cycle #2`** to archive Cycle #1 into `Swing_Trade_Audit_Cycle_1_(Final).xlsx` and initialize clean Cycle #2, then place a test `M&M.NS` Swing Screener trade to confirm `T1/T2/T3` Ratchet Stage tracking in Holdings & Positions.
+
 
 
 

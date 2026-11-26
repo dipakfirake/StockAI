@@ -5776,4 +5776,35 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Commit and push changes from localhost (`git add -A`, `git commit`, `git push origin main`).
   - Instruct user to update live `.env` TTL keys (`CACHE_TTL_QUOTE=3`, `CACHE_TTL_INDEX_QUOTE=3`, `CACHE_TTL_INTRADAY=5`) and run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend`.
 
+---
+
+### Session Entry 98
+- **Timestamp:** 2026-11-26 20:00:00 IST (14:30:00 UTC)
+- **User Prompt:**
+  `"okay so fix all causes and upgrade all you given but i want my system works for an end user at high precision . and check for all limitations of apis rate and all for this while developing this and all price tickers and all. and check that after you make this all modules in system our strategy we madde first that dynamic stoploss increase while targets achieved till target 2 achieved ot target 3 achieved that is working properly or not means when another time the swing scanner says to buy that all. /goal /browser /plan /teamwork ..."`
+- **Forensic Root Causes Diagnosed:**
+  1. **Active Cycle UI & API Blackout (`backend/services/swing_audit_service.py`)**: `GET /api/swing-audit/current-cycle` failed silently (`{"cycle": null, "trades": []}`) on live production because `get_cycle_summary()` invoked `getattr(a, "daily_prices", None)`, raising SQLAlchemy async `MissingGreenlet`.
+  2. **Incomplete Auto-Rollover & Duplicate Protection (`backend/services/swing_audit_service.py`, `backend/models/swing_audit.py`)**: Expired cycles (`ref_date > to_date`) inside `get_or_create_active_cycle()` marked `status="COMPLETED"` without archiving `(Final).xlsx`, squaring off open rows, cleaning orphan working `.xlsx` files, or creating Cycle `#N+1`'s empty workbook; DB lacked unique index `(cycle_id, symbol)`; `track_batch_swing_trades()` ran duplicate `update_daily_prices()`.
+  3. **Disconnected Settings, Missing T3 Audit Step & Unimplemented Live Paper Ratchet (`backend/services/swing_audit_service.py`, `backend/services/paper_trading.py`, `backend/models/paper_trade.py`)**: Fixed wrong `backend.models.system_settings` import -> `backend.models.settings.SystemSettings`; `SwingAuditService` ignored `target_3` and `enable_coupled_ratchet` / `enable_t2_pyramiding` / `swing_atr_multiplier` / `swing_capital_per_trade`; `PaperTrade` and `evaluate_open_trades()` lacked `target_1/2/3`, progressive trailing SL ratchet (`INITIAL -> BREAKEVEN_LOCKED -> T2_RATCHET_ACTIVE -> T3_RATCHET_ACTIVE -> TARGET_3_ACHIEVED / STOPPED_IN_PROFIT`), and blocked valid NSE `&` symbols like `M&M.NS`.
+  4. **Calendar, Tie-Break & Precision Filtering Gaps (`backend/core/market_hours.py`, `backend/services/screener.py`, `backend/tasks/swing_audit_tasks.py`)**: `add_trading_days()` did not skip NSE exchange holidays (`NSE_ANNUAL_HOLIDAYS`), cycle `to_date` used `+11` instead of `+10` inclusive bounds, same-bar morning SL breaches were evaluated after T1 ratchet, `ScreenerService` did not veto falling knives (`SELL >= 58%`, `ADX < 18`, intraday breakdown `< 21-EMA & <= -2.5%`), and `swing_audit_tasks.py` called `update_daily_prices()` 20 times in a loop instead of deferring to Phase 3.
+- **Architectural Remediations Implemented:**
+  - `backend/core/market_hours.py` & `backend/core/database.py`: NSE holiday calendar (`is_indian_holiday`, `is_trading_day`, `normalize_to_trading_day`) and idempotent PostgreSQL `DO $$` migrations for `paper_trades` ratchet columns & `(cycle_id, symbol)` unique index on `swing_trade_audits`.
+  - `backend/models/swing_audit.py` & `backend/services/swing_audit_service.py`: Fixed `MissingGreenlet` via `instance_state` + batched SQL counts, wired expired cycles to `rollover_to_next_cycle()` with orphan `.xlsx` cleanup & initial Cycle `#N+1` workbook creation, wired `SystemSettings`, added `T3_RATCHET_ACTIVE -> TARGET_3_ACHIEVED`, conservative morning SL tie-break, `fill_confirmed`, enriched Scorecard KPIs (`closed_trades`, `in_progress_trades`, `target_win_trades`, `ratchet_profit_trades`, `profit_factor`, `expectancy_rupees`, `estimated_charges_rupees`, `net_after_charges_pnl`, `user_executed_*`), and `filter_cooldown_symbols()`.
+  - `backend/services/screener.py` & `backend/tasks/swing_audit_tasks.py`: Pre-classification ML ensemble veto (`SELL >= 58%`), ADX/breakdown filters, consecutive-SL cooldown filter, and `defer_price_sync=True` batching.
+  - `backend/models/paper_trade.py`, `backend/services/paper_trading.py`, `backend/api/paper_trading.py`, `backend/api/portfolio.py`: Added `target_1/2/3`, `initial_stop_loss`, `highest/lowest_price_recorded`, `ratchet_stage`, `trailing_enabled`; fixed `M&M.NS` symbol regex (`^[A-Za-z0-9.\-:&_]{1,30}$`); added single-bulk-quote progressive `T1 -> T2 -> T3` Ratchet engine in `evaluate_open_trades()` with transition-only WebSocket alerts (`COUPLED_RATCHET_UPDATE`).
+  - Frontend (`AdminPage.tsx`, `SwingScreenerPage.tsx`, `ZerodhaOrderModal.tsx`, `PaperTradingPage.tsx`, `PortfolioPage.tsx`, `HoldingDetailModal.tsx`, `ChartPage.tsx`, `api.ts`): Added Admin Cycle Rollover button + KPIs, wired `T1/T2/T3` & `user_bought` sync into Screener/Chart modals, and displayed live `Ratchet Stage` + trailing `SL` in Orders/Positions & Holdings.
+- **API Rate Limits & Ticker Integrity Verified:**
+  - `FyersRateGovernor`: `250ms` spacing (`max 4 req/s`, `40 req/60s`), lock-free single-flight coalescing, priority preemption (`PRIORITY_USER_ACTION` > `INTERACTIVE` > `BACKGROUND`).
+  - Live Quote TTLs: `effective_live_quote_ttl <= 3s` & `effective_live_index_ttl <= 3s`; WS `poll_market_data` bypasses Redis cache (`4.0s` timeout) while `evaluate_open_trades` executes **1 single `fetch_quotes_bulk(..., use_fallback=True)`** call per 60s Celery sweep regardless of position count.
+  - Gateway `TokenBucketRateLimiter`: `AUTH 10/min`, `TRADING 30/min (20 burst)`, `AI 30/min (15 burst)`, `PRESENCE 240/min (200 burst)`, `GENERAL 120/min (100 burst)`.
+- **Verification Evidence:**
+  - `py_compile` across all modified/new Python modules: **exit code 0**.
+  - `pytest` across 14 backend suites (including new 6-test SQLite/ORM regression suite `backend/tests/test_high_precision_ratchet_and_cycle_fix.py`): **108 passed, 0 failed in 108.54s**.
+  - `npm --prefix frontend run build` (`tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 12.65s**.
+  - `ASGITransport` smoke test across `/api/swing-audit/current-cycle`, `POST /api/paper-trades`, `GET /api/paper-trades`, and `GET /api/portfolio`: **passed (HTTP 200 OK)**.
+- **Next Safe Step:**
+  - Commit and push from localhost (`git add -A`, `git commit`, `git push origin main`).
+  - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose build backend celery_worker celery_beat frontend && docker compose up -d backend celery_worker celery_beat frontend` on the live server.
+
+
 

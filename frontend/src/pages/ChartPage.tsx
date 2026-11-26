@@ -2383,6 +2383,10 @@ export default function ChartPage() {
                 onClick={async () => {
                   try {
                     const { paperTradingApi } = await import('../services/api')
+                    const entryPx = Number(liveSetup.entry || quote?.price || 0)
+                    const tgtPx = Number(liveSetup.target || 0)
+                    const t1Calc = entryPx > 0 && tgtPx > 0 ? Number((entryPx + 0.55 * (tgtPx - entryPx)).toFixed(2)) : undefined
+                    const t3Calc = entryPx > 0 && tgtPx > 0 ? Number((tgtPx + 0.45 * Math.abs(tgtPx - entryPx)).toFixed(2)) : undefined
                     await paperTradingApi.place({
                       symbol: symbol.endsWith('.NS') ? symbol : `${symbol}.NS`,
                       direction: liveSetup.action === 'SELL' ? 'SELL' : 'BUY',
@@ -2390,6 +2394,10 @@ export default function ChartPage() {
                       order_type: 'MARKET',
                       stop_loss: liveSetup.sl,
                       target_price: liveSetup.target,
+                      target_1: t1Calc,
+                      target_2: tgtPx || undefined,
+                      target_3: t3Calc,
+                      trailing_enabled: true,
                     })
                     toast.success(`Paper ${liveSetup.action} order placed!`, `${symbol} @ ${formatINR(liveSetup.entry)} | SL: ${formatINR(liveSetup.sl)} | Target: ${formatINR(liveSetup.target)}`)
                     

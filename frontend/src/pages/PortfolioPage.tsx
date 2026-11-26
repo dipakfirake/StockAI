@@ -209,7 +209,29 @@ export default function PortfolioPage() {
                               <span className="badge badge-secondary" style={{ fontSize: 10 }}>
                                 {a.product_type}
                               </span>
+                              {a.ratchet_stage && a.ratchet_stage !== 'INITIAL' && (
+                                <span
+                                  className="badge"
+                                  style={{
+                                    fontSize: 9,
+                                    padding: '2px 5px',
+                                    background: 'rgba(16, 185, 129, 0.16)',
+                                    color: '#34d399',
+                                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                                  }}
+                                >
+                                  {String(a.ratchet_stage).replace(/_/g, ' ')}
+                                </span>
+                              )}
                             </div>
+                            {(a.stop_loss || a.target_1 || a.target_2 || a.target_3 || a.target_price) && (
+                              <div className="mono" style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 3 }}>
+                                {a.stop_loss ? <span style={{ color: '#f87171', marginRight: 6 }}>SL: ₹{Number(a.stop_loss).toFixed(2)}</span> : null}
+                                {a.target_1 ? <span>T1 ₹{Number(a.target_1).toFixed(0)}</span> : null}
+                                {a.target_2 ? <span> · T2 ₹{Number(a.target_2).toFixed(0)}</span> : null}
+                                {a.target_3 ? <span> · T3 ₹{Number(a.target_3).toFixed(0)}</span> : (!a.target_1 && a.target_price ? <span>T ₹{Number(a.target_price).toFixed(2)}</span> : null)}
+                              </div>
+                            )}
                           </td>
 
                           {/* Holding Period / Days Held */}

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone, date
 from decimal import Decimal
 from typing import List, Optional
-from sqlalchemy import String, Integer, Text, Date, DateTime, Numeric, Boolean, ForeignKey
+from sqlalchemy import String, Integer, Text, Date, DateTime, Numeric, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -39,6 +39,9 @@ class SwingTradeAuditCycle(Base):
 class SwingTradeAudit(Base):
     """Individual stock recommendation tracked across next 11 trading days."""
     __tablename__ = "swing_trade_audits"
+    __table_args__ = (
+        UniqueConstraint("cycle_id", "symbol", name="uq_swing_audit_cycle_symbol"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cycle_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("swing_trade_audit_cycles.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -80,6 +83,7 @@ class SwingTradeAudit(Base):
     user_bought: Mapped[bool] = mapped_column(Boolean, default=False)
     user_buy_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
     user_buy_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    fill_confirmed: Mapped[bool] = mapped_column(Boolean, default=True)
     
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

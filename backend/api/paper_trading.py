@@ -25,6 +25,10 @@ class PlaceOrderRequest(BaseModel):
     stop_price: float | None = None
     target_price: float | None = None
     stop_loss: float | None = None
+    target_1: float | None = None
+    target_2: float | None = None
+    target_3: float | None = None
+    trailing_enabled: bool = True
     idempotency_key: str | None = None
 
 
@@ -71,6 +75,10 @@ async def place_paper_trade(
             stop_price=request.stop_price,
             target_price=request.target_price,
             stop_loss=request.stop_loss,
+            target_1=request.target_1,
+            target_2=request.target_2,
+            target_3=request.target_3,
+            trailing_enabled=request.trailing_enabled,
         )
         response_data = {
             "trade_id": str(trade.id),
@@ -84,6 +92,12 @@ async def place_paper_trade(
             "stop_price": float(trade.stop_price) if trade.stop_price else None,
             "target_price": float(trade.target_price) if trade.target_price else None,
             "stop_loss": float(trade.stop_loss) if trade.stop_loss else None,
+            "target_1": float(trade.target_1) if getattr(trade, "target_1", None) is not None else None,
+            "target_2": float(trade.target_2) if getattr(trade, "target_2", None) is not None else None,
+            "target_3": float(trade.target_3) if getattr(trade, "target_3", None) is not None else None,
+            "initial_stop_loss": float(trade.initial_stop_loss) if getattr(trade, "initial_stop_loss", None) is not None else None,
+            "ratchet_stage": getattr(trade, "ratchet_stage", "INITIAL") or "INITIAL",
+            "trailing_enabled": bool(getattr(trade, "trailing_enabled", True)),
             "commission": float(trade.commission),
             "status": trade.status,
             "opened_at": trade.opened_at.isoformat(),
@@ -149,6 +163,14 @@ async def list_paper_trades(
             "stop_price": float(t.stop_price) if t.stop_price is not None else None,
             "target_price": float(t.target_price) if t.target_price is not None else None,
             "stop_loss": float(t.stop_loss) if t.stop_loss is not None else None,
+            "target_1": float(t.target_1) if getattr(t, "target_1", None) is not None else None,
+            "target_2": float(t.target_2) if getattr(t, "target_2", None) is not None else None,
+            "target_3": float(t.target_3) if getattr(t, "target_3", None) is not None else None,
+            "initial_stop_loss": float(t.initial_stop_loss) if getattr(t, "initial_stop_loss", None) is not None else None,
+            "highest_price_recorded": float(t.highest_price_recorded) if getattr(t, "highest_price_recorded", None) is not None else None,
+            "lowest_price_recorded": float(t.lowest_price_recorded) if getattr(t, "lowest_price_recorded", None) is not None else None,
+            "ratchet_stage": getattr(t, "ratchet_stage", "INITIAL") or "INITIAL",
+            "trailing_enabled": bool(getattr(t, "trailing_enabled", True)),
             "commission": float(t.commission) if t.commission is not None else 0.0,
             "stt_tax": float(t.stt_tax) if t.stt_tax is not None else 0.0,
             "status": t.status,

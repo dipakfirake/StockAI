@@ -121,6 +121,20 @@ async def create_db_tables():
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_bought BOOLEAN DEFAULT FALSE;
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_price NUMERIC(12, 4);
                         ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS user_buy_time TIMESTAMPTZ;
+                        ALTER TABLE swing_trade_audits ADD COLUMN IF NOT EXISTS fill_confirmed BOOLEAN DEFAULT TRUE;
+
+                        DELETE FROM swing_trade_audits a
+                        USING swing_trade_audits b
+                        WHERE a.cycle_id IS NOT NULL
+                          AND a.cycle_id = b.cycle_id
+                          AND a.symbol = b.symbol
+                          AND (
+                              (a.user_bought::int < b.user_bought::int)
+                              OR (a.user_bought = b.user_bought AND a.ctid > b.ctid)
+                          );
+                        CREATE UNIQUE INDEX IF NOT EXISTS uq_swing_audit_cycle_symbol
+                            ON swing_trade_audits (cycle_id, symbol)
+                            WHERE cycle_id IS NOT NULL;
                     END IF;
 
                     IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'swing_trade_audit_prices') THEN
@@ -133,6 +147,17 @@ async def create_db_tables():
                         ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS excel_file_path VARCHAR(500);
                         ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_gain_loss_pct NUMERIC(8, 2) DEFAULT 0.00;
                         ALTER TABLE swing_trade_audit_cycles ADD COLUMN IF NOT EXISTS total_pnl_rupees NUMERIC(14, 2) DEFAULT 0.00;
+                    END IF;
+
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'paper_trades') THEN
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS target_1 NUMERIC(12, 4);
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS target_2 NUMERIC(12, 4);
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS target_3 NUMERIC(12, 4);
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS initial_stop_loss NUMERIC(12, 4);
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS highest_price_recorded NUMERIC(12, 4);
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS lowest_price_recorded NUMERIC(12, 4);
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS ratchet_stage VARCHAR(40) DEFAULT 'INITIAL';
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trailing_enabled BOOLEAN DEFAULT TRUE;
                     END IF;
                 END $$;
             """))

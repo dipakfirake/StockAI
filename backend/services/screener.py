@@ -435,10 +435,12 @@ class ScreenerService:
                             from backend.services.swing_audit_service import SwingAuditService
                             from backend.core.database import AsyncSessionLocal
                             async with AsyncSessionLocal() as audit_db:
-                                await SwingAuditService.track_batch_swing_trades(
-                                    db=audit_db,
-                                    stocks=stocks_to_catalog,
-                                )
+                                filtered = await SwingAuditService.filter_cooldown_symbols(audit_db, stocks_to_catalog)
+                                if filtered:
+                                    await SwingAuditService.track_batch_swing_trades(
+                                        db=audit_db,
+                                        stocks=filtered,
+                                    )
                         except Exception as ex:
                             logger.warning(f"Failed to auto-catalog screener buys into audit: {ex}")
                     asyncio.create_task(_auto_catalog_screener_buys(list(capped_elite_buys)))
@@ -738,6 +740,21 @@ class ScreenerService:
             elif is_fast_growth and raw_conviction >= 65:
                 raw_conviction += 5  # Rewarding proven fundamental momentum
 
+            # Extract ML ensemble, trend strength, and momentum metrics prior to BUY/HOLD classification
+            ml_probs = ai_res.get("probabilities") or {} if isinstance(ai_res, dict) else {}
+            ml_p_buy = float(ml_probs.get("buy", 0.0) or 0.0)
+            ml_p_sell = float(ml_probs.get("sell", 0.0) or 0.0)
+            ml_conf = float(ai_res.get("confidence", 0.5) or 0.5) if isinstance(ai_res, dict) else 0.5
+            nlp_compound = float(nlp_result.get("compound_score", 0.0)) if isinstance(nlp_result, dict) else 0.0
+
+            rsi_val = float(indicators.get("rsi_14") or indicators.get("rsi") or 55.0) if indicators else 55.0
+            adx_val = float(indicators.get("adx_14") or indicators.get("adx") or 22.0) if indicators else 22.0
+            daily_chg_pct = float(quote.get("change_pct") or 0.0) if isinstance(quote, dict) else 0.0
+
+            # ML + Sweet-Spot RSI conviction confluence boost (without masking bearish regimes)
+            if ml_p_buy >= 0.55 and ml_conf >= 0.65 and 48.0 <= rsi_val <= 68.0 and not is_nifty_bearish:
+                raw_conviction += 4.0
+
             total_score = max(0.0, min(100.0, raw_conviction))
             
             # 6. Generate "Best Price to Buy" & Structural Rule-Based Trade Setup
@@ -761,7 +778,17 @@ class ScreenerService:
             swing_low = min(recent_lows) if recent_lows else current_price - (1.0 * atr)
             swing_high = max(recent_highs) if recent_highs else current_price + (1.0 * atr)
 
+            # High-Precision BUY Vetoes (prevents catching falling knives or trendless whipsaws)
+            buy_veto_reason: Optional[str] = None
             if total_score >= buy_threshold:
+                if ml_p_sell >= 0.58 and ml_conf >= 0.55:
+                    buy_veto_reason = f"ML Ensemble bearish veto (SELL {ml_p_sell * 100:.0f}% >= 58%)."
+                elif ema_21 > 0 and current_price < ema_21 and daily_chg_pct <= -2.5:
+                    buy_veto_reason = f"Intraday breakdown filter (CMP ₹{current_price:.2f} < 21-EMA ₹{ema_21:.2f}, {daily_chg_pct:+.1f}% today)."
+                elif adx_val < 18.0 and ml_p_buy < 0.55:
+                    buy_veto_reason = f"Low trend strength filter (ADX {adx_val:.1f} < 18 without ML BUY confirmation)."
+
+            if total_score >= buy_threshold and buy_veto_reason is None:
                 action = "BUY"
                 # Determine "Best Price to Buy" (Optimal Entry Zone) vs Current Market Price
                 ref_support = ema_21 if ema_21 > 0 else (bb_mid if bb_mid > 0 else current_price - (0.5 * atr))
@@ -820,12 +847,7 @@ class ScreenerService:
                 fib_1618 = swing_high + (0.618 * swing_range)
                 r3 = max(fib_1618, r2 + (1.5 * atr))
 
-                # 3. Machine Learning & NLP Sentiment Modulation
-                ml_probs = ai_res.get("probabilities") or {} if isinstance(ai_res, dict) else {}
-                ml_p_buy = float(ml_probs.get("buy", 0.5))
-                ml_conf = float(ai_res.get("confidence", 0.5)) if isinstance(ai_res, dict) else 0.5
-                nlp_compound = float(nlp_result.get("compound_score", 0.0)) if isinstance(nlp_result, dict) else 0.0
-
+                # 3. Machine Learning & NLP Sentiment Modulation (probabilities extracted above)
                 if ml_conf >= 0.70 and ml_p_buy >= 0.55 and nlp_compound >= 0.0:
                     expansion_factor = min(1.0, (ml_conf - 0.70) / 0.30)
                     raw_target = r2 + (0.4 * (r3 - r2) * expansion_factor)
@@ -948,7 +970,10 @@ class ScreenerService:
                 t3 = round(res + (1.0 * atr), 2)  # Channel breakout runner
                 target = t2
                 entry_zone = f"Support Base: ₹{supp:.2f} | Ceiling: ₹{res:.2f}"
-                entry_advice = f"Range-bound consolidation. Stock is oscillating between Support (₹{supp:.2f}) and Resistance (₹{res:.2f}). Best entry is on accumulation near Support at ₹{optimal_entry_price:.2f} with Target ₹{target:.2f}."
+                if buy_veto_reason:
+                    entry_advice = f"Precision Veto -> HOLD: {buy_veto_reason} Support ₹{supp:.2f}, Resistance ₹{res:.2f}."
+                else:
+                    entry_advice = f"Range-bound consolidation. Stock is oscillating between Support (₹{supp:.2f}) and Resistance (₹{res:.2f}). Best entry is on accumulation near Support at ₹{optimal_entry_price:.2f} with Target ₹{target:.2f}."
 
             risk_amount = max(0.01, abs(optimal_entry_price - stop_loss))
             gain_pct = abs((target - optimal_entry_price) / optimal_entry_price) * 100 if optimal_entry_price > 0 else 0.0

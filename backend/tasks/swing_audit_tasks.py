@@ -54,7 +54,10 @@ async def run_eod_screener_and_audit_sync_async():
         # Sort overall list by score descending
         top_candidates.sort(key=lambda x: float(x.get("total_score", 0.0) or 0.0), reverse=True)
 
-        for item in top_candidates:
+        # Phase 2: Consecutive-SL cooldown check + auto-catalog into active cycle (single EOD price sync in Phase 3)
+        from backend.services.swing_audit_service import SwingAuditService
+        filtered_candidates = await SwingAuditService.filter_cooldown_symbols(db, top_candidates)
+        for item in filtered_candidates:
             try:
                 score = float(item.get("total_score", 0.0) or 0.0)
                 plan = item.get("trade_plan")
@@ -66,7 +69,8 @@ async def run_eod_screener_and_audit_sync_async():
                     trade_plan=plan,
                     company_name=item.get("name") or sym,
                     total_score=score,
-                    sector=sec
+                    sector=sec,
+                    defer_price_sync=True,
                 )
                 cataloged_count += 1
             except Exception as cat_err:

@@ -57,7 +57,9 @@ async def test_single_target_normal_win(mock_db):
         {"timestamp": today.isoformat(), "open": 100.0, "high": 105.5, "low": 99.0, "close": 105.0}
     ]
 
-    with patch("backend.services.market_data.market_data_service.fetch_candles", new_callable=AsyncMock) as mock_fetch:
+    with patch("backend.services.market_data.market_data_service.fetch_candles", new_callable=AsyncMock) as mock_fetch, \
+         patch("backend.services.swing_audit_service.market_data_service.fetch_quotes_bulk", new_callable=AsyncMock, return_value={}), \
+         patch("backend.services.swing_audit_service.market_data_service.fetch_quote", new_callable=AsyncMock, return_value=None):
         mock_fetch.return_value = mock_candles
 
         mock_exec = MagicMock()
@@ -78,7 +80,7 @@ async def test_single_target_normal_win(mock_db):
 @pytest.mark.asyncio
 async def test_multi_target_coupled_ratchet_activation(mock_db):
     """When Target 2 is configured, crossing Target 1 activates Tranche 2 and ratchets Tranche 1 stop."""
-    today = date(2026, 11, 10)
+    today = date.today()
     cycle = SwingTradeAuditCycle(
         id=uuid.uuid4(),
         cycle_number=1,
@@ -108,7 +110,9 @@ async def test_multi_target_coupled_ratchet_activation(mock_db):
         {"timestamp": today.isoformat(), "open": 100.0, "high": 106.0, "low": 99.5, "close": 105.5}
     ]
 
-    with patch("backend.services.market_data.market_data_service.fetch_candles", new_callable=AsyncMock) as mock_fetch:
+    with patch("backend.services.market_data.market_data_service.fetch_candles", new_callable=AsyncMock) as mock_fetch, \
+         patch("backend.services.swing_audit_service.market_data_service.fetch_quotes_bulk", new_callable=AsyncMock, return_value={}), \
+         patch("backend.services.swing_audit_service.market_data_service.fetch_quote", new_callable=AsyncMock, return_value=None):
         mock_fetch.return_value = mock_candles
 
         mock_exec = MagicMock()
@@ -165,7 +169,9 @@ async def test_multi_target_reversal_guaranteed_profit(mock_db):
         {"timestamp": d2, "open": 107.0, "high": 107.5, "low": 104.0, "close": 104.5},
     ]
 
-    with patch("backend.services.market_data.market_data_service.fetch_candles", new_callable=AsyncMock) as mock_fetch:
+    with patch("backend.services.market_data.market_data_service.fetch_candles", new_callable=AsyncMock) as mock_fetch, \
+         patch("backend.services.swing_audit_service.market_data_service.fetch_quotes_bulk", new_callable=AsyncMock, return_value={}), \
+         patch("backend.services.swing_audit_service.market_data_service.fetch_quote", new_callable=AsyncMock, return_value=None):
         mock_fetch.return_value = mock_candles
 
         mock_exec = MagicMock()
@@ -219,7 +225,9 @@ async def test_multi_target_continuation_hits_target_2(mock_db):
         {"timestamp": d2, "open": 107.0, "high": 111.0, "low": 106.0, "close": 110.5},
     ]
 
-    with patch("backend.services.market_data.market_data_service.fetch_candles", new_callable=AsyncMock) as mock_fetch:
+    with patch("backend.services.market_data.market_data_service.fetch_candles", new_callable=AsyncMock) as mock_fetch, \
+         patch("backend.services.swing_audit_service.market_data_service.fetch_quotes_bulk", new_callable=AsyncMock, return_value={}), \
+         patch("backend.services.swing_audit_service.market_data_service.fetch_quote", new_callable=AsyncMock, return_value=None):
         mock_fetch.return_value = mock_candles
 
         mock_exec = MagicMock()
@@ -297,9 +305,9 @@ async def test_excel_generation_with_coupled_ratchet_columns(mock_db, tmp_path):
     assert "11-Day Price Tracking" in wb.sheetnames
 
     ws_ledger = wb["11-Day Price Tracking"]
-    # Check headers count = 31
+    # Check headers count = 32 (includes Sector column)
     header_cells = [cell.value for cell in ws_ledger[1]]
-    assert len(header_cells) == 31
+    assert len(header_cells) == 32
     assert "Dynamic Trailing SL (₹)" in header_cells
     assert "Tranche 2 Buy (₹)" in header_cells
     assert "Ratchet Milestone" in header_cells

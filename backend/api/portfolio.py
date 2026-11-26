@@ -174,6 +174,15 @@ async def get_portfolio(
             "opened_at": opened_at_utc.isoformat(),
             "buy_date_formatted": buy_date_formatted,
             "days_held": days_held,
+            "stop_loss": float(t.stop_loss) if t.stop_loss is not None else None,
+            "target_price": float(t.target_price) if t.target_price is not None else None,
+            "target_1": float(t.target_1) if getattr(t, "target_1", None) is not None else None,
+            "target_2": float(t.target_2) if getattr(t, "target_2", None) is not None else None,
+            "target_3": float(t.target_3) if getattr(t, "target_3", None) is not None else None,
+            "initial_stop_loss": float(t.initial_stop_loss) if getattr(t, "initial_stop_loss", None) is not None else None,
+            "highest_price_recorded": float(t.highest_price_recorded) if getattr(t, "highest_price_recorded", None) is not None else None,
+            "ratchet_stage": getattr(t, "ratchet_stage", "INITIAL") or "INITIAL",
+            "trailing_enabled": bool(getattr(t, "trailing_enabled", True)),
         })
 
     total_pnl = total_realized + total_unrealized

@@ -8,7 +8,7 @@ and computes dynamic, market-status-aware cache TTLs to guarantee that:
    unnecessary network and compute overhead on immutable historical data.
 """
 
-from datetime import datetime, time as dtime, timezone, timedelta
+from datetime import date, datetime, time as dtime, timezone, timedelta
 from typing import Optional
 from backend.core.config import settings
 
@@ -20,8 +20,8 @@ IST_TZ = timezone(IST_OFFSET)
 MARKET_OPEN_TIME = dtime(9, 15, 0)
 MARKET_CLOSE_TIME = dtime(15, 30, 0)
 
-# Major Indian Exchange Holidays (year-agnostic month-day or specific dates)
-# Standard fixed holiday dates (Republic Day, Independence Day, Gandhi Jayanti, Christmas, etc.)
+# Major Indian Exchange Holidays (year-agnostic month-day or specific NSE dates)
+# Standard fixed holiday dates (Republic Day, Maharashtra Day, Independence Day, Gandhi Jayanti, Christmas)
 FIXED_HOLIDAYS_MM_DD = {
     (1, 26),   # Republic Day
     (5, 1),    # Maharashtra Day
@@ -29,6 +29,55 @@ FIXED_HOLIDAYS_MM_DD = {
     (10, 2),   # Gandhi Jayanti
     (12, 25),  # Christmas
 }
+
+# Verified NSE annual calendar holidays (lunar / variable holidays outside fixed dates)
+NSE_ANNUAL_HOLIDAYS = {
+    # 2025
+    date(2025, 2, 26),   # Mahashivratri
+    date(2025, 3, 14),   # Holi
+    date(2025, 3, 31),   # Id-Ul-Fitr
+    date(2025, 4, 10),   # Shri Mahavir Jayanti
+    date(2025, 4, 14),   # Dr. Baba Saheb Ambedkar Jayanti
+    date(2025, 4, 18),   # Good Friday
+    date(2025, 10, 21),  # Diwali Laxmi Pujan
+    date(2025, 10, 22),  # Diwali Balipratipada
+    date(2025, 11, 5),   # Prakash Gurpurb Sri Guru Nanak Dev
+    # 2026
+    date(2026, 3, 3),    # Holi
+    date(2026, 3, 26),   # Shri Ram Navami
+    date(2026, 3, 31),   # Shri Mahavir Jayanti
+    date(2026, 4, 3),    # Good Friday
+    date(2026, 4, 14),   # Dr. Baba Saheb Ambedkar Jayanti
+    date(2026, 5, 28),   # Bakri Id
+    date(2026, 6, 26),   # Muharram
+    date(2026, 9, 14),   # Ganesh Chaturthi
+    date(2026, 10, 20),  # Dussehra
+    date(2026, 11, 24),  # Prakash Gurpurb Sri Guru Nanak Dev
+}
+
+
+def is_indian_holiday(target_date: date) -> bool:
+    """Return True if the given calendar date is an NSE/BSE exchange holiday."""
+    return (
+        (target_date.month, target_date.day) in FIXED_HOLIDAYS_MM_DD
+        or target_date in NSE_ANNUAL_HOLIDAYS
+    )
+
+
+def is_trading_day(target_date: date) -> bool:
+    """Return True if the given date is an NSE trading day (Mon-Fri and not an exchange holiday)."""
+    return target_date.weekday() < 5 and not is_indian_holiday(target_date)
+
+
+def normalize_to_trading_day(target_date: date, forward: bool = True) -> date:
+    """Snap a weekend or NSE holiday date to the nearest valid trading session."""
+    step = 1 if forward else -1
+    current = target_date
+    for _ in range(14):
+        if is_trading_day(current):
+            return current
+        current += timedelta(days=step)
+    return current
 
 
 def get_current_ist_time(dt_utc: Optional[datetime] = None) -> datetime:
@@ -46,16 +95,12 @@ def is_indian_market_open(dt_utc: Optional[datetime] = None) -> bool:
     Trading sessions are:
     - Monday through Friday (weekday < 5)
     - Between 09:15:00 AM and 03:30:00 PM IST
-    - Not on recognized National Holidays
+    - Not on recognized National or NSE Calendar Holidays
     """
     ist = get_current_ist_time(dt_utc)
 
-    # Weekday check: Monday is 0, Sunday is 6
-    if ist.weekday() >= 5:  # Saturday (5) or Sunday (6)
-        return False
-
-    # Holiday check
-    if (ist.month, ist.day) in FIXED_HOLIDAYS_MM_DD:
+    # Weekday & Holiday check
+    if not is_trading_day(ist.date()):
         return False
 
     # Time-of-day check (09:15 to 15:30 IST)
