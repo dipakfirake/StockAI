@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timezone, timedelta
 from backend.celery_app import celery_app
+from backend.core.celery_async import run_in_worker_loop
 from backend.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -15,7 +16,7 @@ def analyze_predictions():
     """
     logger.info("Starting False Signal Analysis...")
     try:
-        asyncio.run(_analyze_async())
+        run_in_worker_loop(_analyze_async())
         return {"status": "Analysis complete"}
     except Exception as e:
         logger.error(f"False signal analysis failed: {e}")

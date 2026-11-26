@@ -2,6 +2,7 @@
 
 import asyncio
 from backend.celery_app import celery_app
+from backend.core.celery_async import run_in_worker_loop
 from backend.core.logging_config import get_logger
 from backend.data.ingestion.nse_scraper import nse_scraper
 
@@ -31,7 +32,7 @@ def ingest_watchlist_stocks(self):
                         total_inserted += r
                 await asyncio.sleep(0.5)
             return total_inserted
-        total = asyncio.run(_run_all())
+        total = run_in_worker_loop(_run_all())
         logger.info(f"Ingestion task: {total} candles updated")
         return {"inserted": total}
     except Exception as e:
@@ -46,7 +47,7 @@ def end_of_day_processing():
     
     # Run async logic
     try:
-        asyncio.run(_eod_processing_async())
+        run_in_worker_loop(_eod_processing_async())
         return {"status": "EOD processing complete"}
     except Exception as e:
         logger.error(f"EOD processing failed: {e}")
@@ -87,7 +88,7 @@ def analyze_market_bulk():
     """Run the AI Screener on a large basket of stocks and cache the results."""
     logger.info("Running bulk market analysis...")
     try:
-        results = asyncio.run(_analyze_market_bulk_async())
+        results = run_in_worker_loop(_analyze_market_bulk_async())
         return {"status": "Bulk analysis complete", "stocks_analyzed": len(results)}
     except Exception as e:
         logger.error(f"Bulk analysis failed: {e}")
@@ -115,7 +116,7 @@ def run_sector_screener_task(self, sector: str = "NIFTY_50", force_refresh: bool
     """
     logger.info(f"Celery executing sector screener for {sector} (job_id: {job_id})...")
     try:
-        results = asyncio.run(_run_sector_screener_async(sector=sector, force_refresh=force_refresh, job_id=job_id))
+        results = run_in_worker_loop(_run_sector_screener_async(sector=sector, force_refresh=force_refresh, job_id=job_id))
         return {
             "status": "success",
             "sector": sector,
@@ -127,7 +128,7 @@ def run_sector_screener_task(self, sector: str = "NIFTY_50", force_refresh: bool
         if job_id:
             try:
                 from backend.core.cache import cache_set
-                asyncio.run(cache_set(f"screener_job:{job_id}", {
+                run_in_worker_loop(cache_set(f"screener_job:{job_id}", {
                     "job_id": job_id,
                     "status": "failed",
                     "error": str(e),

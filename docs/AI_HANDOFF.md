@@ -14,6 +14,32 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25 / 2026-11-26)
 
+- **CELERY `Too many open files` ERADICATION, PENDING PAPER ORDER EXECUTION & HOLDINGS/ORDERS VISIBILITY FIX (COMPLETE & VERIFIED - 2026-11-26):**
+  - **Issues Investigated & Resolved**:
+    1. Live Flower showed `backend.tasks.trading_tasks.evaluate_paper_trades` failing every minute (56 consecutive failures) with `OSError: [Errno 24] Too many open files` inside `asyncpg/connect_utils.py -> ssl.load_cert_chain(...)`.
+    2. Live browser inspection on `/paper-trading` and `/portfolio` revealed that 4 `TITAN.NS` `BUY MARKET` orders (placed off-market) and pending `LIMIT` orders remained trapped in `PENDING`, `Orders` tab rendered `"Invalid Date"` (referencing missing `t.created_at` instead of `t.opened_at`) and hardcoded `"OPEN"` status badges, and `Portfolio & Holdings` displayed `1 / 5 pending` without listing pending orders or linking to Orders.
+  - **Root Causes & Fixes Implemented**:
+    1. **Celery File Descriptor Leak Eradication**:
+       - Created `backend/core/celery_async.py` (`run_in_worker_loop` / `close_worker_loops`) maintaining one persistent fork-safe asyncio event loop per Celery worker PID; updated `trading_tasks.py`, `alert_tasks.py`, `market_tasks.py`, `swing_audit_tasks.py`, `false_signal_analysis.py`, and added `@worker_process_shutdown` cleanup in `backend/celery_app.py`.
+       - Updated `backend/core/cache.py` (`get_redis`) to store `(loop_ref, client)` and prune closed loops + migrate `setex` -> `set(..., ex=ttl)`.
+       - Updated `backend/services/market_data.py` to cache `FyersModel` instances per `(client_id, access_token)` (eliminating per-request `fyersApi.log` `FileHandler` leaks), skip `FyersStreamService` WebSocket daemon restarts/subscriptions inside Celery worker processes, and wrap all 6 `requests.Session()` calls in context managers.
+       - Fixed `MarketDepthService.get_market_depth` (`backend/services/market_depth_service.py`) calling non-existent `_get_fyers_model()` -> `await MarketDataService._get_fyers_client()`, and partitioned `_DEPTH_LOCKS` by running loop ID.
+       - Fixed `backend/core/executors.py` to lazily recreate shutdown threadpools instead of raising `RuntimeError: cannot schedule new futures after shutdown` after lifespan shutdown.
+    2. **Pending Paper Order Execution Engine**:
+       - Updated `PaperTradingService.place_order` (`backend/services/paper_trading.py`) to validate fat-finger limits upfront and immediately fill marketable `LIMIT` orders during open market hours (`is_indian_market_open()`).
+       - Updated `PaperTradingService.evaluate_pending_orders` to support `MARKET` (AMO/liquidity-locked) and `SL_LIMIT` orders alongside `LIMIT`/`SL` with null-price safety, fresh `opened_at` on fill, and `OrderExecutedEvent` publication.
+       - Added opportunistic user-scoped `evaluate_pending_orders` sweep on `GET /api/paper-trades` and `GET /api/portfolio` during open market hours, plus `pending_orders_list` inside `GET /api/portfolio`.
+    3. **Frontend Visibility & Accuracy**:
+       - Fixed `PaperTradingPage.tsx` `Invalid Date` (`t.opened_at || t.created_at`), hardcoded `"OPEN"` badge -> actual `t.status`, added `Order Price / GTT` column, added `?tab=orders` routing, and added a Pending Orders notice banner on `Positions`.
+       - Updated `PortfolioPage.tsx` to render a **Pending Orders Queue** section with order/trigger/target/SL prices, Cancel action, and clickable navigation to `/paper-trading?tab=orders`.
+       - Updated `ZerodhaOrderModal.tsx` & `frontend/src/services/api.ts` to reset `orderType` deterministically per modal mode, attach per-submit `Idempotency-Key`, and report `EXECUTED (OPEN)` vs `QUEUED (PENDING)` status truthfully.
+  - **Verification Evidence**:
+    - `py_compile` across all modified/new Python modules: **exit code 0**.
+    - `pytest` across 8 backend suites (`test_paper_trading_pending_and_celery_fd.py`, `test_market_depth.py`, `test_portfolio_holdings_analytics.py`, `test_holdings_and_proximity_alerts.py`, `test_cybersecurity.py`, `test_system_design.py`, `test_alert_tasks.py`, `test_market_data.py`): **63 passed, 0 failed in 87.10s (100% green)**.
+    - FastAPI `ASGITransport` smoke test: `POST /api/paper-trades` (`MARKET` -> `OPEN`, lower `LIMIT` -> `PENDING`), `GET /api/portfolio` -> `open_trades=1`, `pending_orders=1`, `pending_orders_list` hydrated cleanly.
+    - Frontend production build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 24.04s (exit code 0)**.
+  - **Exact Next Safe Step**: Commit and push locally (`git add -A && git commit && git push origin main`), then instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
+
 - **SWING AUDIT CYCLE #2 ROLLOVER, ANTI-CHURN DEDUPLICATION, ARCHIVE DOWNLOAD FIX & 10-SECTOR INTEGRATION (COMPLETE & VERIFIED - 2026-11-26):**
   - **Issues Investigated & Resolved**:
     1. **Archive Download Collision**: When downloading past archives (Cycle #1) from the "Past Audits" modal, the system served the exact same active cycle workbook instead of historical archive files. Root cause: in `backend/api/swing_audit.py:392`, the SQL query included `| (SwingTradeAuditCycle.status == "ACTIVE")`, which caused any requested filename to match the active cycle and regenerate the active cycle ledger. Remediated by checking disk files first and removing the unconditional active fallback.

@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.core.auth import get_current_user
+from backend.core.market_hours import is_indian_market_open
 from backend.models.paper_trade import PaperTrade
 from backend.services.market_data import market_data_service
+from backend.services.paper_trading import paper_trading_service
 
 router = APIRouter()
 
@@ -23,6 +25,19 @@ async def get_portfolio(
         select(PaperTrade).where(PaperTrade.user_id == current_user.id)
     )
     trades = result.scalars().all()
+
+    # Opportunistically sweep actionable pending orders during live market hours
+    if trades and is_indian_market_open() and any(t.status == "PENDING" for t in trades):
+        try:
+            filled = await paper_trading_service.evaluate_pending_orders(db, user_id=str(current_user.id))
+            if filled > 0:
+                await db.flush()
+                result = await db.execute(
+                    select(PaperTrade).where(PaperTrade.user_id == current_user.id)
+                )
+                trades = result.scalars().all()
+        except Exception:
+            pass
 
     if not trades:
         return {
@@ -42,6 +57,7 @@ async def get_portfolio(
             "closed_trades": 0,
             "win_rate": 0.0,
             "allocation": [],
+            "pending_orders_list": [],
         }
 
     initial_capital = 100000.0
@@ -172,6 +188,26 @@ async def get_portfolio(
     for a in allocation:
         a["weight_pct"] = round(a["value"] / weight_denominator * 100, 2)
 
+    pending_orders_list = []
+    for t in sorted(pending, key=lambda x: x.opened_at or now_utc, reverse=True):
+        opened_at = t.opened_at if isinstance(getattr(t, "opened_at", None), datetime) else now_utc
+        opened_at_utc = opened_at if opened_at.tzinfo else opened_at.replace(tzinfo=timezone.utc)
+        pending_orders_list.append({
+            "trade_id": str(t.id),
+            "symbol": t.symbol,
+            "direction": t.direction,
+            "order_type": t.order_type,
+            "product_type": t.product_type,
+            "quantity": t.quantity,
+            "limit_price": float(t.limit_price) if t.limit_price is not None else None,
+            "stop_price": float(t.stop_price) if t.stop_price is not None else None,
+            "target_price": float(t.target_price) if t.target_price is not None else None,
+            "stop_loss": float(t.stop_loss) if t.stop_loss is not None else None,
+            "status": t.status,
+            "opened_at": opened_at_utc.isoformat(),
+            "buy_date_formatted": opened_at_utc.strftime("%d %b %Y, %I:%M %p"),
+        })
+
     return {
         "initial_capital": initial_capital,
         "current_value": round(current_value, 2),
@@ -189,5 +225,6 @@ async def get_portfolio(
         "closed_trades": len(closed),
         "win_rate": round(win_rate, 4),
         "allocation": allocation,
+        "pending_orders_list": pending_orders_list,
     }
 

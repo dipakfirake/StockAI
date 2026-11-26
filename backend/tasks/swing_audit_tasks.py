@@ -3,20 +3,15 @@
 import asyncio
 import concurrent.futures
 from backend.celery_app import celery_app
+from backend.core.celery_async import run_in_worker_loop
 from backend.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
 def _run_async(coro):
-    """Safely execute coroutine whether an event loop is running or not."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result()
+    """Safely execute coroutine on the persistent Celery worker event loop."""
+    return run_in_worker_loop(coro)
 
 
 async def run_eod_screener_and_audit_sync_async():

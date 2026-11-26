@@ -5719,3 +5719,25 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Commit and push changes from localhost (`git add`, `git commit -m "...", `git push origin main`).
   - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
 
+---
+
+### Session Entry 96
+- **Timestamp:** 2026-11-26 11:48:00 IST (06:18:00 UTC)
+- **User Prompt:**
+  `"Order Placed: BUY 10x TITAN.NS ... Portfolio & Holdings: 1 Open (PERSISTENT.NS) / 5 pending ... why holdings and order & positions doesnt shows when i buy titan from swing screener. ... Flower: backend.tasks.trading_tasks.evaluate_paper_trades FAILURE (51+ tasks) ... /goal /browser /plan /teamwork ..."`
+- **Forensic Root Causes Diagnosed:**
+  1. **Celery `evaluate_paper_trades` Failing Every Minute (`OSError: [Errno 24] Too many open files`)**: Live Flower inspection on task `a5af3cfc-6eb9-4e17-a616-b1187c5e15b3` & `113a12a6-fb82-477f-9ecd-0e7e1aea8059` revealed `asyncpg/connect_utils.py:787 -> ssl.load_cert_chain(...)` failing with `OSError: [Errno 24] Too many open files`. Root leaks inside `stockcelery`: (a) `asyncio.run(...)` creating/destroying thousands of loops while `_redis_clients` in `backend/core/cache.py` never pruned closed loops' `ConnectionPool` FDs; (b) `MarketDataService._get_fyers_client()` creating a fresh `FyersModel` (and `logging.FileHandler("fyersApi.log")`) on every call; (c) `MarketDataService.check_credentials_changed()` starting `FyersStreamService` WebSocket daemon threads inside short-lived Celery loops; (d) 6 `requests.Session()` calls without context managers; and (e) `MarketDepthService.get_market_depth()` calling non-existent `_get_fyers_model()`.
+  2. **Queued `MARKET` & Marketable `LIMIT` Orders Trapped in `PENDING`**: Live `/paper-trading` inspection showed 4 `TITAN.NS` orders stuck with `order_type: "MARKET"`, `status: "PENDING"` (queued during off-market hours when order book asks were 0). `PaperTradingService.evaluate_pending_orders` did not handle `order_type == "MARKET"` or `"SL_LIMIT"`, lacked `None` price guards, and `place_order` left marketable `LIMIT` orders `PENDING` during open hours.
+  3. **Frontend Visibility & Rendering Bugs**: `PaperTradingPage.tsx` read non-existent `t.created_at` (rendering `"Invalid Date"`), hardcoded `"OPEN"` status inside `Orders`, hid price/target/SL info, and hid pending orders behind a secondary tab without notice; `PortfolioPage.tsx` showed `/ 5 pending` without listing pending orders; `ZerodhaOrderModal.tsx` omitted `Idempotency-Key` and always showed `"Order Placed"` even when `PENDING`.
+- **Architectural Remediations Implemented:**
+  1. **Persistent Celery Worker Event Loop & Leak Fixes (`backend/core/celery_async.py`, `backend/celery_app.py`, `backend/core/cache.py`, `backend/core/executors.py`, `backend/tasks/*.py`, `backend/services/market_data.py`, `backend/services/market_depth_service.py`)**: Added PID-scoped `run_in_worker_loop` + shutdown cleanup, evicted closed loops in `get_redis()`, cached `FyersModel` per credentials, blocked WebSocket stream restarts inside Celery CLI processes, closed all `requests.Session()` instances via `with`, fixed `_get_fyers_client()` call in depth service, and added lazy recreation of shutdown `ThreadPoolExecutor`s.
+  2. **Paper Trading Order Lifecycle (`backend/services/paper_trading.py`, `backend/api/paper_trading.py`, `backend/api/portfolio.py`)**: Enabled immediate execution of marketable `LIMIT` orders when market is open, added `MARKET` & `SL_LIMIT` evaluation with null guards and `OrderExecutedEvent` emission, added opportunistic open-market sweep on `/api/paper-trades` and `/api/portfolio`, and added `pending_orders_list` to `/api/portfolio`.
+  3. **UI Visibility Fixes (`frontend/src/pages/PaperTradingPage.tsx`, `frontend/src/pages/PortfolioPage.tsx`, `frontend/src/components/ZerodhaOrderModal.tsx`, `frontend/src/services/api.ts`)**: Fixed `Invalid Date` and hardcoded `OPEN` status badge, added Order Price/Target/SL column, `?tab=orders` routing, Pending Orders banner on `Positions`, dedicated Pending Orders Queue table on `Holdings`, mode-consistent `orderType` reset, `Idempotency-Key`, and accurate `EXECUTED` vs `QUEUED (PENDING)` toast messaging.
+- **Verification Evidence:**
+  - `backend/tests/test_paper_trading_pending_and_celery_fd.py` + 7 regression suites: **63 passed, 0 failed in 87.10s (100% green)**.
+  - FastAPI `ASGITransport` smoke test across `POST /api/paper-trades`, `GET /api/paper-trades`, and `GET /api/portfolio`: **passed**.
+  - Frontend production build (`npm --prefix frontend run build`): **1,995 modules transformed, 0 TypeScript errors, built in 24.04s (exit code 0)**.
+- **Next Safe Step:**
+  - Commit and push changes from localhost (`git add -A`, `git commit`, `git push origin main`).
+  - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose restart backend celery_worker celery_beat frontend` on the live server.
+

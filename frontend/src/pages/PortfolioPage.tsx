@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { portfolioApi } from '../services/api'
-import { PieChart, TrendingUp, TrendingDown, Clock, Calendar, Eye, HelpCircle } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { portfolioApi, paperTradingApi } from '../services/api'
+import { PieChart, TrendingUp, TrendingDown, Clock, Calendar, Eye, HelpCircle, ArrowRight } from 'lucide-react'
 import HoldingDetailModal from '../components/HoldingDetailModal'
-import { formatINR, formatNumber2Dec, getPnlColor, getPnlClass, getPnlSign } from '../utils/formatters'
+import { formatINR, getPnlColor, getPnlClass, getPnlSign } from '../utils/formatters'
 
 export default function PortfolioPage() {
+  const navigate = useNavigate()
   const [portfolio, setPortfolio] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [selectedHolding, setSelectedHolding] = useState<any | null>(null)
@@ -16,6 +18,12 @@ export default function PortfolioPage() {
       const res = await portfolioApi.get()
       setPortfolio(res.data)
     } finally { setLoading(false) }
+  }
+
+  async function handleCancelPendingOrder(tradeId: string) {
+    if (!confirm('Cancel this pending order?')) return
+    await paperTradingApi.close(tradeId)
+    await loadPortfolio()
   }
 
   if (loading) return <div className="loading">Loading portfolio…</div>
@@ -124,12 +132,18 @@ export default function PortfolioPage() {
             </div>
 
             {/* 6. Open / Pending */}
-            <div className="card">
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>
-                Open Positions / Orders
+            <div
+              className="card"
+              onClick={() => navigate(portfolio.pending_orders > 0 ? '/paper-trading?tab=orders' : '/paper-trading')}
+              style={{ cursor: 'pointer' }}
+              title="Click to inspect Orders & Positions"
+            >
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Open Positions / Orders</span>
+                <ArrowRight size={13} />
               </div>
               <div style={{ fontSize: 24, fontWeight: 700 }}>
-                {portfolio.open_trades} <span style={{ fontSize: 16, color: 'var(--color-text-muted)', fontWeight: 400 }}>/ {portfolio.pending_orders} pending</span>
+                {portfolio.open_trades} <span style={{ fontSize: 16, color: portfolio.pending_orders > 0 ? '#fbbf24' : 'var(--color-text-muted)', fontWeight: portfolio.pending_orders > 0 ? 600 : 400 }}>/ {portfolio.pending_orders} pending</span>
               </div>
               <div style={{ fontSize: 11, marginTop: 4, color: getPnlColor(portfolio.unrealized_pnl) }}>
                 Unrealized: {getPnlSign(portfolio.unrealized_pnl)}{formatINR(portfolio.unrealized_pnl)}
@@ -292,6 +306,87 @@ export default function PortfolioPage() {
               </div>
             )}
           </div>
+
+          {/* Pending Orders Queue Section (prevents queued BUY/LIMIT/AMO orders from looking invisible) */}
+          {portfolio.pending_orders_list && portfolio.pending_orders_list.length > 0 && (
+            <div className="card" style={{ marginTop: 20, borderLeft: '4px solid #f59e0b' }}>
+              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="card-title" style={{ display: 'flex', alignItems: 'center', color: '#fbbf24' }}>
+                    <Clock size={16} style={{ marginRight: 6 }} /> Pending Orders Queue (Awaiting Execution)
+                  </span>
+                  <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.35)' }}>
+                    {portfolio.pending_orders_list.length} Pending
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  onClick={() => navigate('/paper-trading?tab=orders')}
+                >
+                  Open in Orders &amp; Positions <ArrowRight size={13} />
+                </button>
+              </div>
+              <div className="table-container" style={{ overflowX: 'auto' }}>
+                <table className="table" style={{ minWidth: '750px', margin: 0 }}>
+                  <thead>
+                    <tr>
+                      <th>Instrument</th>
+                      <th>Type</th>
+                      <th>Product</th>
+                      <th>Qty</th>
+                      <th>Order / Trigger Price</th>
+                      <th>Target / SL</th>
+                      <th>Placed At</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'center' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {portfolio.pending_orders_list.map((po: any) => {
+                      const orderPrice = po.limit_price ?? po.stop_price
+                      return (
+                        <tr key={po.trade_id}>
+                          <td className="mono" style={{ fontWeight: 600 }}>{po.symbol}</td>
+                          <td>
+                            <span className={`badge ${po.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>
+                              {po.direction} {po.order_type}
+                            </span>
+                          </td>
+                          <td><span className="badge badge-secondary">{po.product_type}</span></td>
+                          <td>{po.quantity}</td>
+                          <td className="mono">{orderPrice ? formatINR(orderPrice) : 'Market Price'}</td>
+                          <td className="mono" style={{ fontSize: 12 }}>
+                            {po.target_price ? `T: ₹${Number(po.target_price).toFixed(2)}` : '—'}
+                            {po.stop_loss ? ` / SL: ₹${Number(po.stop_loss).toFixed(2)}` : ''}
+                          </td>
+                          <td style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                            {po.buy_date_formatted || (po.opened_at ? new Date(po.opened_at).toLocaleString() : '—')}
+                          </td>
+                          <td>
+                            <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.35)' }}>
+                              {po.status || 'PENDING'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 10px', fontSize: 12 }}
+                              onClick={() => handleCancelPendingOrder(po.trade_id)}
+                            >
+                              Cancel
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Holding Detail Modal */}
           <HoldingDetailModal

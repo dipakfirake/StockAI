@@ -5,6 +5,7 @@ import re
 import smtplib
 from email.message import EmailMessage
 from backend.celery_app import celery_app
+from backend.core.celery_async import run_in_worker_loop
 from backend.core.logging_config import get_logger
 from backend.core.config import settings
 from backend.data.ingestion.nse_scraper import nse_scraper
@@ -49,7 +50,7 @@ def evaluate_all_alerts():
         return {"skipped": True, "reason": "Outside market hours (quiet hours enforced)"}
 
     try:
-        result = asyncio.run(_evaluate_alerts_async())
+        result = run_in_worker_loop(_evaluate_alerts_async())
         return result
     except Exception as e:
         logger.error(f"Alert evaluation failed: {e}")

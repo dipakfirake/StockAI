@@ -81,7 +81,13 @@ export default function ZerodhaOrderModal({
     setTargetPercentInput(String(tgtPct))
 
     setTriggerPrice(initialStopLoss ? Number(initialStopLoss.toFixed(2)) : Number((baseP * 0.98).toFixed(2)))
-  }, [symbol, currentPrice, bestBuyPrice, initialTarget, initialStopLoss, defaultDirection])
+    // Reset orderType cleanly: MARKET for immediate BUY/SELL clicks (or GTT at CMP); LIMIT when GTT targets a lower dip
+    const hasDistinctBestBuy = Boolean(
+      isGttMode && bestBuyPrice && bestBuyPrice > 0 && currentPrice > 0 &&
+      Math.abs(bestBuyPrice - currentPrice) / currentPrice >= 0.002
+    )
+    setOrderType(hasDistinctBestBuy ? 'LIMIT' : 'MARKET')
+  }, [isOpen, isGttMode, symbol, currentPrice, bestBuyPrice, initialTarget, initialStopLoss, defaultDirection])
 
   // Close on Escape key
   useEffect(() => {
@@ -165,7 +171,12 @@ export default function ZerodhaOrderModal({
 
     setSubmitting(true)
     try {
-      // 1. Submit Paper Trade
+      // 1. Submit Paper Trade with per-submit Idempotency-Key to block double-clicks
+      const submissionKey =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+
       const payload: any = {
         symbol: symbol.toUpperCase(),
         direction: direction,
@@ -176,6 +187,7 @@ export default function ZerodhaOrderModal({
         stop_price: orderType === 'SL' || orderType === 'SL_M' ? triggerPrice : undefined,
         target_price: enableGtt ? targetPrice : undefined,
         stop_loss: enableGtt ? stopLoss : undefined,
+        idempotency_key: submissionKey,
       }
 
       const res = await paperTradingApi.place(payload)
@@ -197,10 +209,19 @@ export default function ZerodhaOrderModal({
         }
       }
 
-      toast.success(
-        `Order Placed: ${direction} ${quantity}x ${symbol}`,
-        `Price: ₹${activePrice.toFixed(2)} | Margin: ₹${marginRequired.toFixed(2)}${autoSetAlerts ? ' | Coupled Alerts Active' : ''}`
-      )
+      const execStatus = String(tradeData?.status || 'OPEN').toUpperCase()
+      const filledPrice = Number(tradeData?.entry_price || activePrice)
+      if (execStatus === 'OPEN') {
+        toast.success(
+          `Executed (${execStatus}): ${direction} ${quantity}x ${symbol}`,
+          `Filled @ ₹${filledPrice.toFixed(2)} | Live in Holdings & Positions${autoSetAlerts ? ' | Coupled Alerts Active' : ''}`
+        )
+      } else {
+        toast.info(
+          `Order Queued (${execStatus}): ${direction} ${quantity}x ${symbol}`,
+          `Trigger/Limit: ₹${activePrice.toFixed(2)} — Track in Orders & Positions -> Orders tab${autoSetAlerts ? ' | Coupled Alerts Active' : ''}`
+        )
+      }
 
       if (onOrderSuccess) onOrderSuccess(tradeData)
       onClose()

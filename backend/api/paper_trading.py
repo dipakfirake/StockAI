@@ -8,6 +8,7 @@ from backend.core.database import get_db
 from backend.core.auth import get_current_user
 from backend.core.idempotency import idempotency_manager
 from backend.core.audit_logger import log_security_event
+from backend.core.market_hours import is_indian_market_open
 from backend.services.paper_trading import paper_trading_service
 from backend.services.market_data import market_data_service
 
@@ -109,6 +110,16 @@ async def list_paper_trades(
 ):
     """List all paper trades with current unrealized PnL for open trades."""
     trades = await paper_trading_service.get_all_trades(db, str(current_user.id))
+
+    # Opportunistically sweep actionable pending orders during active market hours
+    if is_indian_market_open() and any(t.status == "PENDING" for t in trades):
+        try:
+            filled = await paper_trading_service.evaluate_pending_orders(db, user_id=str(current_user.id))
+            if filled > 0:
+                await db.flush()
+                trades = await paper_trading_service.get_all_trades(db, str(current_user.id))
+        except Exception:
+            pass
 
     open_symbols = list({t.symbol for t in trades if t.status == "OPEN"})
     quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols) if open_symbols else {}

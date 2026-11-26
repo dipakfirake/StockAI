@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.config import settings
 from backend.core.logging_config import get_logger
 from backend.core.audit_logger import log_security_event
-from backend.core.event_bus import event_bus, OrderPlacedEvent, OrderClosedEvent
+from backend.core.event_bus import event_bus, OrderPlacedEvent, OrderExecutedEvent, OrderClosedEvent
+from backend.core.market_hours import is_indian_market_open
 from backend.core.telemetry import metrics
 from backend.models.paper_trade import PaperTrade
 from backend.services.market_data import market_data_service
@@ -103,6 +104,27 @@ class PaperTradingService:
                 f"Order notional value (₹{notional_value:,.2f}) exceeds the maximum allowable limit of ₹{MAX_NOTIONAL_VALUE_PER_ORDER:,.2f}."
             )
 
+        # 4. Fat-Finger Price Deviation Bounds (validate before matching)
+        if order_type == "LIMIT":
+            if limit_price is None:
+                raise ValueError("Limit price must be provided for LIMIT orders.")
+            deviation = abs(limit_price - raw_price) / raw_price
+            if deviation > MAX_PRICE_DEVIATION_PCT:
+                raise ValueError(
+                    f"Limit price (₹{limit_price}) deviates by {deviation*100:.1f}% from market price (₹{raw_price}). "
+                    f"Maximum allowed deviation is {int(MAX_PRICE_DEVIATION_PCT*100)}%. Fat-finger circuit breaker triggered."
+                )
+
+        if order_type in ("SL", "SL_LIMIT"):
+            if stop_price is None:
+                raise ValueError("Stop price must be provided for SL orders.")
+            deviation = abs(stop_price - raw_price) / raw_price
+            if deviation > MAX_PRICE_DEVIATION_PCT:
+                raise ValueError(
+                    f"Stop price (₹{stop_price}) deviates by {deviation*100:.1f}% from market price (₹{raw_price}). "
+                    f"Maximum allowed deviation is {int(MAX_PRICE_DEVIATION_PCT*100)}%. Fat-finger circuit breaker triggered."
+                )
+
         status = "PENDING"
         entry_price = None
         slippage_amount = 0.0
@@ -127,7 +149,7 @@ class PaperTradingService:
                     entry_price = exec_price
                     slippage_amount = slip
                 elif exec_status in ("PENDING_NO_BUYERS", "PENDING_NO_SELLERS"):
-                    # Circuit breaker lock: No buyers to sell to, or no sellers to buy from
+                    # Circuit breaker / exchange-closed lock: queue order cleanly as PENDING
                     status = "PENDING"
                     entry_price = None
                     slippage_amount = 0.0
@@ -138,27 +160,29 @@ class PaperTradingService:
                 status = "OPEN"
                 slippage_amount = raw_price * settings.DEFAULT_SLIPPAGE_PCT
                 entry_price = raw_price + slippage_amount if direction == "BUY" else raw_price - slippage_amount
-
-        # 4. Fat-Finger Price Deviation Bounds
-        if order_type == "LIMIT":
-            if limit_price is None:
-                raise ValueError("Limit price must be provided for LIMIT orders.")
-            deviation = abs(limit_price - raw_price) / raw_price
-            if deviation > MAX_PRICE_DEVIATION_PCT:
-                raise ValueError(
-                    f"Limit price (₹{limit_price}) deviates by {deviation*100:.1f}% from market price (₹{raw_price}). "
-                    f"Maximum allowed deviation is {int(MAX_PRICE_DEVIATION_PCT*100)}%. Fat-finger circuit breaker triggered."
+        elif order_type == "LIMIT" and is_indian_market_open():
+            # Immediately execute marketable LIMIT orders when live market liquidity satisfies the limit boundary
+            if depth:
+                exec_price, slip, exec_status, _ = MarketDepthService.calculate_order_book_execution(
+                    depth=depth,
+                    direction=direction,
+                    quantity=quantity,
+                    order_type="LIMIT",
+                    limit_price=limit_price,
                 )
-
-        if order_type in ("SL", "SL_LIMIT"):
-            if stop_price is None:
-                raise ValueError("Stop price must be provided for SL orders.")
-            deviation = abs(stop_price - raw_price) / raw_price
-            if deviation > MAX_PRICE_DEVIATION_PCT:
-                raise ValueError(
-                    f"Stop price (₹{stop_price}) deviates by {deviation*100:.1f}% from market price (₹{raw_price}). "
-                    f"Maximum allowed deviation is {int(MAX_PRICE_DEVIATION_PCT*100)}%. Fat-finger circuit breaker triggered."
+                if exec_status == "FILLED":
+                    status = "OPEN"
+                    entry_price = exec_price
+                    slippage_amount = slip
+            else:
+                is_marketable = (
+                    (direction == "BUY" and raw_price <= float(limit_price))
+                    or (direction == "SELL" and raw_price >= float(limit_price))
                 )
+                if is_marketable:
+                    status = "OPEN"
+                    slippage_amount = raw_price * settings.DEFAULT_SLIPPAGE_PCT
+                    entry_price = raw_price + slippage_amount if direction == "BUY" else raw_price - slippage_amount
 
         trade = PaperTrade(
             user_id=uuid.UUID(str(user_id)),
@@ -213,7 +237,18 @@ class PaperTradingService:
         )
 
         if status == "OPEN":
-            logger.info(f"Market trade opened: {direction} {quantity}x{symbol} @ {entry_price:.4f}")
+            await event_bus.publish(
+                OrderExecutedEvent(
+                    user_id=str(user_id),
+                    trade_id=str(trade.id),
+                    symbol=symbol,
+                    direction=direction,
+                    quantity=quantity,
+                    execution_price=float(entry_price or raw_price),
+                    slippage=float(slippage_amount),
+                )
+            )
+            logger.info(f"Market/marketable trade opened: {direction} {quantity}x{symbol} @ {entry_price:.4f}")
         else:
             logger.info(f"Pending order placed: {direction} {quantity}x{symbol} Type={order_type}")
             
@@ -327,71 +362,120 @@ class PaperTradingService:
         trade.closed_at = datetime.now(timezone.utc)
 
     @staticmethod
-    async def evaluate_pending_orders(db: AsyncSession):
-        """Check all PENDING orders and execute if price levels are hit with order book liquidity."""
+    async def evaluate_pending_orders(db: AsyncSession, user_id: str | None = None) -> int:
+        """Check all PENDING orders (MARKET AMO, LIMIT, SL, SL_LIMIT) and execute against live liquidity."""
         from backend.services.market_depth_service import market_depth_service, MarketDepthService
 
-        result = await db.execute(select(PaperTrade).where(PaperTrade.status == "PENDING"))
+        stmt = select(PaperTrade).where(PaperTrade.status == "PENDING")
+        if user_id:
+            stmt = stmt.where(PaperTrade.user_id == uuid.UUID(str(user_id)))
+        result = await db.execute(stmt)
         pending_orders = result.scalars().all()
-        
+        if not pending_orders:
+            return 0
+
+        pending_symbols = list({o.symbol for o in pending_orders})
+        quotes_map = await market_data_service.fetch_quotes_bulk(pending_symbols) if pending_symbols else {}
+
+        executed_count = 0
         for order in pending_orders:
-            quote = await market_data_service.fetch_quote(order.symbol)
+            quote = quotes_map.get(order.symbol)
+            if not quote or not quote.get("price"):
+                quote = await market_data_service.fetch_quote(order.symbol)
             if not quote or not quote.get("price"):
                 continue
-                
-            current_price = quote["price"]
+
+            current_price = float(quote["price"])
             triggered = False
-            
-            if order.order_type == "LIMIT":
-                if order.direction == "BUY" and current_price <= float(order.limit_price):
+
+            if order.order_type == "MARKET":
+                # After-Market / Liquidity-Locked MARKET orders execute as soon as market depth unlocks
+                triggered = True
+            elif order.order_type == "LIMIT" and order.limit_price is not None:
+                lim = float(order.limit_price)
+                if order.direction == "BUY" and current_price <= lim:
                     triggered = True
-                elif order.direction == "SELL" and current_price >= float(order.limit_price):
+                elif order.direction == "SELL" and current_price >= lim:
                     triggered = True
-            
-            elif order.order_type == "SL":
-                if order.direction == "BUY" and current_price >= float(order.stop_price):
+            elif order.order_type == "SL" and order.stop_price is not None:
+                stp = float(order.stop_price)
+                if order.direction == "BUY" and current_price >= stp:
                     triggered = True
-                elif order.direction == "SELL" and current_price <= float(order.stop_price):
+                elif order.direction == "SELL" and current_price <= stp:
                     triggered = True
-            
-            if triggered:
-                try:
-                    depth = await market_depth_service.get_market_depth(order.symbol)
-                    exec_p, slip_amt, exec_stat, _ = MarketDepthService.calculate_order_book_execution(
-                        depth=depth,
-                        direction=order.direction,
-                        quantity=order.quantity,
-                        order_type="MARKET",
-                    )
-                    if exec_stat == "FILLED":
-                        entry_price = exec_p
-                        slippage_amount = slip_amt
-                    else:
-                        continue  # Wait for liquidity / circuit unlock
-                except Exception:
-                    slippage_amount = current_price * settings.DEFAULT_SLIPPAGE_PCT
-                    entry_price = current_price + slippage_amount if order.direction == "BUY" else current_price - slippage_amount
-                
-                order.entry_price = Decimal(str(round(entry_price, 4)))
-                order.slippage = Decimal(str(round(slippage_amount, 4)))
-                order.status = "OPEN"
-                logger.info(f"Auto-executed pending order: {order.direction} {order.quantity}x{order.symbol} @ {entry_price:.4f}")
+            elif order.order_type == "SL_LIMIT" and order.stop_price is not None:
+                stp = float(order.stop_price)
+                lim = float(order.limit_price) if order.limit_price is not None else None
+                if order.direction == "BUY" and current_price >= stp and (lim is None or current_price <= lim):
+                    triggered = True
+                elif order.direction == "SELL" and current_price <= stp and (lim is None or current_price >= lim):
+                    triggered = True
+
+            if not triggered:
+                continue
+
+            try:
+                depth = await market_depth_service.get_market_depth(order.symbol)
+                exec_p, slip_amt, exec_stat, _ = MarketDepthService.calculate_order_book_execution(
+                    depth=depth,
+                    direction=order.direction,
+                    quantity=order.quantity,
+                    order_type="MARKET",
+                )
+                if exec_stat == "FILLED":
+                    entry_price = exec_p
+                    slippage_amount = slip_amt
+                else:
+                    continue  # Wait for liquidity / session unlock
+            except Exception:
+                slippage_amount = current_price * settings.DEFAULT_SLIPPAGE_PCT
+                entry_price = current_price + slippage_amount if order.direction == "BUY" else current_price - slippage_amount
+
+            order.entry_price = Decimal(str(round(entry_price, 4)))
+            order.slippage = Decimal(str(round(slippage_amount, 4)))
+            order.status = "OPEN"
+            order.opened_at = datetime.now(timezone.utc)
+            executed_count += 1
+
+            await event_bus.publish(
+                OrderExecutedEvent(
+                    user_id=str(order.user_id),
+                    trade_id=str(order.id),
+                    symbol=order.symbol,
+                    direction=order.direction,
+                    quantity=order.quantity,
+                    execution_price=float(order.entry_price),
+                    slippage=float(order.slippage),
+                )
+            )
+            logger.info(
+                f"Auto-executed pending {order.order_type} order: {order.direction} {order.quantity}x{order.symbol} @ {entry_price:.4f}"
+            )
+
+        return executed_count
 
     @staticmethod
     async def evaluate_open_trades(db: AsyncSession):
         """Check all OPEN trades against targets and stop losses."""
         result = await db.execute(select(PaperTrade).where(PaperTrade.status == "OPEN"))
         open_trades = result.scalars().all()
-        
+        if not open_trades:
+            return
+
+        open_symbols = list({t.symbol for t in open_trades if t.target_price or t.stop_loss})
+        quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols) if open_symbols else {}
+
         for trade in open_trades:
             if not trade.target_price and not trade.stop_loss:
                 continue
-                
-            quote = await market_data_service.fetch_quote(trade.symbol)
+
+            quote = quotes_map.get(trade.symbol)
+            if not quote or not quote.get("price"):
+                quote = await market_data_service.fetch_quote(trade.symbol)
             if not quote or not quote.get("price"):
                 continue
-                
-            current_price = quote["price"]
+
+            current_price = float(quote["price"])
             triggered_exit = False
             
             if trade.direction == "BUY":

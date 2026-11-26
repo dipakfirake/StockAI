@@ -13,6 +13,7 @@ Schedule:
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_shutdown
 
 from backend.core.config import settings
 
@@ -101,3 +102,13 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=10, minute=15, day_of_week="1-5"),
     },
 }
+
+
+@worker_process_shutdown.connect
+def _on_celery_worker_shutdown(**kwargs):
+    """Dispose persistent worker event loop, Redis pools, and DB engine on exit."""
+    try:
+        from backend.core.celery_async import close_worker_loops
+        close_worker_loops()
+    except Exception:
+        pass

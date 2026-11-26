@@ -78,25 +78,55 @@ def configure_ml_runtime() -> None:
         logger.debug(f"[Executors] PyTorch runtime tuning skipped: {exc}")
 
 
+def _get_fast_executor() -> ThreadPoolExecutor:
+    global fast_control_executor
+    if getattr(fast_control_executor, "_shutdown", False):
+        fast_control_executor = ThreadPoolExecutor(
+            max_workers=8,
+            thread_name_prefix="fast-ctrl",
+        )
+    return fast_control_executor
+
+
+def _get_scraper_executor() -> ThreadPoolExecutor:
+    global scraper_io_executor
+    if getattr(scraper_io_executor, "_shutdown", False):
+        scraper_io_executor = ThreadPoolExecutor(
+            max_workers=4 if _cpu_count <= 2 else 6,
+            thread_name_prefix="scraper-io",
+        )
+    return scraper_io_executor
+
+
+def _get_ml_executor() -> ThreadPoolExecutor:
+    global ml_compute_executor
+    if getattr(ml_compute_executor, "_shutdown", False):
+        ml_compute_executor = ThreadPoolExecutor(
+            max_workers=1 if _cpu_count <= 2 else 3,
+            thread_name_prefix="ml-cpu",
+        )
+    return ml_compute_executor
+
+
 async def run_in_fast_executor(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     """Run a quick control-plane blocking function on the isolated fast executor."""
     loop = asyncio.get_running_loop()
     call = functools.partial(func, *args, **kwargs) if kwargs else functools.partial(func, *args)
-    return await loop.run_in_executor(fast_control_executor, call)
+    return await loop.run_in_executor(_get_fast_executor(), call)
 
 
 async def run_in_scraper_executor(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     """Run an external scraper / HTML parser function on the isolated scraper executor."""
     loop = asyncio.get_running_loop()
     call = functools.partial(func, *args, **kwargs) if kwargs else functools.partial(func, *args)
-    return await loop.run_in_executor(scraper_io_executor, call)
+    return await loop.run_in_executor(_get_scraper_executor(), call)
 
 
 async def run_in_ml_executor(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     """Run CPU-bound indicator or ML ensemble scoring on the bounded ML executor."""
     loop = asyncio.get_running_loop()
     call = functools.partial(func, *args, **kwargs) if kwargs else functools.partial(func, *args)
-    return await loop.run_in_executor(ml_compute_executor, call)
+    return await loop.run_in_executor(_get_ml_executor(), call)
 
 
 def shutdown_executors() -> None:

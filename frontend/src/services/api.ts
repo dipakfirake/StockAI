@@ -173,6 +173,7 @@ export const paperTradingApi = {
     stop_price?: number;
     target_price?: number;
     stop_loss?: number;
+    idempotency_key?: string;
   }) => api.post('/paper-trades', data),
   close: (tradeId: string) => api.put(`/paper-trades/${tradeId}/close`),
 }

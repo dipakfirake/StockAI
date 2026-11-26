@@ -9,6 +9,7 @@ from celery.utils.log import get_task_logger
 import pytz
 
 from backend.celery_app import celery_app
+from backend.core.celery_async import run_in_worker_loop
 from backend.core.database import AsyncSessionLocal
 from backend.services.paper_trading import paper_trading_service
 from backend.services.market_data import market_data_service
@@ -73,7 +74,7 @@ def evaluate_paper_trades():
     Periodic task to evaluate pending orders and open trades against live market prices.
     Runs every minute.
     """
-    asyncio.run(_evaluate_orders_async())
+    run_in_worker_loop(_evaluate_orders_async())
 
 
 @celery_app.task(name="backend.tasks.trading_tasks.square_off_intraday")
@@ -81,4 +82,4 @@ def square_off_intraday():
     """
     Square off all open INTRADAY positions at 15:20 IST.
     """
-    asyncio.run(_square_off_intraday_async())
+    run_in_worker_loop(_square_off_intraday_async())

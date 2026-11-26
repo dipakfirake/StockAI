@@ -36,9 +36,8 @@ except Exception:  # pragma: no cover
     async def cache_set(key: str, value: Any, ttl: int = 60) -> None:
         pass
 
-# In-memory single-flight lock dictionary per symbol
-_DEPTH_LOCKS: Dict[str, asyncio.Lock] = {}
-_GLOBAL_LOCK = asyncio.Lock()
+# In-memory single-flight lock dictionary partitioned per running loop + symbol
+_DEPTH_LOCKS: Dict[Tuple[int, str], asyncio.Lock] = {}
 
 
 def quantize_tick(price: float, tick_size: float = 0.05) -> float:
@@ -57,9 +56,16 @@ class MarketDepthService:
     @staticmethod
     def _get_symbol_lock(symbol: str) -> asyncio.Lock:
         clean = symbol.upper().strip()
-        if clean not in _DEPTH_LOCKS:
-            _DEPTH_LOCKS[clean] = asyncio.Lock()
-        return _DEPTH_LOCKS[clean]
+        try:
+            loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            loop_id = 0
+        key = (loop_id, clean)
+        if key not in _DEPTH_LOCKS:
+            if len(_DEPTH_LOCKS) > 2000:
+                _DEPTH_LOCKS.clear()
+            _DEPTH_LOCKS[key] = asyncio.Lock()
+        return _DEPTH_LOCKS[key]
 
     @staticmethod
     def generate_synthetic_depth(symbol: str, quote: dict, is_open: Optional[bool] = None) -> dict:
@@ -317,7 +323,7 @@ class MarketDepthService:
             can_call_fyers = await MarketDataService.check_and_record_fyers_rate_budget()
             if can_call_fyers:
                 try:
-                    fyers_instance = MarketDataService._get_fyers_model()
+                    fyers_instance = await MarketDataService._get_fyers_client()
                     if fyers_instance:
                         from backend.services.fyers_rate_governor import fyers_rate_governor, PRIORITY_INTERACTIVE
                         resp = await fyers_rate_governor.execute(

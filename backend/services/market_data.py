@@ -306,7 +306,51 @@ class MarketDataService:
     _rate_budget_lock: Optional[asyncio.Lock] = None
     _rate_budget_lock_loop: Optional[asyncio.AbstractEventLoop] = None
     _mem_fyers_creds: Optional[tuple[str, str, float]] = None
+    _cached_fyers_model: Optional[tuple[str, str, object]] = None
     _invalid_fyers_symbols: set[str] = set()
+
+    @staticmethod
+    def _is_celery_worker_process() -> bool:
+        """Return True when executing inside a dedicated Celery worker CLI process."""
+        import os
+        import sys
+        argv0 = os.path.basename(sys.argv[0]).lower() if sys.argv else ""
+        return "celery" in argv0
+
+    @classmethod
+    def _build_cached_fyers_model(cls, client_id: str, access_token: str):
+        """
+        Return a cached FyersModel instance for the active credential pair.
+        Prevents opening a new logging.FileHandler('fyersApi.log') descriptor
+        on every single quote/candle call.
+        """
+        cid = str(client_id).strip()
+        tok = str(access_token).strip()
+        cached = cls._cached_fyers_model
+        if cached is not None and cached[0] == cid and cached[1] == tok:
+            return cached[2]
+
+        # Close any prior FyersDataSocket FileHandler before constructing replacement client
+        try:
+            import logging as _logging
+            fyers_lg = _logging.getLogger("FyersDataSocket")
+            for h in list(fyers_lg.handlers):
+                if isinstance(h, _logging.FileHandler):
+                    try:
+                        h.close()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        model = fyersModel.FyersModel(
+            client_id=cid,
+            is_async=False,
+            token=tok,
+            log_path="",
+        )
+        cls._cached_fyers_model = (cid, tok, model)
+        return model
 
     @classmethod
     def _get_rate_budget_lock(cls) -> asyncio.Lock:
@@ -710,17 +754,18 @@ class MarketDataService:
             if discovered_client_id:
                 cls._last_loaded_client_id = discovered_client_id
 
-            # Debounce / deduplicate stream restart:
-            now = time.time()
-            if now - cls._last_restart_dispatch_time >= 3.0:
-                cls._last_restart_dispatch_time = now
-                try:
-                    from backend.services.fyers_stream import fyers_stream_service
-                    asyncio.create_task(fyers_stream_service.restart())
-                except Exception as ex:
-                    logger.debug(f"Stream restart on credential hot-swap skipped: {ex}")
-            else:
-                logger.info("Stream restart debounced in check_credentials_changed (already dispatched recently).")
+            # Debounce / deduplicate stream restart (web process only, never inside Celery workers):
+            if not cls._is_celery_worker_process():
+                now = time.time()
+                if now - cls._last_restart_dispatch_time >= 3.0:
+                    cls._last_restart_dispatch_time = now
+                    try:
+                        from backend.services.fyers_stream import fyers_stream_service
+                        asyncio.create_task(fyers_stream_service.restart())
+                    except Exception as ex:
+                        logger.debug(f"Stream restart on credential hot-swap skipped: {ex}")
+                else:
+                    logger.info("Stream restart debounced in check_credentials_changed (already dispatched recently).")
 
             return True
 
@@ -743,7 +788,7 @@ class MarketDataService:
         mem_creds = MarketDataService._mem_fyers_creds
         if mem_creds and _time_mod.time() < mem_creds[2]:
             client_id, access_token = mem_creds[0], mem_creds[1]
-            return fyersModel.FyersModel(client_id=client_id, is_async=False, token=access_token, log_path="")
+            return MarketDataService._build_cached_fyers_model(client_id, access_token)
 
         try:
             from backend.core.cache import cache_get, cache_set
@@ -754,7 +799,7 @@ class MarketDataService:
                 client_id = str(cached_creds["client_id"]).strip()
                 access_token = str(cached_creds["access_token"]).strip()
                 MarketDataService._mem_fyers_creds = (client_id, access_token, _time_mod.time() + 15.0)
-                return fyersModel.FyersModel(client_id=client_id, is_async=False, token=access_token, log_path="")
+                return MarketDataService._build_cached_fyers_model(client_id, access_token)
 
             # Priority 2: Check PostgreSQL SystemSettings if Redis cache cold
             db = AsyncSessionLocal()
@@ -814,12 +859,7 @@ class MarketDataService:
         MarketDataService._last_loaded_client_id = client_id
         MarketDataService._last_loaded_token = access_token
 
-        return fyersModel.FyersModel(
-            client_id=client_id,
-            is_async=False,
-            token=access_token,
-            log_path=""
-        )
+        return MarketDataService._build_cached_fyers_model(client_id, access_token)
 
     @staticmethod
     def _parse_yahoo_chart_meta(meta: dict, sym: str) -> dict | None:
@@ -912,22 +952,24 @@ class MarketDataService:
         cached = await cache_get(cache_key) or await cache_get(f"quote:{fyers_symbol}") or await cache_get(f"quote:{clean_symbol}")
         if cached and cached.get("price", 0) > 0:
             logger.debug(f"Quote cache hit: {original_symbol}")
-            # Ensure background WebSocket subscription is active for live ticks
+            # Ensure background WebSocket subscription is active for live ticks (web server only)
+            if not MarketDataService._is_celery_worker_process():
+                try:
+                    from backend.services.fyers_stream import fyers_stream_service
+                    if fyers_stream_service.is_connected:
+                        asyncio.create_task(fyers_stream_service.subscribe_symbols([fyers_symbol]))
+                except Exception:
+                    pass
+            return cached
+
+        # Auto-subscribe to Fyers WebSocket push stream so exchange ticks flow immediately
+        if not MarketDataService._is_celery_worker_process():
             try:
                 from backend.services.fyers_stream import fyers_stream_service
                 if fyers_stream_service.is_connected:
                     asyncio.create_task(fyers_stream_service.subscribe_symbols([fyers_symbol]))
             except Exception:
                 pass
-            return cached
-
-        # Auto-subscribe to Fyers WebSocket push stream so exchange ticks flow immediately
-        try:
-            from backend.services.fyers_stream import fyers_stream_service
-            if fyers_stream_service.is_connected:
-                asyncio.create_task(fyers_stream_service.subscribe_symbols([fyers_symbol]))
-        except Exception:
-            pass
 
         # Check for dynamic credential updates in DB, Redis, or .env
         await MarketDataService.check_credentials_changed()
@@ -1026,11 +1068,15 @@ class MarketDataService:
         try:
             import yfinance as yf
             import requests
-            session = requests.Session()
-            session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
             yf_sym = MarketDataService._normalise_yf_symbol(original_symbol)
-            ticker = yf.Ticker(yf_sym, session=session)
-            hist = await asyncio.wait_for(run_in_scraper_executor(ticker.history, period="5d"), timeout=5.0)
+
+            def _single_yf_hist():
+                with requests.Session() as session:
+                    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+                    ticker = yf.Ticker(yf_sym, session=session)
+                    return ticker.history(period="5d")
+
+            hist = await asyncio.wait_for(run_in_scraper_executor(_single_yf_hist), timeout=5.0)
             if not hist.empty:
                 last_price = float(hist["Close"].iloc[-1])
                 prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else last_price
@@ -1105,13 +1151,14 @@ class MarketDataService:
         if not missing_symbols:
             return quotes_dict
 
-        # Auto-subscribe missing symbols to Fyers WebSocket push stream
-        try:
-            from backend.services.fyers_stream import fyers_stream_service
-            if fyers_stream_service.is_connected and missing_symbols:
-                asyncio.create_task(fyers_stream_service.subscribe_symbols([MarketDataService._normalise_symbol(s) for s in missing_symbols]))
-        except Exception:
-            pass
+        # Auto-subscribe missing symbols to Fyers WebSocket push stream (web server only)
+        if not MarketDataService._is_celery_worker_process():
+            try:
+                from backend.services.fyers_stream import fyers_stream_service
+                if fyers_stream_service.is_connected and missing_symbols:
+                    asyncio.create_task(fyers_stream_service.subscribe_symbols([MarketDataService._normalise_symbol(s) for s in missing_symbols]))
+            except Exception:
+                pass
 
         fyers_to_orig: dict[str, list[str]] = {}
         for s in missing_symbols:
@@ -1329,10 +1376,10 @@ class MarketDataService:
                         yf_map[yf_sym] = s
 
                     def _batch_yf():
-                        session = requests.Session()
-                        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-                        tickers = " ".join(yf_map.keys())
-                        return yf.download(tickers, period="5d", interval="1d", progress=False, group_by="ticker", session=session)
+                        with requests.Session() as session:
+                            session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+                            tickers = " ".join(yf_map.keys())
+                            return yf.download(tickers, period="5d", interval="1d", progress=False, group_by="ticker", session=session)
 
                     df = await asyncio.wait_for(run_in_scraper_executor(_batch_yf), timeout=6.0)
                     if df is not None and not df.empty:
@@ -1396,10 +1443,10 @@ class MarketDataService:
     @staticmethod
     def _fetch_yf_candles_sync(yf_sym: str, interval: str, period: str, original_symbol: str):
         import requests
-        session = requests.Session()
-        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-        ticker = yf.Ticker(yf_sym, session=session)
-        df = ticker.history(interval=interval, period=period, auto_adjust=True)
+        with requests.Session() as session:
+            session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+            ticker = yf.Ticker(yf_sym, session=session)
+            df = ticker.history(interval=interval, period=period, auto_adjust=True)
         if df is None or df.empty:
             return []
         fallback_candles = []
@@ -2165,11 +2212,11 @@ class MarketDataService:
     @staticmethod
     def _fetch_yf_info_sync(yf_symbol: str) -> dict:
         import requests
-        session = requests.Session()
-        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-        ticker = yf.Ticker(yf_symbol, session=session)
-        info = ticker.info
-        return info if isinstance(info, dict) else {}
+        with requests.Session() as session:
+            session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+            ticker = yf.Ticker(yf_symbol, session=session)
+            info = ticker.info
+            return info if isinstance(info, dict) else {}
 
     @staticmethod
     async def get_stock_info(symbol: str) -> dict:
@@ -2325,10 +2372,10 @@ class MarketDataService:
                 import requests
 
                 def _news_sync():
-                    session = requests.Session()
-                    session.headers.update({"User-Agent": "Mozilla/5.0"})
-                    ticker = yf.Ticker(yf_symbol, session=session)
-                    return ticker.news or []
+                    with requests.Session() as session:
+                        session.headers.update({"User-Agent": "Mozilla/5.0"})
+                        ticker = yf.Ticker(yf_symbol, session=session)
+                        return ticker.news or []
 
                 news_items = await asyncio.wait_for(
                     run_in_scraper_executor(_news_sync),
@@ -2359,38 +2406,38 @@ class MarketDataService:
         import pandas as pd
 
         events = {"earnings_date": None, "dividends": []}
-        session = requests.Session()
-        session.headers.update({"User-Agent": "Mozilla/5.0"})
-        ticker = yf.Ticker(yf_symbol, session=session)
+        with requests.Session() as session:
+            session.headers.update({"User-Agent": "Mozilla/5.0"})
+            ticker = yf.Ticker(yf_symbol, session=session)
 
-        try:
-            cal = ticker.calendar
-            if isinstance(cal, dict) and "Earnings Date" in cal:
-                dates = cal["Earnings Date"]
-                if len(dates) > 0:
-                    events["earnings_date"] = str(dates[0])
-            elif hasattr(cal, "empty") and not cal.empty:
-                events["earnings_date"] = str(cal.iloc[0, 0])
-        except Exception:
-            pass
+            try:
+                cal = ticker.calendar
+                if isinstance(cal, dict) and "Earnings Date" in cal:
+                    dates = cal["Earnings Date"]
+                    if len(dates) > 0:
+                        events["earnings_date"] = str(dates[0])
+                elif hasattr(cal, "empty") and not cal.empty:
+                    events["earnings_date"] = str(cal.iloc[0, 0])
+            except Exception:
+                pass
 
-        try:
-            divs = ticker.dividends
-            if divs is not None and not divs.empty:
-                two_years_ago = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=730)
-                if divs.index.tz is None:
-                    two_years_ago = two_years_ago.tz_localize(None)
-                else:
-                    two_years_ago = two_years_ago.tz_convert(divs.index.tz)
+            try:
+                divs = ticker.dividends
+                if divs is not None and not divs.empty:
+                    two_years_ago = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=730)
+                    if divs.index.tz is None:
+                        two_years_ago = two_years_ago.tz_localize(None)
+                    else:
+                        two_years_ago = two_years_ago.tz_convert(divs.index.tz)
 
-                recent_divs = divs[divs.index > two_years_ago]
-                for date, amount in recent_divs.items():
-                    events["dividends"].append({
-                        "date": date.isoformat() if hasattr(date, "isoformat") else str(date),
-                        "amount": float(amount),
-                    })
-        except Exception:
-            pass
+                    recent_divs = divs[divs.index > two_years_ago]
+                    for date, amount in recent_divs.items():
+                        events["dividends"].append({
+                            "date": date.isoformat() if hasattr(date, "isoformat") else str(date),
+                            "amount": float(amount),
+                        })
+            except Exception:
+                pass
 
         return events
 

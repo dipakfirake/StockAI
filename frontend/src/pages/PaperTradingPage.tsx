@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { paperTradingApi, stocksApi } from '../services/api'
 import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle, Calendar, Eye, AlignJustify } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
@@ -7,14 +8,25 @@ import MarketDepthModal from '../components/MarketDepthModal'
 import { formatINR, formatNumber2Dec, getPnlColor, getPnlClass, getPnlSign } from '../utils/formatters'
 
 export default function PaperTradingPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [trades, setTrades] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [quote, setQuote] = useState<any>(null)
-  const [activeTab, setActiveTab] = useState<'POSITIONS' | 'ORDERS' | 'HISTORY'>('POSITIONS')
+  const initialTab = searchParams.get('tab')?.toUpperCase()
+  const [activeTab, setActiveTab] = useState<'POSITIONS' | 'ORDERS' | 'HISTORY'>(
+    initialTab === 'ORDERS' || initialTab === 'HISTORY' ? (initialTab as 'ORDERS' | 'HISTORY') : 'POSITIONS'
+  )
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [selectedPosition, setSelectedPosition] = useState<any | null>(null)
   const [depthModalSymbol, setDepthModalSymbol] = useState<string | null>(null)
+
+  useEffect(() => {
+    const qTab = searchParams.get('tab')?.toUpperCase()
+    if (qTab === 'ORDERS' || qTab === 'HISTORY' || qTab === 'POSITIONS') {
+      setActiveTab(qTab as 'POSITIONS' | 'ORDERS' | 'HISTORY')
+    }
+  }, [searchParams])
   
   const [form, setForm] = useState({ 
     symbol: '', 
@@ -138,24 +150,55 @@ export default function PaperTradingPage() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 30, borderBottom: '1px solid var(--color-border-light)', marginBottom: 20 }}>
         <div 
-          onClick={() => setActiveTab('POSITIONS')}
+          onClick={() => { setActiveTab('POSITIONS'); setSearchParams({ tab: 'positions' }) }}
           style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 500, borderBottom: activeTab === 'POSITIONS' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'POSITIONS' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
         >
           <Briefcase size={16} style={{ display: 'inline', marginRight: 6, verticalAlign: '-3px' }}/> Positions ({openTrades.length})
         </div>
         <div 
-          onClick={() => setActiveTab('ORDERS')}
+          onClick={() => { setActiveTab('ORDERS'); setSearchParams({ tab: 'orders' }) }}
           style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 500, borderBottom: activeTab === 'ORDERS' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'ORDERS' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
         >
           <Clock size={16} style={{ display: 'inline', marginRight: 6, verticalAlign: '-3px' }}/> Orders ({pendingTrades.length})
         </div>
         <div 
-          onClick={() => setActiveTab('HISTORY')}
+          onClick={() => { setActiveTab('HISTORY'); setSearchParams({ tab: 'history' }) }}
           style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 500, borderBottom: activeTab === 'HISTORY' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'HISTORY' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
         >
           History ({closedTrades.length})
         </div>
       </div>
+
+      {/* Visibility Notice when Pending Orders are queued */}
+      {activeTab === 'POSITIONS' && pendingTrades.length > 0 && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: '10px 16px',
+            borderRadius: 8,
+            background: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 10,
+            fontSize: 13,
+          }}
+        >
+          <span style={{ color: '#fbbf24', fontWeight: 600 }}>
+            ⏳ You have {pendingTrades.length} pending order{pendingTrades.length > 1 ? 's' : ''} awaiting trigger/market execution ({pendingTrades.map((p) => p.symbol).slice(0, 3).join(', ')}{pendingTrades.length > 3 ? '…' : ''}).
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ padding: '4px 12px', fontSize: 12, borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}
+            onClick={() => { setActiveTab('ORDERS'); setSearchParams({ tab: 'orders' }) }}
+          >
+            View Pending Orders →
+          </button>
+        </div>
+      )}
 
       {/* Content based on Active Tab */}
       <div className="card table-container" style={{ padding: 0, overflowX: 'auto' }}>
@@ -270,32 +313,59 @@ export default function PaperTradingPage() {
         )}
 
         {activeTab === 'ORDERS' && (
-          <table className="table" style={{ margin: 0, minWidth: '650px' }}>
+          <table className="table" style={{ margin: 0, minWidth: '780px' }}>
             <thead style={{ background: 'var(--color-bg-card-hover)' }}>
               <tr>
-                <th>Time</th><th>Type</th><th>Instrument</th><th>Product</th><th>Qty.</th><th>Status</th><th>Action</th>
+                <th>Time</th><th>Type</th><th>Instrument</th><th>Product</th><th>Qty.</th><th>Order Price / GTT</th><th>Status</th><th>Action</th>
               </tr>
             </thead>
             <tbody>
               {pendingTrades.length === 0 ? (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>You don't have any pending orders</td></tr>
-              ) : pendingTrades.map(t => (
-                <tr key={t.trade_id}>
-                  <td style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{new Date(t.created_at).toLocaleTimeString()}</td>
-                  <td>
-                    <span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction} {t.order_type}</span>
-                  </td>
-                  <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
-                  <td><span className="badge badge-secondary">{t.product_type}</span></td>
-                  <td>{t.quantity}</td>
-                  <td><span className="badge badge-watch">OPEN</span></td>
-                  <td>
-                    <button className="btn btn-secondary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => handleClose(t.trade_id)}>
-                      Cancel
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>You don't have any pending orders</td></tr>
+              ) : pendingTrades.map(t => {
+                const rawTs = t.opened_at || t.created_at
+                const parsedDate = rawTs ? new Date(rawTs) : null
+                const formattedTime = parsedDate && !isNaN(parsedDate.getTime())
+                  ? parsedDate.toLocaleString()
+                  : (t.buy_date_formatted || '—')
+                const orderPrice = t.limit_price ?? t.stop_price
+                return (
+                  <tr key={t.trade_id}>
+                    <td style={{ fontSize: 12, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>{formattedTime}</td>
+                    <td>
+                      <span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction} {t.order_type}</span>
+                    </td>
+                    <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
+                    <td><span className="badge badge-secondary">{t.product_type}</span></td>
+                    <td>{t.quantity}</td>
+                    <td className="mono" style={{ fontSize: 12 }}>
+                      <div>{orderPrice ? formatINR(orderPrice) : 'Market Price'}</div>
+                      {(t.target_price || t.stop_loss) && (
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                          {t.target_price ? `T: ₹${Number(t.target_price).toFixed(2)}` : ''}{t.target_price && t.stop_loss ? ' · ' : ''}{t.stop_loss ? `SL: ₹${Number(t.stop_loss).toFixed(2)}` : ''}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <span
+                        className="badge"
+                        style={{
+                          background: 'rgba(245, 158, 11, 0.15)',
+                          color: '#fbbf24',
+                          border: '1px solid rgba(245, 158, 11, 0.35)',
+                        }}
+                      >
+                        {t.status || 'PENDING'}
+                      </span>
+                    </td>
+                    <td>
+                      <button className="btn btn-secondary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => handleClose(t.trade_id)}>
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
