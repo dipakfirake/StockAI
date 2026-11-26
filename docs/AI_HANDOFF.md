@@ -3084,8 +3084,23 @@ docker compose restart backend frontend
 
 ## Exact Next Safe Steps
 1. Commit & push changes from localhost (`git add -A`, `git commit`, `git push origin main`).
-2. On the live Oracle server, run `cd /home/opc/StockAI && git pull origin main && docker compose build backend celery_worker celery_beat frontend && docker compose up -d backend celery_worker celery_beat frontend` (required so DB migration `ALTER TABLE ...` + new React bundle + backend Ratchet engine take effect).
-3. In the live UI (`/screener` or `/admin`), verify Active Cycle Banner shows `Cycle #1`, click **`Complete & Start Cycle #2`** to archive Cycle #1 into `Swing_Trade_Audit_Cycle_1_(Final).xlsx` and initialize clean Cycle #2, then place a test `M&M.NS` Swing Screener trade to confirm `T1/T2/T3` Ratchet Stage tracking in Holdings & Positions.
+2. On the live Oracle server, run `cd /home/opc/StockAI && git pull origin main && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat` (no image rebuild required — `./backend` is bind-mounted and only Python files changed).
+
+### Phase 21: Unconditional Automatic Day-11 ~15:45 IST Cycle Rollover (2026-11-26)
+1. 🔍 **Requirement**:
+   - Ensure 11-Day Swing Audit cycles automatically close, archive into `Swing_Trade_Audit_Cycle_{N}_(Final).xlsx`, and start Cycle `#N+1` on the next NSE trading day right around **15:45 IST** on the 11th working day (`cycle.to_date`) after NSE close (`15:30 IST`), even on 0-`BUY` days and without anyone opening the web UI.
+2. ✅ **Implemented Upgrades**:
+   - **IST Rollover Cutoff & Closing-Window Guard ([`swing_audit_service.py`](file:///d:/Stock%20Prediction%20System/backend/services/swing_audit_service.py))**:
+     - Added `ROLLOVER_CUTOFF_IST = dtime(15, 42, 0)`, `CLOSING_WINDOW_START_IST = dtime(15, 30, 0)`, `is_cycle_rollover_due()`, `is_cycle_in_closing_window()`, and `SwingAuditService.is_closing_window_active()`.
+     - Updated `update_daily_prices(db, cycle_id=None)` so when `15:45 IST` Celery Beat task `sync_swing_trade_audits` evaluates Day 11 close prices, if `is_cycle_rollover_due(cycle)` is `True` (`ist_date > to_date` or `ist_date == to_date and ist_time >= 15:42 IST`), it immediately calls `rollover_to_next_cycle(db, square_off_remaining=True)` unconditionally.
+     - Updated `rollover_to_next_cycle()` and `get_or_create_active_cycle()` in IST: when rolling over after `15:30 IST` close, `new_from_date` advances to the next NSE trading day (`normalize_to_trading_day(ist_date + 1 day, forward=True)`), skipping weekends and NSE holidays.
+   - **Day-11 Post-Close Deferral Guard ([`swing_audit_tasks.py`](file:///d:/Stock%20Prediction%20System/backend/tasks/swing_audit_tasks.py), [`screener.py`](file:///d:/Stock%20Prediction%20System/backend/services/screener.py))**:
+     - In `run_eod_screener_and_audit_sync_async` (`15:35 IST`) and `_auto_catalog_screener_buys`, if `is_closing_window_active(db)` is `True` (`15:30–15:45 IST` on `cycle.to_date`), Day 11 prices sync cleanly while new picks defer so closing Cycle `#N` is not polluted 10 minutes before `15:45 IST` archival.
+3. 🧪 **Verification Evidence**:
+   - Added `test_day11_1545_ist_auto_rollover_and_closing_window_guard` in [`test_high_precision_ratchet_and_cycle_fix.py`](file:///d:/Stock%20Prediction%20System/backend/tests/test_high_precision_ratchet_and_cycle_fix.py) testing `15:25 / 15:35 / 15:45 IST`, Thursday -> Friday transition, and Friday -> Monday weekend skip.
+   - `py_compile` across all modified/new modules: **exit code 0**.
+   - `pytest` across 11 backend suites (90 tests): **90 passed, 0 failed in 104.46s**.
+
 
 
 

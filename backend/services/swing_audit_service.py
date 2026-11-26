@@ -8,7 +8,7 @@ import uuid
 import shutil
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, time as dtime, timezone, date, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
@@ -19,11 +19,44 @@ from sqlalchemy.orm import selectinload
 
 from backend.core.logging_config import get_logger
 from backend.core.database import AsyncSessionLocal
-from backend.core.market_hours import is_trading_day, normalize_to_trading_day
+from backend.core.market_hours import get_current_ist_time, is_trading_day, normalize_to_trading_day
 from backend.models.swing_audit import SwingTradeAuditCycle, SwingTradeAudit, SwingTradeAuditPrice
 from backend.services.market_data import market_data_service
 
 logger = get_logger(__name__)
+
+# Automated Day-11 EOD Rollover cutoff (after 15:30 IST NSE close & 15:35 IST price sync)
+ROLLOVER_CUTOFF_IST = dtime(15, 42, 0)
+CLOSING_WINDOW_START_IST = dtime(15, 30, 0)
+
+
+def is_cycle_rollover_due(cycle: Any, now_ist: Optional[datetime] = None) -> bool:
+    """
+    Returns True if an ACTIVE cycle has finished its 11th working day:
+    - Either the IST calendar date is strictly past cycle.to_date, OR
+    - It is Day 11 (ist_date == cycle.to_date) at/after ~15:42 IST (triggers cleanly at 15:45 IST Celery Beat).
+    """
+    if cycle is None or not getattr(cycle, "to_date", None):
+        return False
+    ist_now = now_ist or get_current_ist_time()
+    ist_date = ist_now.date()
+    if ist_date > cycle.to_date:
+        return True
+    if ist_date == cycle.to_date and ist_now.time() >= ROLLOVER_CUTOFF_IST:
+        return True
+    return False
+
+
+def is_cycle_in_closing_window(cycle: Any, now_ist: Optional[datetime] = None) -> bool:
+    """
+    Returns True on Day 11 after 15:30 IST NSE market close so 15:35 IST scans do not
+    dump brand-new picks into a closing cycle 10 minutes before the 15:45 IST rollover.
+    """
+    if cycle is None or not getattr(cycle, "to_date", None):
+        return False
+    ist_now = now_ist or get_current_ist_time()
+    ist_date = ist_now.date()
+    return (ist_date > cycle.to_date) or (ist_date == cycle.to_date and ist_now.time() >= CLOSING_WINDOW_START_IST)
 
 
 def _is_mock_session(db: Any) -> bool:
@@ -239,16 +272,35 @@ class SwingAuditService:
         return get_audit_dir()
 
     @staticmethod
+    async def is_closing_window_active(db: AsyncSession, now_ist: Optional[datetime] = None) -> bool:
+        """Checks whether the current ACTIVE cycle is in its Day-11 post-close rollover window."""
+        if _is_mock_session(db):
+            return False
+        try:
+            stmt = (
+                select(SwingTradeAuditCycle)
+                .where(SwingTradeAuditCycle.status == "ACTIVE")
+                .order_by(SwingTradeAuditCycle.cycle_number.desc())
+            )
+            cycle = (await db.execute(stmt)).scalars().first()
+            return is_cycle_in_closing_window(cycle, now_ist=now_ist)
+        except Exception:
+            return False
+
+    @staticmethod
     async def get_or_create_active_cycle(db: AsyncSession, target_date: Optional[date] = None) -> SwingTradeAuditCycle:
         """
         Retrieves the current ACTIVE 11-day audit cycle, or creates a new one
-        if none exists or if the current one has expired past its 11th trading day.
+        if none exists or if the current one has expired past its 11th trading day
+        (including >= 15:42 IST on cycle.to_date).
         On real DB sessions, expiration performs complete archive rollover (square-off,
         permanent Cycle #(Final).xlsx archive, and clean Cycle #N+1 initialization).
         """
         await ensure_swing_audit_schema(db)
-        ref_date = target_date or date.today()
-        
+        now_ist = get_current_ist_time()
+        ref_date = target_date or now_ist.date()
+        is_mock = _is_mock_session(db)
+
         stmt = (
             select(SwingTradeAuditCycle)
             .where(SwingTradeAuditCycle.status == "ACTIVE")
@@ -258,10 +310,14 @@ class SwingAuditService:
         cycle = (await db.execute(stmt)).scalars().first()
 
         if cycle:
-            # If current active cycle is past its end date, archive cleanly and start a new one
-            if ref_date > cycle.to_date:
-                if not _is_mock_session(db):
-                    logger.info(f"Active audit cycle #{cycle.cycle_number} expired after {cycle.to_date}; executing clean rollover...")
+            expired = (
+                (is_cycle_rollover_due(cycle, now_ist) if target_date is None else ref_date > cycle.to_date)
+                if not is_mock
+                else (ref_date > cycle.to_date)
+            )
+            if expired:
+                if not is_mock:
+                    logger.info(f"Active audit cycle #{cycle.cycle_number} reached Day-11 completion ({cycle.to_date}); executing clean rollover...")
                     await SwingAuditService.rollover_to_next_cycle(db, square_off_remaining=True)
                     new_cycle = (await db.execute(stmt)).scalars().first()
                     if new_cycle:
@@ -278,7 +334,11 @@ class SwingAuditService:
             cycle_count = (await db.execute(count_stmt)).scalar() or 0
             new_num = cycle_count + 1
             
-            cycle_start = normalize_to_trading_day(ref_date, forward=True) if (target_date is None and not _is_mock_session(db)) else ref_date
+            if target_date is None and not is_mock:
+                start_anchor = now_ist.date() + timedelta(days=1) if now_ist.time() >= CLOSING_WINDOW_START_IST else now_ist.date()
+                cycle_start = normalize_to_trading_day(start_anchor, forward=True)
+            else:
+                cycle_start = ref_date
             end_date = add_trading_days(cycle_start, 10)
             filename = f"Swing_Trade_Audit_{cycle_start.isoformat()}_to_{end_date.isoformat()}.xlsx"
             file_path = str(get_audit_dir() / filename)
@@ -1202,7 +1262,7 @@ class SwingAuditService:
             except Exception as xl_err:
                 logger.error(f"Excel generation warning during audit sync: {xl_err}", exc_info=True)
 
-            return {
+            summary_payload = {
                 "status": "success",
                 "cycle_id": str(cycle.id),
                 "cycle_number": cycle.cycle_number,
@@ -1221,8 +1281,19 @@ class SwingAuditService:
                 "total_gain_loss_pct": round(total_gain_loss, 2),
                 "total_pnl_rupees": round(total_pnl, 2),
                 "updated_count": updated_count,
-                "excel_file_path": str(excel_path) if excel_path else cycle.excel_file_path
+                "excel_file_path": str(excel_path) if excel_path else cycle.excel_file_path,
+                "rollover_executed": False,
             }
+
+            # Unconditional automatic rollover at ~15:45 IST on Day 11 (or next day) even on 0-BUY days
+            if cycle_id is None and not _is_mock_session(db) and is_cycle_rollover_due(cycle):
+                logger.info(f"update_daily_prices detected Day-11 completion cutoff for Cycle #{cycle.cycle_number}; triggering automatic rollover...")
+                rollover_res = await SwingAuditService.rollover_to_next_cycle(db, square_off_remaining=True)
+                summary_payload["rollover_executed"] = True
+                summary_payload["completed_cycle"] = rollover_res.get("completed_cycle")
+                summary_payload["active_cycle"] = rollover_res.get("active_cycle")
+
+            return summary_payload
         except Exception as exc:
             logger.error(f"Top-level failure in update_daily_prices: {exc}", exc_info=True)
             return {
@@ -1310,7 +1381,9 @@ class SwingAuditService:
         )
         cycle_audits = (await db.execute(audits_stmt)).scalars().all()
 
-        today_val = date.today()
+        now_ist = get_current_ist_time()
+        is_mock = _is_mock_session(db)
+        today_val = now_ist.date() if not is_mock else date.today()
         for a in cycle_audits:
             if a.status == "IN_PROGRESS" and square_off_remaining:
                 dps = sorted(a.daily_prices, key=lambda p: p.day_number)
@@ -1391,7 +1464,11 @@ class SwingAuditService:
 
         # 5. Initialize Next Cycle cleanly
         new_cycle_number = cycle.cycle_number + 1
-        new_from_date = normalize_to_trading_day(today_val, forward=True) if not _is_mock_session(db) else today_val
+        if not is_mock:
+            start_anchor = (today_val + timedelta(days=1)) if now_ist.time() >= CLOSING_WINDOW_START_IST else today_val
+            new_from_date = normalize_to_trading_day(start_anchor, forward=True)
+        else:
+            new_from_date = today_val
         new_to_date = add_trading_days(new_from_date, 10)
         new_filename = f"Swing_Trade_Audit_{new_from_date.isoformat()}_to_{new_to_date.isoformat()}.xlsx"
         new_file_path = str(get_audit_dir() / new_filename)
@@ -1954,7 +2031,7 @@ class SwingAuditService:
             else:
                 stmt = select(SwingTradeAuditCycle).where(SwingTradeAuditCycle.status == "ACTIVE").order_by(SwingTradeAuditCycle.cycle_number.desc())
                 cycle = (await db.execute(stmt)).scalars().first()
-                if not cycle or (not _is_mock_session(db) and cycle.to_date and date.today() > cycle.to_date):
+                if not cycle or (not _is_mock_session(db) and is_cycle_rollover_due(cycle)):
                     cycle = await SwingAuditService.get_or_create_active_cycle(db)
 
             if not cycle:

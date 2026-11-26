@@ -435,6 +435,9 @@ class ScreenerService:
                             from backend.services.swing_audit_service import SwingAuditService
                             from backend.core.database import AsyncSessionLocal
                             async with AsyncSessionLocal() as audit_db:
+                                if await SwingAuditService.is_closing_window_active(audit_db):
+                                    logger.info("Skipping auto-catalog during Day-11 post-close window before 15:45 IST rollover.")
+                                    return
                                 filtered = await SwingAuditService.filter_cooldown_symbols(audit_db, stocks_to_catalog)
                                 if filtered:
                                     await SwingAuditService.track_batch_swing_trades(

@@ -533,3 +533,96 @@ async def test_screener_ml_sell_veto_and_cooldown_filter():
         ]
         filtered_elite = await SwingAuditService.filter_cooldown_symbols(db, elite_candidates)
         assert [s["symbol"] for s in filtered_elite] == ["CHRONIC.NS"]
+
+
+@pytest.mark.asyncio
+async def test_day11_1545_ist_auto_rollover_and_closing_window_guard(tmp_path, monkeypatch):
+    """
+    Verify automatic Day-11 ~15:45 IST post-close cycle rollover:
+    1. 15:25 IST on Day 11: neither closing window nor rollover due.
+    2. 15:35 IST on Day 11: closing window blocks adding brand-new EOD picks right before rollover,
+       while not rolling over before 15:42 IST.
+    3. 15:45 IST on Day 11 (Thu 2026-12-10): update_daily_prices(db) unconditionally finalizes Cycle #1,
+       writes Swing_Trade_Audit_Cycle_1_(Final).xlsx, and opens clean Cycle #2 starting Fri 2026-12-11.
+    4. When Day 11 falls on Friday (2026-12-11 15:45 IST), Cycle #3 snaps to Monday 2026-12-14.
+    """
+    monkeypatch.setenv("AUDIT_DIR", str(tmp_path))
+    from backend.core.market_hours import IST_TZ
+    from backend.services.swing_audit_service import is_cycle_in_closing_window, is_cycle_rollover_due
+
+    day11_thu = date(2026, 12, 10)
+    mock_c = MagicMock(to_date=day11_thu)
+    assert is_cycle_in_closing_window(mock_c, datetime(2026, 12, 10, 15, 25, tzinfo=IST_TZ)) is False
+    assert is_cycle_rollover_due(mock_c, datetime(2026, 12, 10, 15, 25, tzinfo=IST_TZ)) is False
+
+    assert is_cycle_in_closing_window(mock_c, datetime(2026, 12, 10, 15, 35, tzinfo=IST_TZ)) is True
+    assert is_cycle_rollover_due(mock_c, datetime(2026, 12, 10, 15, 35, tzinfo=IST_TZ)) is False
+
+    assert is_cycle_in_closing_window(mock_c, datetime(2026, 12, 10, 15, 45, tzinfo=IST_TZ)) is True
+    assert is_cycle_rollover_due(mock_c, datetime(2026, 12, 10, 15, 45, tzinfo=IST_TZ)) is True
+
+    with real_sqlite_async_db() as (db, sync_s):
+        cycle1 = SwingTradeAuditCycle(
+            cycle_number=1,
+            from_date=date(2026, 11, 26),
+            to_date=day11_thu,
+            status="ACTIVE",
+        )
+        sync_s.add(cycle1)
+        sync_s.commit()
+
+        open_trade = SwingTradeAudit(
+            cycle_id=cycle1.id,
+            symbol="TCS.NS",
+            recommendation_date=date(2026, 12, 8),
+            buy_price=Decimal("4000.00"),
+            target_price=Decimal("4300.00"),
+            stop_loss=Decimal("3850.00"),
+            status="IN_PROGRESS",
+        )
+        sync_s.add(open_trade)
+        sync_s.commit()
+
+        ist_1545_thu = datetime(2026, 12, 10, 15, 45, tzinfo=IST_TZ)
+        day11_candles = [
+            {"timestamp": datetime(2026, 12, 8, 10, 0, tzinfo=timezone.utc).isoformat(), "open": 4000, "high": 4050, "low": 3990, "close": 4040, "volume": 1000},
+            {"timestamp": datetime(2026, 12, 9, 10, 0, tzinfo=timezone.utc).isoformat(), "open": 4040, "high": 4090, "low": 4030, "close": 4080, "volume": 1000},
+            {"timestamp": datetime(2026, 12, 10, 10, 0, tzinfo=timezone.utc).isoformat(), "open": 4080, "high": 4140, "low": 4070, "close": 4120, "volume": 1000},
+        ]
+
+        with patch("backend.services.swing_audit_service.get_current_ist_time", return_value=ist_1545_thu), \
+             patch("backend.services.swing_audit_service.market_data_service.fetch_quotes_bulk", new=AsyncMock(return_value={"TCS.NS": {"price": 4120.0, "previous_close": 4080.0}})), \
+             patch("backend.services.swing_audit_service.market_data_service.fetch_quote", new=AsyncMock(return_value={"price": 4120.0, "previous_close": 4080.0})), \
+             patch("backend.services.swing_audit_service.market_data_service.fetch_candles", new=AsyncMock(return_value=day11_candles)):
+            assert await SwingAuditService.is_closing_window_active(db) is True
+            sync_res = await SwingAuditService.update_daily_prices(db)
+
+        assert sync_res["rollover_executed"] is True
+        assert sync_res["completed_cycle"]["cycle_number"] == 1
+        assert sync_res["active_cycle"]["cycle_number"] == 2
+        assert sync_res["active_cycle"]["from_date"] == "2026-12-11"
+        assert (tmp_path / "Swing_Trade_Audit_Cycle_1_(Final).xlsx").exists()
+
+        sync_s.expire_all()
+        c1_done = sync_s.execute(select(SwingTradeAuditCycle).where(SwingTradeAuditCycle.cycle_number == 1)).scalar_one()
+        c2_new = sync_s.execute(select(SwingTradeAuditCycle).where(SwingTradeAuditCycle.cycle_number == 2)).scalar_one()
+        t_closed = sync_s.execute(select(SwingTradeAudit).where(SwingTradeAudit.symbol == "TCS.NS")).scalar_one()
+        assert c1_done.status == "COMPLETED"
+        assert c2_new.status == "ACTIVE"
+        assert t_closed.status == "DAY_11_EXIT"
+        assert float(t_closed.exit_price) == 4120.0
+
+        # Also test Friday Day-11 15:45 IST rolling directly to Monday (2026-12-14)
+        c2_new.to_date = date(2026, 12, 11)
+        sync_s.commit()
+        ist_1545_fri = datetime(2026, 12, 11, 15, 45, tzinfo=IST_TZ)
+        with patch("backend.services.swing_audit_service.get_current_ist_time", return_value=ist_1545_fri), \
+             patch("backend.services.swing_audit_service.market_data_service.fetch_quotes_bulk", new=AsyncMock(return_value={})), \
+             patch("backend.services.swing_audit_service.market_data_service.fetch_quote", new=AsyncMock(return_value=None)), \
+             patch("backend.services.swing_audit_service.market_data_service.fetch_candles", new=AsyncMock(return_value=[])):
+            fri_res = await SwingAuditService.update_daily_prices(db)
+
+        assert fri_res["rollover_executed"] is True
+        assert fri_res["active_cycle"]["cycle_number"] == 3
+        assert fri_res["active_cycle"]["from_date"] == "2026-12-14"
+

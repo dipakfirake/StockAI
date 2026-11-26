@@ -5806,5 +5806,23 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Commit and push from localhost (`git add -A`, `git commit`, `git push origin main`).
   - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose build backend celery_worker celery_beat frontend && docker compose up -d backend celery_worker celery_beat frontend` on the live server.
 
+---
+
+### Session Entry 99
+- **Timestamp:** 2026-11-26 21:34:00 IST (16:04:00 UTC)
+- **User Prompt:**
+  `"@[Quote] so do it automatic rollover at approx 3.45 pm on 11th working day after market gets stopped . /goal ..."`
+- **Changes Implemented:**
+  - `backend/services/swing_audit_service.py`: Added IST-aligned `ROLLOVER_CUTOFF_IST = dtime(15, 42, 0)`, `CLOSING_WINDOW_START_IST = dtime(15, 30, 0)`, `is_cycle_rollover_due()`, `is_cycle_in_closing_window()`, `SwingAuditService.is_closing_window_active()`; wired `update_daily_prices(db, cycle_id=None)` to automatically execute `rollover_to_next_cycle()` when `is_cycle_rollover_due(cycle)` is `True` (at `15:45 IST` `sync_swing_trade_audits` on Day 11 even with zero `BUY` setups or UI visits); updated `rollover_to_next_cycle()` and `get_or_create_active_cycle()` so post-close (`>= 15:30 IST`) rollovers start `Cycle #N+1` on the next NSE trading day (`normalize_to_trading_day(ist_date + 1 day)`).
+  - `backend/tasks/swing_audit_tasks.py` & `backend/services/screener.py`: Skipped cataloging brand-new picks during the `15:30–15:45 IST` closing settlement window (`is_closing_window_active(db)`) so the closing cycle preserves clean Day 11 settlement before archival.
+  - `backend/tests/test_high_precision_ratchet_and_cycle_fix.py`: Added `test_day11_1545_ist_auto_rollover_and_closing_window_guard` covering `15:25 / 15:35 / 15:45 IST`, archival `.xlsx` generation, Thursday→Friday next-day rollover, and Friday→Monday weekend jump.
+- **Verification Evidence:**
+  - `py_compile` across `swing_audit_service.py`, `swing_audit_tasks.py`, `screener.py`, and `test_high_precision_ratchet_and_cycle_fix.py`: **exit code 0**.
+  - `pytest` across 11 suites: **90 passed, 0 failed in 104.46s**.
+- **Next Safe Step:**
+  - Commit & push from localhost (`git add -A`, `git commit`, `git push origin main`).
+  - Instruct user to run `cd /home/opc/StockAI && git pull origin main && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat` on the live server.
+
+
 
 

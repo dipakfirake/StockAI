@@ -56,7 +56,12 @@ async def run_eod_screener_and_audit_sync_async():
 
         # Phase 2: Consecutive-SL cooldown check + auto-catalog into active cycle (single EOD price sync in Phase 3)
         from backend.services.swing_audit_service import SwingAuditService
-        filtered_candidates = await SwingAuditService.filter_cooldown_symbols(db, top_candidates)
+        closing_window = await SwingAuditService.is_closing_window_active(db)
+        if closing_window:
+            logger.info("EOD Pipeline: Active cycle is in Day-11 post-close settlement window (15:30-15:45 IST); deferring new EOD picks so closing cycle archives cleanly.")
+            filtered_candidates = []
+        else:
+            filtered_candidates = await SwingAuditService.filter_cooldown_symbols(db, top_candidates)
         for item in filtered_candidates:
             try:
                 score = float(item.get("total_score", 0.0) or 0.0)
