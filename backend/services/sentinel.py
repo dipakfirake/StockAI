@@ -223,29 +223,55 @@ class SentinelService:
             return {"status": "DEGRADED", "latency_ms": latency, "error": str(e)}
 
     async def _probe_security_logs(self) -> Dict[str, Any]:
-        """Scan security audit logs for repeated failed logins or high 429 rate limits."""
-        log_path = "logs/security_audit.log"
+        """Scan canonical security audit logs for brute force, lockouts, fraud blocks, 500s, and rate limits."""
+        import json as _json
+        from backend.core.audit_logger import AUDIT_LOG_PATH
+
+        log_path = AUDIT_LOG_PATH if os.path.exists(AUDIT_LOG_PATH) else "logs/security_audit.log"
         active_threats = 0
         threat_level = "LOW"
 
         if os.path.exists(log_path):
             try:
-                # Read last 50 lines of security audit log
                 with open(log_path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()[-50:]
-                
-                brute_force_count = sum(1 for line in lines if "FAILED_LOGIN" in line or "AUTH_LOCKOUT" in line)
-                rate_limit_hits = sum(1 for line in lines if "RATE_LIMIT_EXCEEDED" in line)
+                    lines = f.readlines()[-100:]
 
-                if brute_force_count >= 5:
+                brute_force_count = 0
+                rate_limit_hits = 0
+                critical_sec_count = 0
+                unhandled_500_count = 0
+
+                for line in lines:
+                    raw = line.strip()
+                    if not raw:
+                        continue
+                    evt = ""
+                    sev = "INFO"
+                    try:
+                        rec = _json.loads(raw)
+                        evt = str(rec.get("event_type") or "")
+                        sev = str(rec.get("severity") or "INFO")
+                    except Exception:
+                        evt = raw
+
+                    if any(k in evt for k in ("AUTH_LOGIN_FAILED", "AUTH_ACCOUNT_LOCKED", "AUTH_LOCKOUT_BLOCKED", "FAILED_LOGIN", "AUTH_LOCKOUT")):
+                        brute_force_count += 1
+                    if "RATE_LIMIT_BLOCKED" in evt or "RATE_LIMIT_EXCEEDED" in evt:
+                        rate_limit_hits += 1
+                    if any(k in evt for k in ("AUTH_CREDENTIAL_STUFFING_ALERT", "AUTH_LOGIN_FRAUD_BLOCKED", "AUTH_GEO_VELOCITY_ANOMALY", "UNAUTHORIZED_ADMIN_ACCESS_ATTEMPT")) or sev == "CRITICAL":
+                        critical_sec_count += 1
+                    if "UNHANDLED_EXCEPTION" in evt:
+                        unhandled_500_count += 1
+
+                if critical_sec_count >= 1 or brute_force_count >= 5:
                     active_threats += 1
                     threat_level = "HIGH"
                     await self._record_incident(
                         subsystem="SECURITY",
                         severity="CRITICAL",
-                        title="Potential Brute Force Authentication Attack Detected",
-                        detail=f"{brute_force_count} failed login / lockout events detected in recent audit logs.",
-                        suggested_action="Review client IP in security_audit.log and verify fail2ban / rate limiter lockout.",
+                        title="High-Risk Security Threat / Brute-Force Activity Detected",
+                        detail=f"Detected {critical_sec_count} critical security events and {brute_force_count} failed/locked login events in security_audit.log.",
+                        suggested_action="Inspect client IPs & Trace IDs in Admin Alerts Hub and review security_audit.log.",
                     )
                 elif rate_limit_hits >= 15:
                     active_threats += 1
@@ -256,6 +282,17 @@ class SentinelService:
                         title="Elevated Rate Limit Rejections Detected",
                         detail=f"{rate_limit_hits} requests throttled by token bucket rate limiter.",
                         suggested_action="Inspect client traffic volume or adjust burst token capacities.",
+                    )
+                if unhandled_500_count >= 1:
+                    active_threats += 1
+                    if threat_level == "LOW":
+                        threat_level = "MEDIUM"
+                    await self._record_incident(
+                        subsystem="API_ENDPOINT",
+                        severity="CRITICAL",
+                        title=f"Unhandled Backend 500 Exception(s) Logged ({unhandled_500_count})",
+                        detail=f"Found {unhandled_500_count} UNHANDLED_EXCEPTION entries in recent audit trail.",
+                        suggested_action="Inspect traceback & trace_id in Admin Threats/Failures/Logs Hub.",
                     )
             except Exception as e:
                 logger.warning(f"🛡️ [Sentinel] Error reading security audit log: {e}")
@@ -332,6 +369,25 @@ class SentinelService:
         except Exception as e:
             logger.warning(f"🛡️ [Sentinel] Could not persist incident to DB: {e}")
 
+        try:
+            from backend.services.admin_alerts_service import schedule_admin_alert_nonblocking
+
+            cat_map = {
+                "SECURITY": "SECURITY_THREAT",
+                "CELERY": "CELERY_FAILURE",
+                "BROKER_API": "BROKER_FEED",
+            }
+            schedule_admin_alert_nonblocking(
+                category=cat_map.get(subsystem, "SYSTEM_FAILURE"),
+                subsystem=subsystem,
+                severity=severity,
+                title=title,
+                detail=detail,
+                suggested_action=suggested_action,
+            )
+        except Exception:
+            pass
+
     def get_health_summary(self) -> Dict[str, Any]:
         """Calculate aggregate system score (0-100) and subsystem matrix."""
         statuses = [s.get("status") for s in self._subsystem_status.values()]
@@ -385,6 +441,16 @@ class SentinelService:
                     inc.status = "RESOLVED"
                     inc.resolved_at = now
                     inc.resolved_by = resolved_by
+                    from backend.models.admin_alert_event import AdminAlertEvent
+                    adm_rows = (
+                        await session.execute(select(AdminAlertEvent).where(AdminAlertEvent.title == inc.title))
+                    ).scalars().all()
+                    for a_ev in adm_rows:
+                        a_ev.status = "RESOLVED"
+                        a_ev.resolved_at = now
+                        a_ev.resolved_by = resolved_by
+                        a_ev.is_seen = True
+                        a_ev.is_read = True
                     await session.commit()
             return True
         except Exception:

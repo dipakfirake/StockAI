@@ -13,7 +13,7 @@ Schedule:
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_process_shutdown
+from celery.signals import worker_process_shutdown, task_failure
 
 from backend.core.config import settings
 
@@ -102,6 +102,36 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=10, minute=15, day_of_week="1-5"),
     },
 }
+
+
+@task_failure.connect
+def _on_celery_task_failure(sender=None, task_id=None, exception=None, args=None, kwargs=None, traceback=None, einfo=None, **extra):
+    """Capture background Celery task crashes directly into Admin Failure & Error Log Hub."""
+    try:
+        from backend.services.admin_alerts_service import record_captured_log, schedule_admin_alert_nonblocking
+
+        task_name = getattr(sender, "name", None) or str(sender or "celery.task")
+        err_str = f"{type(exception).__name__}: {exception}" if exception else "Unknown Celery failure"
+        tb_str = str(getattr(einfo, "traceback", "") or "")
+        record_captured_log(
+            level="ERROR",
+            logger_name="celery.worker",
+            message=f"Task {task_name} ({task_id}) failed: {err_str}",
+            traceback_text=tb_str,
+            module_func=task_name,
+        )
+        schedule_admin_alert_nonblocking(
+            category="CELERY_FAILURE",
+            subsystem="CELERY",
+            severity="CRITICAL",
+            title=f"Celery Task Failed: {task_name}",
+            detail=f"Task ID: {task_id}\nError: {err_str}\n{tb_str[:800]}".strip(),
+            suggested_action="Inspect Celery Worker logs & Flower dashboard for worker saturation or upstream errors.",
+            trace_id=str(task_id) if task_id else None,
+            metadata={"task_name": task_name, "error": err_str},
+        )
+    except Exception:
+        pass
 
 
 @worker_process_shutdown.connect

@@ -12,7 +12,27 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25 / 2026-11-26 / 2026-11-27)
+## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25 / 2026-11-26 / 2026-11-27 / 2026-11-28)
+
+- **UNIFIED USER `🔔` NOTIFICATION BELL, AUTO-SELL INBOX, PERSISTENT RED BADGES, DESKTOP PUSH + CHIME & ADMIN `🚨` THREATS/FAILURES/LOGS HUB (COMPLETE & VERIFIED - 2026-11-28):**
+  - **Implemented Architecture**:
+    1. **Persistent User Notifications & Per-Stock Auto-Sell Ledger (`backend/models/notification.py`, `backend/core/database.py`, `backend/services/notification_service.py`, `backend/api/notifications.py`)**:
+       - Extended `Notification` with `category` (`AUTO_SELL`, `ORDER_FILL`, `SYSTEM_NOTICE`, `ALERT_TRIGGERED`, `GENERAL`), `symbol`, `trade_id`, `metadata_json`, `is_seen`, `seen_at`, and `read_at`, with idempotent PostgreSQL `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS ...` and `COALESCE(is_read, FALSE)` backfill in `database.py`.
+       - Separated `is_seen` (red counter badge cleared **only** when opening the Notifications tab via `POST /api/notifications/mark-seen`) from `is_read` (per-item highlight / `POST /api/notifications/mark-all-read` or `POST /api/notifications/{id}/read`).
+       - Wired per-stock notification emission (`notify_auto_sell_exit`, `notify_order_filled`, `broadcast_system_notice_to_users`) across `PaperTradingService.evaluate_open_trades`, `evaluate_pending_orders`, `trading_tasks.square_off_intraday`, `alert_tasks`, and `SwingAuditService.rollover_to_next_cycle`, plus `session_has_table()` active-connection inspection under `no_autoflush` for safe partial-schema SQLite test isolation.
+    2. **Admin-Only Advanced `🚨 Threats, Failures & Logs` Hub (`backend/models/admin_alert_event.py`, `backend/services/admin_alerts_service.py`, `backend/api/admin.py`, `backend/api/websocket.py`, `backend/core/logging_config.py`, `backend/core/audit_logger.py`, `backend/services/sentinel.py`, `backend/celery_app.py`)**:
+       - Created `AdminAlertEvent` (`admin_alert_events`) with fingerprint deduplication (`occurrence_count`), secret scrubbing (`redact_sensitive_text`), trace ID, IP address, and `is_seen` / `status` tracking.
+       - Attached `AdminErrorLogHandler` ring buffer (`deque(maxlen=250)`) in `setup_logging()`, forwarded `WARNING`/`CRITICAL` security events from `audit_logger.py`, connected `@task_failure.connect` in `celery_app.py`, and fixed `SentinelService._probe_security_logs` to read canonical `AUDIT_LOG_PATH` and match real security event types (`AUTH_LOGIN_FAILED`, `AUTH_ACCOUNT_LOCKED`, `AUTH_CREDENTIAL_STUFFING_ALERT`, `AUTH_GEO_VELOCITY_ANOMALY`, `UNAUTHORIZED_ADMIN_ACCESS_ATTEMPT`, `UNHANDLED_EXCEPTION`).
+       - Exposed `GET /api/admin/alerts-hub`, `POST /api/admin/alerts-hub/mark-seen`, `POST /api/admin/alerts-hub/acknowledge`, and `POST /api/admin/broadcast-notice` strictly guarded by `require_admin` (`HTTP 403` for non-admins), plus admin-scoped `ADMIN_ALERT_NEW` WebSocket broadcasts (`is_admin=True`).
+    3. **Theme-Matched UI, Red NavBar Markers, Web Audio Chime & OS Desktop Push (`frontend/src/utils/notificationSound.ts`, `frontend/src/components/NotificationBell.tsx`, `NavBar.tsx`, `App.tsx`, `AlertsPage.tsx`, `AdminPage.tsx`, `services/api.ts`)**:
+       - Added desktop & mobile `<NotificationBell />` dropdown preview (without clearing tab unseen marker) plus red unseen badges on `Alerts` (`?tab=INBOX` / `Notifications & Auto-Sells`) and `Admin Control` (`threats` tab), clearing only when those destination views open.
+       - Added synthesized Web Audio chime (`playNotificationChime`) and Desktop Push alerts (`triggerDesktopPushNotification` / `requestDesktopPushPermission`) with `localStorage` toggles on both WS (`NOTIFICATION_NEW` / `ADMIN_ALERT_NEW`) and background poll (`25s`/`30s`) updates.
+  - **Verification Evidence**:
+    - `py_compile` across all 17 modified/new backend Python files: **exit code 0**.
+    - `pytest` across 11 backend suites (`test_notifications_and_admin_hub.py`, `test_alerts_radar_and_sold_portfolio.py`, `test_screener_proximity_radar.py`, `test_holdings_and_proximity_alerts.py`, `test_portfolio_holdings_analytics.py`, `test_paper_trading_pending_and_celery_fd.py`, `test_high_precision_ratchet_and_cycle_fix.py`, `test_alert_tasks.py`, `test_endpoint_crash_and_math_audit.py`, `test_cybersecurity.py`, `test_system_design.py`): **73 passed, 0 failed in 75.80s**.
+    - FastAPI `ASGITransport` check inside `test_notifications_and_admin_hub.py`: non-admin `/api/admin/alerts-hub` returns **HTTP 403**, admin returns **HTTP 200 OK**, and `/api/notifications` returns **HTTP 200 OK**.
+    - Frontend build (`npm --prefix frontend run build` / `tsc && vite build`): **1,997 modules transformed, 0 TypeScript errors, built in 20.33s**.
+  - **Exact Next Safe Step**: Commit & push locally (`git add -A && git commit && git push origin main`), and run on Oracle server: `cd /home/opc/StockAI && git pull origin main && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend`.
 
 - **ALERTS PROXIMITY RADAR FIX, HOLDINGS GUARD REPAIR & PORTFOLIO SOLD STOCKS LEDGER (COMPLETE & VERIFIED - 2026-11-27):**
   - **Issues Investigated & Resolved**:

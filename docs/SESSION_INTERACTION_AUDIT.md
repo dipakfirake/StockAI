@@ -5851,3 +5851,31 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - `npm --prefix frontend run build` (`tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 17.53s**.
 - **Next Safe Step:**
   - Commit & push locally, then run on Oracle VM: `cd /home/opc/StockAI && git pull origin main && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend`.
+
+
+---
+
+### Session Entry 101
+- **Timestamp:** 2026-11-28 00:05:00 IST (18:35:00 UTC)
+- **User Prompt:**
+  `"what i want is when system auto sold the stock i want notifications for each stock sold in 1 tab and one mark on that tab till i dont open that tab ... bell symbol and one red marker on it ... important messages in systems ... in admin dashboard make this more advanced for system failures, security threats, wrong logs"` + `"ok proceed will all you suggested and add all that badge clearing, location on navbar, and desktop push sound also and match that bell icon with our system ui."`
+- **Architecture & Remediations Implemented:**
+  1. **User Notification Center & Auto-Sell Per-Stock Ledger (`backend/models/notification.py`, `backend/core/database.py`, `backend/services/notification_service.py`, `backend/api/notifications.py`)**:
+     - Added `category`, `symbol`, `trade_id`, `metadata_json`, `is_seen`, `seen_at`, `read_at` to `Notification` + idempotent `DO $$` Postgres migration + `COALESCE(is_read, FALSE)` backfill for `is_seen`.
+     - Added `session_has_table()` inspecting `sync_s.connection()` under `no_autoflush` (preventing `sqlite:///:memory:` `SingletonThreadPool` rollbacks across partial-schema test harnesses), `serialize_notification`, `compute_user_notification_counts`, `create_user_notification`, `notify_auto_sell_exit`, `notify_order_filled`, and `broadcast_system_notice_to_users`.
+     - Exposed `GET /api/notifications`, `POST /api/notifications/mark-seen` (clears red badge on tab open), `POST /api/notifications/mark-all-read`, and `POST /api/notifications/{id}/read`.
+     - Hooked per-stock exit/fill/system notifications into `PaperTradingService.evaluate_open_trades`, `evaluate_pending_orders`, `trading_tasks.square_off_intraday`, `alert_tasks.py`, and `SwingAuditService.rollover_to_next_cycle`.
+  2. **Admin-Only `🚨 Threats, Failures & Logs` Hub (`backend/models/admin_alert_event.py`, `backend/services/admin_alerts_service.py`, `backend/api/admin.py`, `backend/api/websocket.py`, `backend/core/logging_config.py`, `backend/core/audit_logger.py`, `backend/services/sentinel.py`, `backend/celery_app.py`)**:
+     - Created `AdminAlertEvent` (`admin_alert_events`) with fingerprint deduplication (`occurrence_count`), regex/secret scrubbing (`redact_sensitive_text`), `trace_id`, `ip_address`, `is_seen`, and `status`.
+     - Wired `AdminErrorLogHandler` ring buffer (`deque(maxlen=250)`) in `setup_logging()`, forwarded `WARNING`/`CRITICAL` security events from `audit_logger.py`, connected `@task_failure.connect` in `celery_app.py`, and fixed `SentinelService._probe_security_logs` to read canonical `AUDIT_LOG_PATH` and match actual event types (`AUTH_LOGIN_FAILED`, `UNAUTHORIZED_ADMIN_ACCESS_ATTEMPT`, `UNHANDLED_EXCEPTION`, etc.).
+     - Added admin-only `GET /api/admin/alerts-hub`, `POST /api/admin/alerts-hub/mark-seen`, `POST /api/admin/alerts-hub/acknowledge`, and `POST /api/admin/broadcast-notice` (strictly enforced via `require_admin`, `HTTP 403` for non-admins) + admin-only WS `ADMIN_ALERT_NEW` channel (`is_admin=True`).
+  3. **Frontend UI, Red Counter Badges, Chime & Desktop Push (`frontend/src/utils/notificationSound.ts`, `frontend/src/components/NotificationBell.tsx`, `NavBar.tsx`, `App.tsx`, `AlertsPage.tsx`, `AdminPage.tsx`, `services/api.ts`)**:
+     - Built `<NotificationBell />` on desktop & mobile `NavBar` + persistent red `#ef4444` unseen badges on NavBar links (`Alerts` and `Admin Control`), `AlertsPage` `🔔 Notifications & Auto-Sells` (`INBOX`) tab, and `AdminPage` `🚨 Threats, Failures & Logs` (`threats`) tab, clearing strictly on destination tab entry (`markSeen` / `markAlertsHubSeen`).
+     - Added Web Audio chimes (`playNotificationChime`) and OS desktop push notifications (`triggerDesktopPushNotification`, `requestDesktopPushPermission`) with `localStorage` preferences, plus Admin System Broadcast Notice sender and Runtime Captured Logs + Security Audit Log viewers.
+- **Verification Evidence:**
+  - `py_compile` across all 17 backend Python modules: **exit code 0**.
+  - `pytest` across all 11 backend suites (including `backend/tests/test_notifications_and_admin_hub.py`, `test_alerts_radar_and_sold_portfolio.py`, and `test_high_precision_ratchet_and_cycle_fix.py`): **73 passed, 0 failed in 75.80s**.
+  - FastAPI `ASGITransport` check in `test_notifications_and_admin_hub.py`: `/api/admin/alerts-hub` returns **HTTP 403** for regular users and **HTTP 200 OK** for admins; `/api/notifications` returns **HTTP 200 OK**.
+  - `npm --prefix frontend run build` (`tsc && vite build`): **1,997 modules transformed, 0 TypeScript errors, built in 20.33s**.
+- **Next Safe Step:**
+  - Commit & push locally (`git add -A && git commit && git push origin main`), then execute on Oracle VM: `cd /home/opc/StockAI && git pull origin main && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend`.

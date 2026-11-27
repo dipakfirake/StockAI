@@ -1,14 +1,24 @@
 import { useEffect, useState, useMemo } from 'react'
-import { alertsApi, stocksApi, paperTradingApi } from '../services/api'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { alertsApi, stocksApi, paperTradingApi, notificationsApi } from '../services/api'
 import { 
   Bell, PlusCircle, Trash2, BellOff, ShieldAlert, ShieldCheck, 
   Target, TrendingUp, TrendingDown, RefreshCw, AlertTriangle, 
   ExternalLink, ArrowUpRight, ArrowDownRight, CheckCircle2, DollarSign,
-  Briefcase, Sparkles, X, Layers, Filter, Zap
+  Briefcase, Sparkles, X, Layers, Filter, Zap, Volume2, VolumeX, BellRing, Bot, Megaphone, CheckCheck
 } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
 import ZerodhaOrderModal from '../components/ZerodhaOrderModal'
 import { toast } from '../components/Toast'
+import {
+  isNotifSoundEnabled,
+  setNotifSoundEnabled,
+  isNotifPushEnabled,
+  setNotifPushEnabled,
+  requestDesktopPushPermission,
+  playNotificationChime,
+  triggerDesktopPushNotification,
+} from '../utils/notificationSound'
 
 const SECTORS = [
   { value: 'ALL', label: '🌐 All Sectors (100+ Stocks)' },
@@ -61,7 +71,26 @@ const PATTERN_TYPES = [
 ]
 
 export default function AlertsPage() {
-  const [activeTab, setActiveTab] = useState<'SCREENER_RADAR' | 'HOLDINGS' | 'RADAR' | 'CUSTOM'>('SCREENER_RADAR')
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialTab = searchParams.get('tab')?.toUpperCase()
+  const [activeTab, setActiveTab] = useState<'SCREENER_RADAR' | 'HOLDINGS' | 'RADAR' | 'CUSTOM' | 'INBOX'>(
+    initialTab === 'INBOX' || initialTab === 'NOTIFICATIONS'
+      ? 'INBOX'
+      : initialTab === 'HOLDINGS' || initialTab === 'RADAR' || initialTab === 'CUSTOM'
+      ? (initialTab as 'HOLDINGS' | 'RADAR' | 'CUSTOM')
+      : 'SCREENER_RADAR'
+  )
+
+  // Persisted User Notifications Inbox State (Auto-Sells, Order Fills, System Notices)
+  const [inboxNotifications, setInboxNotifications] = useState<any[]>([])
+  const [inboxUnseenCount, setInboxUnseenCount] = useState<number>(0)
+  const [inboxUnreadCount, setInboxUnreadCount] = useState<number>(0)
+  const [inboxCategory, setInboxCategory] = useState<string>('ALL')
+  const [inboxUnreadOnly, setInboxUnreadOnly] = useState<boolean>(false)
+  const [loadingInbox, setLoadingInbox] = useState<boolean>(false)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => isNotifSoundEnabled())
+  const [pushEnabled, setPushEnabled] = useState<boolean>(() => isNotifPushEnabled())
   
   // Screener Best Buy Radar State (all 10 sectors + ALL)
   const [radarSector, setRadarSector] = useState<string>('ALL')
@@ -216,15 +245,68 @@ export default function AlertsPage() {
   }, [activeTab, radarSector, radarProximityPct, radarStage])
 
   useEffect(() => {
+    const qTab = searchParams.get('tab')?.toUpperCase()
+    if (qTab === 'INBOX' || qTab === 'NOTIFICATIONS') {
+      setActiveTab('INBOX')
+    } else if (qTab === 'HOLDINGS' || qTab === 'RADAR' || qTab === 'CUSTOM' || qTab === 'SCREENER_RADAR') {
+      setActiveTab(qTab as any)
+    }
+  }, [searchParams])
+
+  async function loadInboxNotifications(markSeenIfOpen: boolean = false) {
+    setLoadingInbox(true)
+    try {
+      const res = await notificationsApi.list({
+        category: inboxCategory === 'ALL' ? undefined : inboxCategory,
+        unread_only: inboxUnreadOnly,
+        limit: 100,
+      })
+      const list: any[] = res.data?.notifications || []
+      let unseen = Number(res.data?.unseen_count ?? 0)
+      const unread = Number(res.data?.unread_count ?? 0)
+      if (markSeenIfOpen && unseen > 0) {
+        await notificationsApi.markSeen()
+        unseen = 0
+        window.dispatchEvent(new CustomEvent('stockai:notifications-updated'))
+      }
+      setInboxNotifications(
+        markSeenIfOpen ? list.map((it) => ({ ...it, is_seen: true })) : list
+      )
+      setInboxUnseenCount(unseen)
+      setInboxUnreadCount(unread)
+    } catch (err) {
+      console.error('Failed to load notifications inbox:', err)
+    } finally {
+      setLoadingInbox(false)
+    }
+  }
+
+  useEffect(() => {
     loadAlerts()
     loadHoldingsMonitor()
+    loadInboxNotifications(activeTab === 'INBOX')
 
     // Poll live holdings every 10 seconds for real-time risk tracking
     const timer = setInterval(() => {
       loadHoldingsMonitor(true)
     }, 10000)
-    return () => clearInterval(timer)
+    const onNotifEvt = () => loadInboxNotifications(activeTab === 'INBOX')
+    const onPrefEvt = () => {
+      setSoundEnabled(isNotifSoundEnabled())
+      setPushEnabled(isNotifPushEnabled())
+    }
+    window.addEventListener('stockai:notifications-updated', onNotifEvt)
+    window.addEventListener('stockai:notif-prefs-changed', onPrefEvt)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('stockai:notifications-updated', onNotifEvt)
+      window.removeEventListener('stockai:notif-prefs-changed', onPrefEvt)
+    }
   }, [])
+
+  useEffect(() => {
+    loadInboxNotifications(activeTab === 'INBOX')
+  }, [activeTab, inboxCategory, inboxUnreadOnly])
 
   async function loadAlerts() {
     try {
@@ -488,7 +570,7 @@ export default function AlertsPage() {
         </button>
 
         <button
-          onClick={() => setActiveTab('CUSTOM')}
+          onClick={() => { setActiveTab('CUSTOM'); setSearchParams({}) }}
           style={{
             padding: '10px 18px',
             fontSize: 14,
@@ -507,6 +589,50 @@ export default function AlertsPage() {
         >
           <Bell size={16} style={{ color: activeTab === 'CUSTOM' ? '#387ed1' : 'inherit' }} />
           <span>Custom Technical Alerts ({customAlerts.length})</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('INBOX')
+            setSearchParams({ tab: 'INBOX' })
+          }}
+          style={{
+            padding: '10px 18px',
+            fontSize: 14,
+            fontWeight: 700,
+            border: 'none',
+            borderBottom: activeTab === 'INBOX' ? '3px solid #ef4444' : '3px solid transparent',
+            background: activeTab === 'INBOX' ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+            color: activeTab === 'INBOX' ? 'var(--color-text-primary, #ffffff)' : 'var(--color-text-muted, #8a92a6)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            transition: 'all 0.15s ease',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Bell size={16} style={{ color: inboxUnseenCount > 0 ? '#ef4444' : activeTab === 'INBOX' ? '#38bdf8' : 'inherit' }} />
+          <span>🔔 Notifications &amp; Auto-Sells</span>
+          {inboxUnseenCount > 0 ? (
+            <span
+              style={{
+                background: '#ef4444',
+                color: '#ffffff',
+                fontSize: 11,
+                padding: '1px 7px',
+                borderRadius: 999,
+                fontWeight: 800,
+                boxShadow: '0 0 8px rgba(239, 68, 68, 0.5)',
+              }}
+            >
+              {inboxUnseenCount}
+            </span>
+          ) : inboxUnreadCount > 0 ? (
+            <span style={{ background: 'rgba(56, 189, 248, 0.18)', color: '#38bdf8', fontSize: 11, padding: '1px 7px', borderRadius: 10, fontWeight: 700 }}>
+              {inboxUnreadCount} Unread
+            </span>
+          ) : null}
         </button>
       </div>
 
@@ -938,6 +1064,245 @@ export default function AlertsPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* TAB 4: 🔔 PERSISTED SYSTEM & AUTO-SELL NOTIFICATIONS INBOX */}
+      {activeTab === 'INBOX' && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <div>
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Bell size={18} style={{ color: '#ef4444' }} />
+                <span>System Auto-Sells &amp; Important Notifications</span>
+                {inboxUnreadCount > 0 && (
+                  <span style={{ background: 'rgba(56, 189, 248, 0.16)', color: '#38bdf8', fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>
+                    {inboxUnreadCount} Unread
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 3 }}>
+                One persistent notification per Auto-Sold stock (Target / Ratchet Profit Lock / Stop-Loss / EOD Square-Off), executed orders, and system notices. Red bell markers stay lit until you open this tab.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                onClick={() => {
+                  const next = !soundEnabled
+                  setNotifSoundEnabled(next)
+                  setSoundEnabled(next)
+                  if (next) playNotificationChime('HIGH')
+                }}
+              >
+                {soundEnabled ? <Volume2 size={14} style={{ color: '#38bdf8' }} /> : <VolumeX size={14} />}
+                <span>{soundEnabled ? 'Sound Chime ON' : 'Muted'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                onClick={async () => {
+                  if (pushEnabled) {
+                    setNotifPushEnabled(false)
+                    setPushEnabled(false)
+                    return
+                  }
+                  const ok = await requestDesktopPushPermission()
+                  setPushEnabled(ok)
+                  if (ok) {
+                    triggerDesktopPushNotification({
+                      title: '🔔 Desktop Notifications Ready',
+                      body: 'Live Auto-Sell executions and important system alerts will now chime and appear on desktop.',
+                      severity: 'HIGH',
+                      tag: 'stockai-alerts-tab-test',
+                    })
+                  }
+                }}
+              >
+                <BellRing size={14} style={{ color: pushEnabled ? '#10b981' : undefined }} />
+                <span>{pushEnabled ? 'Desktop Push ON' : 'Enable Desktop Push'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                onClick={async () => {
+                  await notificationsApi.markAllRead()
+                  await loadInboxNotifications(true)
+                  window.dispatchEvent(new CustomEvent('stockai:notifications-updated'))
+                }}
+                disabled={inboxUnreadCount === 0}
+              >
+                <CheckCheck size={14} /> Mark All Read
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                onClick={() => loadInboxNotifications(true)}
+                disabled={loadingInbox}
+              >
+                <RefreshCw size={13} className={loadingInbox ? 'spin' : ''} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          {/* Category Filter Pills */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+            {[
+              { key: 'ALL', label: 'All Notifications' },
+              { key: 'AUTO_SELL', label: '🤖 System Auto-Sold Stocks' },
+              { key: 'ORDER_FILL', label: '✅ Order Fills' },
+              { key: 'SYSTEM_NOTICE', label: '📢 System Notices' },
+              { key: 'ALERT_TRIGGERED', label: '⚡ Triggered Alerts' },
+            ].map((pill) => (
+              <button
+                key={pill.key}
+                type="button"
+                className={inboxCategory === pill.key && !inboxUnreadOnly ? 'btn btn-primary' : 'btn btn-secondary'}
+                style={{ fontSize: 12, padding: '5px 12px' }}
+                onClick={() => {
+                  setInboxCategory(pill.key)
+                  setInboxUnreadOnly(false)
+                }}
+              >
+                {pill.label}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              className={inboxUnreadOnly ? 'btn btn-primary' : 'btn btn-secondary'}
+              style={{ fontSize: 12, padding: '5px 12px' }}
+              onClick={() => setInboxUnreadOnly((v) => !v)}
+            >
+              Unread Only ({inboxUnreadCount})
+            </button>
+          </div>
+
+          {loadingInbox && inboxNotifications.length === 0 ? (
+            <div className="loading" style={{ padding: 36, textAlign: 'center' }}>Loading notifications...</div>
+          ) : inboxNotifications.length === 0 ? (
+            <div className="empty-state" style={{ padding: 36, textAlign: 'center', color: 'var(--color-text-muted)' }}>
+              No notifications match this filter yet. Whenever the system auto-sells a holding or publishes a system message, it will appear here.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {inboxNotifications.map((n: any) => {
+                const isUnread = !n.is_read
+                const meta = n.metadata || {}
+                const pnl = meta.realized_pnl !== undefined && meta.realized_pnl !== null ? Number(meta.realized_pnl) : null
+                return (
+                  <div
+                    key={n.id}
+                    style={{
+                      padding: 14,
+                      borderRadius: 10,
+                      border: `1px solid ${isUnread ? 'rgba(56, 189, 248, 0.45)' : 'var(--color-border)'}`,
+                      borderLeft: n.category === 'AUTO_SELL'
+                        ? `4px solid ${pnl !== null && pnl < 0 ? '#ef4444' : '#10b981'}`
+                        : isUnread
+                        ? '4px solid #38bdf8'
+                        : '4px solid var(--color-border)',
+                      background: isUnread ? 'rgba(56, 189, 248, 0.05)' : 'rgba(255, 255, 255, 0.015)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      gap: 14,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 260 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                        <span
+                          className="badge"
+                          style={{
+                            fontSize: 10,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            background: n.category === 'AUTO_SELL'
+                              ? 'rgba(16, 185, 129, 0.16)'
+                              : n.category === 'SYSTEM_NOTICE'
+                              ? 'rgba(168, 85, 247, 0.16)'
+                              : 'rgba(56, 189, 248, 0.16)',
+                            color: n.category === 'AUTO_SELL'
+                              ? '#34d399'
+                              : n.category === 'SYSTEM_NOTICE'
+                              ? '#c084fc'
+                              : '#38bdf8',
+                          }}
+                        >
+                          {n.category === 'AUTO_SELL' ? <Bot size={11} /> : n.category === 'SYSTEM_NOTICE' ? <Megaphone size={11} /> : <Zap size={11} />}
+                          {n.category || 'GENERAL'}
+                        </span>
+                        {n.symbol && <span className="badge badge-secondary mono" style={{ fontSize: 10 }}>{n.symbol}</span>}
+                        {isUnread && (
+                          <span style={{ fontSize: 10, fontWeight: 800, color: '#38bdf8', background: 'rgba(56,189,248,0.16)', padding: '1px 6px', borderRadius: 4 }}>
+                            UNREAD
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                          {n.created_at_ist || (n.created_at ? new Date(n.created_at).toLocaleString() : '')}
+                        </span>
+                      </div>
+
+                      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{n.title}</div>
+                      <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.45 }}>{n.message}</div>
+
+                      {n.category === 'AUTO_SELL' && meta.exit_price != null && (
+                        <div className="mono" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, marginTop: 8, color: 'var(--color-text-muted)' }}>
+                          <span>Qty: <strong>{meta.quantity}</strong></span>
+                          <span>Buy: <strong>₹{Number(meta.entry_price || 0).toFixed(2)}</strong></span>
+                          <span>Sell: <strong>₹{Number(meta.exit_price || 0).toFixed(2)}</strong></span>
+                          <span>Charges: <strong>₹{Number(meta.total_charges || 0).toFixed(2)}</strong></span>
+                          {meta.holding_duration && <span>Held: <strong>{meta.holding_duration}</strong></span>}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {meta.link && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: 12, padding: '5px 10px' }}
+                          onClick={async () => {
+                            if (isUnread) await notificationsApi.markRead(n.id)
+                            window.dispatchEvent(new CustomEvent('stockai:notifications-updated'))
+                            navigate(meta.link)
+                          }}
+                        >
+                          Open Ledger <ExternalLink size={12} style={{ marginLeft: 4 }} />
+                        </button>
+                      )}
+                      {isUnread && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: 12, padding: '5px 10px' }}
+                          onClick={async () => {
+                            await notificationsApi.markRead(n.id)
+                            await loadInboxNotifications(true)
+                            window.dispatchEvent(new CustomEvent('stockai:notifications-updated'))
+                          }}
+                        >
+                          Mark Read
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 

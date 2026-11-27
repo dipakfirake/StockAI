@@ -13,6 +13,7 @@ from backend.models.user_preference import UserPreference
 from backend.models.subscription import SubscriptionOrder
 from backend.models.sentinel_incident import SentinelIncident
 from backend.models.swing_audit import SwingTradeAuditCycle, SwingTradeAudit, SwingTradeAuditPrice
+from backend.models.admin_alert_event import AdminAlertEvent
 
 __all__ = [
     "User",
@@ -32,5 +33,6 @@ __all__ = [
     "SwingTradeAuditCycle",
     "SwingTradeAudit",
     "SwingTradeAuditPrice",
+    "AdminAlertEvent",
 ]
 

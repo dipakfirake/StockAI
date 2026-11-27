@@ -466,6 +466,12 @@ class PaperTradingService:
             order.opened_at = datetime.now(timezone.utc)
             executed_count += 1
 
+            try:
+                from backend.services.notification_service import notify_order_filled
+                await notify_order_filled(db, order)
+            except Exception:
+                pass
+
             await event_bus.publish(
                 OrderExecutedEvent(
                     user_id=str(order.user_id),
@@ -731,6 +737,13 @@ class PaperTradingService:
                 await PaperTradingService._deactivate_exit_alerts_if_flat(
                     db, str(trade.user_id), trade.symbol, active_open_trades=open_trades
                 )
+                try:
+                    from backend.services.notification_service import notify_auto_sell_exit
+                    exit_meta = PaperTradingService.resolve_trade_exit_details(trade)
+                    exit_label = PaperTradingService.EXIT_REASON_LABELS.get(reason_code, "System Auto-Sell")
+                    await notify_auto_sell_exit(db, trade, reason_code, exit_label, exit_meta)
+                except Exception:
+                    pass
                 logger.info(f"Auto-exited trade ({trade.exit_reason} / {trade.ratchet_stage}): {trade.symbol} PnL={trade.realized_pnl}")
 
     EXIT_REASON_LABELS = {
@@ -792,6 +805,10 @@ class PaperTradingService:
                         break
 
             if still_open:
+                return 0
+
+            from backend.services.notification_service import session_has_table
+            if not await session_has_table(db, "alerts"):
                 return 0
 
             from backend.models.alert import Alert

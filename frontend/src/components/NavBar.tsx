@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   LayoutDashboard,
   CandlestickChart,
@@ -21,13 +21,15 @@ import {
   Target,
   Radar,
   Shield,
-  ShieldAlert
 } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
+import { adminApi, notificationsApi } from '../services/api'
+import { triggerDesktopPushNotification } from '../utils/notificationSound'
 import StockSearchBox from './StockSearchBox'
 import LiveTicker from './LiveTicker'
 import WatchlistSidebar from './WatchlistSidebar'
+import NotificationBell from './NotificationBell'
 
 export default function NavBar() {
   const navigate = useNavigate()
@@ -35,8 +37,70 @@ export default function NavBar() {
   const { theme, toggleTheme } = useTheme()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [watchlistOpen, setWatchlistOpen] = useState(false)
+  const [userUnseenCount, setUserUnseenCount] = useState(0)
+  const [adminUnseenCount, setAdminUnseenCount] = useState(0)
+  const prevAdminUnseenRef = useRef<number | null>(null)
 
   const isAdmin = Boolean(user?.is_admin)
+
+  useEffect(() => {
+    if (!user) {
+      setUserUnseenCount(0)
+      setAdminUnseenCount(0)
+      return
+    }
+    const loadUserBadge = async () => {
+      try {
+        const res = await notificationsApi.list({ limit: 5 })
+        setUserUnseenCount(Number(res.data?.unseen_count ?? 0))
+      } catch {
+        // ignore
+      }
+    }
+    loadUserBadge()
+    const uTimer = window.setInterval(loadUserBadge, 30000)
+    window.addEventListener('stockai:notifications-updated', loadUserBadge)
+
+    let aTimer: number | null = null
+    const loadAdminBadge = async () => {
+      if (!isAdmin) return
+      try {
+        const res = await adminApi.getAlertsHub({ limit: 5 })
+        const nextUnseen = Number(res.data?.unseen_count ?? 0)
+        if (
+          prevAdminUnseenRef.current !== null &&
+          nextUnseen > prevAdminUnseenRef.current &&
+          Array.isArray(res.data?.alerts) &&
+          res.data.alerts.length > 0
+        ) {
+          const newest = res.data.alerts.find((a: any) => !a.is_seen) || res.data.alerts[0]
+          triggerDesktopPushNotification({
+            title: `🚨 [ADMIN] ${newest.title}`,
+            body: (newest.detail || '').slice(0, 140),
+            severity: newest.severity || 'CRITICAL',
+            tag: `admin-poll-${newest.id}`,
+            url: '/admin?tab=threats',
+          })
+        }
+        prevAdminUnseenRef.current = nextUnseen
+        setAdminUnseenCount(nextUnseen)
+      } catch {
+        // ignore
+      }
+    }
+    if (isAdmin) {
+      loadAdminBadge()
+      aTimer = window.setInterval(loadAdminBadge, 30000)
+      window.addEventListener('stockai:admin-alerts-updated', loadAdminBadge)
+    }
+
+    return () => {
+      window.clearInterval(uTimer)
+      window.removeEventListener('stockai:notifications-updated', loadUserBadge)
+      if (aTimer !== null) window.clearInterval(aTimer)
+      if (isAdmin) window.removeEventListener('stockai:admin-alerts-updated', loadAdminBadge)
+    }
+  }, [user, isAdmin])
 
   const links = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -130,6 +194,8 @@ export default function NavBar() {
             >
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
+
+            <NotificationBell />
             
             <button 
               onClick={() => setWatchlistOpen(true)}
@@ -205,17 +271,41 @@ export default function NavBar() {
       {/* Desktop Bottom Row: Nav Links */}
       <div className="navbar-desktop-row" style={{ display: 'flex', alignItems: 'center', height: '50px', padding: '0 20px', overflowX: 'auto', borderBottom: '1px solid var(--color-border)', width: '100%', boxSizing: 'border-box' }}>
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'nowrap' }}>
-          {links.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-            >
-              <Icon size={14} />
-              <span>{label}</span>
-            </NavLink>
-          ))}
+          {links.map(({ to, label, icon: Icon }) => {
+            const linkBadge =
+              to === '/alerts' ? userUnseenCount : to === '/admin' ? adminUnseenCount : 0
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', position: 'relative' }}
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+                {linkBadge > 0 && (
+                  <span
+                    style={{
+                      minWidth: 16,
+                      height: 16,
+                      padding: '0 4px',
+                      borderRadius: 999,
+                      background: '#ef4444',
+                      color: '#ffffff',
+                      fontSize: 10,
+                      fontWeight: 800,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      lineHeight: 1,
+                    }}
+                  >
+                    {linkBadge > 99 ? '99+' : linkBadge}
+                  </span>
+                )}
+              </NavLink>
+            )
+          })}
         </div>
       </div>
 
@@ -304,6 +394,8 @@ export default function NavBar() {
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
 
+          {user && <NotificationBell compact={true} />}
+
           {user && (
             <button 
               onClick={() => setWatchlistOpen(true)}
@@ -360,27 +452,50 @@ export default function NavBar() {
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {links.map(({ to, label, icon: Icon }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    fontSize: '0.95rem',
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    color: 'var(--text-color)'
-                  }}
-                >
-                  <Icon size={18} color="#3b82f6" />
-                  <span>{label}</span>
-                </NavLink>
-              ))}
+              {links.map(({ to, label, icon: Icon }) => {
+                const linkBadge =
+                  to === '/alerts' ? userUnseenCount : to === '/admin' ? adminUnseenCount : 0
+                return (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: '8px',
+                      fontSize: '0.95rem',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      color: 'var(--text-color)'
+                    }}
+                  >
+                    <Icon size={18} color="#3b82f6" />
+                    <span style={{ flex: 1 }}>{label}</span>
+                    {linkBadge > 0 && (
+                      <span
+                        style={{
+                          minWidth: 20,
+                          height: 20,
+                          padding: '0 6px',
+                          borderRadius: 999,
+                          background: '#ef4444',
+                          color: '#ffffff',
+                          fontSize: 11,
+                          fontWeight: 800,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {linkBadge > 99 ? '99+' : linkBadge}
+                      </span>
+                    )}
+                  </NavLink>
+                )
+              })}
             </div>
 
             {user && (

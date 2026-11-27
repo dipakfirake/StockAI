@@ -225,3 +225,140 @@ async def set_user_admin_status(
         "is_admin": target_user.is_admin,
     }
 
+
+class AdminAcknowledgeAlertsRequest(BaseModel):
+    alert_id: str | None = None
+    action: str = "ACKNOWLEDGE"  # ACKNOWLEDGE, RESOLVE
+    mark_all: bool = False
+
+
+class AdminBroadcastNoticeRequest(BaseModel):
+    title: str
+    message: str
+    priority: str = "INFO"
+
+
+@router.get("/alerts-hub")
+async def get_admin_alerts_hub(
+    category: str | None = None,
+    severity: str | None = None,
+    unseen_only: bool = False,
+    status_filter: str | None = None,
+    search: str | None = None,
+    limit: int = 80,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Strictly Admin-Only Surveillance Inbox:
+    Combines persistent deduplicated security threats, system failures, Celery crashes,
+    Fyers feed interruptions, captured application ERROR/WARNING logs, and Sentinel status.
+    """
+    from backend.services.admin_alerts_service import fetch_admin_alerts_hub_summary
+    from backend.services.sentinel import sentinel_service
+
+    hub_data = await fetch_admin_alerts_hub_summary(
+        db,
+        category=category,
+        severity=severity,
+        unseen_only=unseen_only,
+        status_filter=status_filter,
+        search=search,
+        limit=limit,
+    )
+    await db.commit()
+    hub_data["sentinel_summary"] = sentinel_service.get_health_summary()
+    return hub_data
+
+
+@router.post("/alerts-hub/mark-seen")
+async def mark_admin_alerts_seen(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear the red unseen badge on the Admin Control / Threats tab when opened by admin."""
+    from backend.models.admin_alert_event import AdminAlertEvent
+
+    now = datetime.now(timezone.utc)
+    rows = (await db.execute(select(AdminAlertEvent).where(AdminAlertEvent.is_seen == False))).scalars().all()
+    for r in rows:
+        r.is_seen = True
+        r.seen_at = now
+    await db.commit()
+    return {"success": True, "unseen_count": 0}
+
+
+@router.post("/alerts-hub/acknowledge")
+async def acknowledge_admin_alerts(
+    payload: AdminAcknowledgeAlertsRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Acknowledge or resolve one or all admin threat/failure alerts."""
+    from backend.models.admin_alert_event import AdminAlertEvent
+
+    now = datetime.now(timezone.utc)
+    target_status = "RESOLVED" if payload.action.upper() == "RESOLVE" else "ACKNOWLEDGED"
+
+    if payload.mark_all:
+        rows = (await db.execute(select(AdminAlertEvent))).scalars().all()
+    elif payload.alert_id:
+        try:
+            a_uuid = uuid.UUID(str(payload.alert_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid alert_id UUID")
+        rows = (await db.execute(select(AdminAlertEvent).where(AdminAlertEvent.id == a_uuid))).scalars().all()
+    else:
+        rows = []
+
+    updated = 0
+    for r in rows:
+        r.is_seen = True
+        r.seen_at = r.seen_at or now
+        r.is_read = True
+        if target_status == "RESOLVED":
+            r.status = "RESOLVED"
+            r.resolved_at = now
+            r.resolved_by = admin.email
+        elif (r.status or "OPEN") == "OPEN":
+            r.status = "ACKNOWLEDGED"
+            r.acknowledged_at = now
+            r.acknowledged_by = admin.email
+        updated += 1
+
+    await db.commit()
+    return {"success": True, "updated": updated, "status": target_status}
+
+
+@router.post("/broadcast-notice")
+async def admin_broadcast_system_notice(
+    payload: AdminBroadcastNoticeRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Publish an important system announcement into every active user's 🔔 Notifications tab."""
+    from backend.services.notification_service import broadcast_system_notice_to_users
+
+    clean_title = (payload.title or "").strip()
+    clean_msg = (payload.message or "").strip()
+    if not clean_title or not clean_msg:
+        raise HTTPException(status_code=400, detail="Title and message are required")
+    prio = payload.priority.upper() if payload.priority.upper() in {"INFO", "WARNING", "CRITICAL", "HIGH"} else "INFO"
+
+    sent_count = await broadcast_system_notice_to_users(
+        db,
+        title=f"📢 {clean_title}",
+        message=clean_msg,
+        priority=prio,
+        category="SYSTEM_NOTICE",
+        metadata={"sent_by": admin.email, "link": "/alerts?tab=INBOX"},
+    )
+    await db.commit()
+    log_security_event(
+        event_type="ADMIN_SYSTEM_NOTICE_BROADCAST",
+        severity="INFO",
+        user_id=str(admin.id),
+        details={"admin_email": admin.email, "title": clean_title, "recipients": sent_count},
+    )
+    return {"success": True, "recipients": sent_count}
+

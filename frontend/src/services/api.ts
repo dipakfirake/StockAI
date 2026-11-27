@@ -161,6 +161,15 @@ export const alertsApi = {
   deactivate: (alertId: string) => api.put(`/alerts/${alertId}/deactivate`),
 }
 
+// ===== Persistent Notifications Inbox endpoints =====
+export const notificationsApi = {
+  list: (params?: { category?: string; unread_only?: boolean; limit?: number }) =>
+    api.get('/notifications', { params }),
+  markSeen: () => api.post('/notifications/mark-seen'),
+  markAllRead: () => api.post('/notifications/mark-all-read'),
+  markRead: (notificationId: number) => api.post(`/notifications/${notificationId}/read`),
+}
+
 // ===== Paper trading endpoints =====
 export const paperTradingApi = {
   list: () => api.get('/paper-trades'),
@@ -334,6 +343,22 @@ export const adminApi = {
   approvePro: (userId: string) => api.post(`/admin/users/${userId}/approve-pro`),
   rejectPro: (userId: string) => api.post(`/admin/users/${userId}/reject-pro`),
   revokePro: (userId: string) => api.post(`/admin/users/${userId}/revoke-pro`),
+  getAlertsHub: (params?: {
+    category?: string
+    severity?: string
+    unseen_only?: boolean
+    status_filter?: string
+    search?: string
+    limit?: number
+  }) => api.get('/admin/alerts-hub', { params }),
+  markAlertsHubSeen: () => api.post('/admin/alerts-hub/mark-seen'),
+  acknowledgeAlertsHub: (data: {
+    alert_id?: string
+    action?: 'ACKNOWLEDGE' | 'RESOLVE'
+    mark_all?: boolean
+  }) => api.post('/admin/alerts-hub/acknowledge', data),
+  broadcastNotice: (data: { title: string; message: string; priority?: string }) =>
+    api.post('/admin/broadcast-notice', data),
 }
 
 // ===== Sentinel Watchdog endpoints =====

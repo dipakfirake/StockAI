@@ -161,6 +161,18 @@ async def create_db_tables():
                         ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS closed_by VARCHAR(30);
                         ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS exit_reason VARCHAR(60);
                     END IF;
+
+                    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'notifications') THEN
+                        ALTER TABLE notifications ADD COLUMN IF NOT EXISTS category VARCHAR(40) DEFAULT 'GENERAL';
+                        ALTER TABLE notifications ADD COLUMN IF NOT EXISTS symbol VARCHAR(30);
+                        ALTER TABLE notifications ADD COLUMN IF NOT EXISTS trade_id VARCHAR(64);
+                        ALTER TABLE notifications ADD COLUMN IF NOT EXISTS metadata_json TEXT;
+                        ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_seen BOOLEAN;
+                        UPDATE notifications SET is_seen = COALESCE(is_read, FALSE) WHERE is_seen IS NULL;
+                        ALTER TABLE notifications ALTER COLUMN is_seen SET DEFAULT FALSE;
+                        ALTER TABLE notifications ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ;
+                        ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+                    END IF;
                 END $$;
             """))
 

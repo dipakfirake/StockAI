@@ -64,6 +64,18 @@ async def _square_off_intraday_async():
                     closed_trade.closed_by = "AUTO_SYSTEM"
                     closed_trade.exit_reason = "SYSTEM_AUTO_EOD_INTRADAY"
                     await paper_trading_service._deactivate_exit_alerts_if_flat(db, str(trade.user_id), trade.symbol)
+                    try:
+                        from backend.services.notification_service import notify_auto_sell_exit
+                        exit_meta = paper_trading_service.resolve_trade_exit_details(closed_trade)
+                        exit_label = paper_trading_service.EXIT_REASON_LABELS.get(
+                            "SYSTEM_AUTO_EOD_INTRADAY",
+                            "System Auto-Sell (15:20 IST Intraday Square-Off)",
+                        )
+                        await notify_auto_sell_exit(
+                            db, closed_trade, "SYSTEM_AUTO_EOD_INTRADAY", exit_label, exit_meta
+                        )
+                    except Exception:
+                        pass
                 count += 1
             except Exception as e:
                 logger.error(f"Failed to square off trade {trade.id}: {str(e)}")

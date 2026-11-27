@@ -1494,6 +1494,22 @@ class SwingAuditService:
                 await SwingAuditService.generate_excel_workbook(db, new_cycle.id)
             except Exception as init_xl_err:
                 logger.debug(f"Initial Cycle #{new_cycle_number} Excel creation notice: {init_xl_err}")
+            try:
+                from backend.services.notification_service import broadcast_system_notice_to_users
+                await broadcast_system_notice_to_users(
+                    db,
+                    title=f"🔄 Cycle #{cycle.cycle_number} Completed -> Cycle #{new_cycle_number} Active",
+                    message=(
+                        f"11-Day Swing Audit Cycle #{cycle.cycle_number} finalized ({win_trades}W / {loss_trades}L, "
+                        f"{win_rate}% Win Rate, Net ₹{total_pnl:,.2f}). New Cycle #{new_cycle_number} active for "
+                        f"{new_from_date.isoformat()} to {new_to_date.isoformat()}."
+                    ),
+                    priority="INFO",
+                    category="SYSTEM_NOTICE",
+                    metadata={"link": "/settings", "completed_cycle": cycle.cycle_number, "new_cycle": new_cycle_number},
+                )
+            except Exception:
+                pass
         logger.info(f"Successfully initialized Audit Cycle #{new_cycle_number} ({new_from_date} to {new_to_date})")
 
         return {

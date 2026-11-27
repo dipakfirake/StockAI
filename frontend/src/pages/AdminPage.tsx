@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { adminApi, settingsApi, healthApi, swingAuditApi } from '../services/api';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { usePresenceContext } from '../PresenceContext';
 import {
   Smartphone,
@@ -35,6 +35,11 @@ import {
   Download,
   History,
   Calendar,
+  Bell,
+  Search,
+  CheckCheck,
+  Megaphone,
+  Bug,
 } from 'lucide-react';
 
 interface AdminUser {
@@ -88,9 +93,102 @@ interface FyersStatus {
 export default function AdminPage() {
   const { user } = useAuth();
   const isAdmin = Boolean(user?.is_admin);
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  // Navigation tab: 'live' | 'fyers' | 'users' | 'ops' | 'audit' (defaults to 'fyers' so live surveillance only starts when clicked)
-  const [activeTab, setActiveTab] = useState<'live' | 'fyers' | 'users' | 'ops' | 'audit'>('fyers');
+  const initialAdminTab = searchParams.get('tab')?.toLowerCase();
+  const validAdminTabs = ['live', 'fyers', 'users', 'ops', 'audit', 'threats'] as const;
+  type AdminTab = (typeof validAdminTabs)[number];
+
+  // Navigation tab: 'live' | 'fyers' | 'users' | 'ops' | 'audit' | 'threats'
+  const [activeTab, setActiveTab] = useState<AdminTab>(
+    validAdminTabs.includes(initialAdminTab as AdminTab) ? (initialAdminTab as AdminTab) : 'fyers'
+  );
+
+  // Admin Threats, System Failures & Error Logs Hub State
+  const [alertsHubData, setAlertsHubData] = useState<any>({
+    unseen_count: 0,
+    unread_count: 0,
+    open_count: 0,
+    critical_count: 0,
+    counts_by_category: {},
+    alerts: [],
+    recent_logs: [],
+    security_audit_tail: [],
+    sentinel_summary: null,
+  });
+  const [alertsHubLoading, setAlertsHubLoading] = useState(false);
+  const [threatsCategory, setThreatsCategory] = useState<string>('ALL');
+  const [threatsSeverity, setThreatsSeverity] = useState<string>('ALL');
+  const [threatsStatus, setThreatsStatus] = useState<string>('ALL');
+  const [threatsSearch, setThreatsSearch] = useState<string>('');
+  const [threatsSubView, setThreatsSubView] = useState<'ALERTS' | 'LOGS' | 'AUDIT_LOG'>('ALERTS');
+  const [noticeForm, setNoticeForm] = useState({ title: '', message: '', priority: 'INFO' });
+  const [broadcastingNotice, setBroadcastingNotice] = useState(false);
+
+  const fetchAdminAlertsHub = async (markSeenOnOpen: boolean = false) => {
+    setAlertsHubLoading(true);
+    try {
+      const res = await adminApi.getAlertsHub({
+        category: threatsCategory,
+        severity: threatsSeverity,
+        status_filter: threatsStatus,
+        search: threatsSearch || undefined,
+        limit: 100,
+      });
+      const payload = res.data || {};
+      if (markSeenOnOpen && Number(payload.unseen_count || 0) > 0) {
+        await adminApi.markAlertsHubSeen();
+        payload.unseen_count = 0;
+        payload.alerts = (payload.alerts || []).map((a: any) => ({ ...a, is_seen: true }));
+        window.dispatchEvent(new CustomEvent('stockai:admin-alerts-updated'));
+      }
+      setAlertsHubData(payload);
+    } catch (err) {
+      console.error('Failed to load admin alerts hub:', err);
+    } finally {
+      setAlertsHubLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const qTab = searchParams.get('tab')?.toLowerCase();
+    if (qTab && validAdminTabs.includes(qTab as AdminTab)) {
+      setActiveTab(qTab as AdminTab);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchAdminAlertsHub(activeTab === 'threats');
+    const onAdmEvt = () => fetchAdminAlertsHub(activeTab === 'threats');
+    window.addEventListener('stockai:admin-alerts-updated', onAdmEvt);
+    return () => window.removeEventListener('stockai:admin-alerts-updated', onAdmEvt);
+  }, [isAdmin, activeTab, threatsCategory, threatsSeverity, threatsStatus]);
+
+  const handleAcknowledgeAdminAlert = async (alertId?: string, action: 'ACKNOWLEDGE' | 'RESOLVE' = 'ACKNOWLEDGE', markAll = false) => {
+    try {
+      await adminApi.acknowledgeAlertsHub({ alert_id: alertId, action, mark_all: markAll });
+      await fetchAdminAlertsHub(true);
+      window.dispatchEvent(new CustomEvent('stockai:admin-alerts-updated'));
+    } catch (err: any) {
+      alert(`Failed to update alert status: ${err?.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const handleBroadcastSystemNotice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noticeForm.title.trim() || !noticeForm.message.trim()) return;
+    setBroadcastingNotice(true);
+    try {
+      const res = await adminApi.broadcastNotice(noticeForm);
+      alert(`System announcement delivered to ${res.data?.recipients || 0} active user(s).`);
+      setNoticeForm({ title: '', message: '', priority: 'INFO' });
+    } catch (err: any) {
+      alert(`Broadcast failed: ${err?.response?.data?.detail || err.message}`);
+    } finally {
+      setBroadcastingNotice(false);
+    }
+  };
 
   // 11-Day Swing Audit State
   const [auditCycle, setAuditCycle] = useState<any | null>(null);
@@ -807,6 +905,58 @@ export default function AdminPage() {
           >
             {auditFiles.length} Reports
           </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('threats');
+            setSearchParams({ tab: 'threats' });
+            fetchAdminAlertsHub(true);
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 18px',
+            borderRadius: '8px',
+            border: activeTab === 'threats' ? '1px solid #ef4444' : '1px solid rgba(239, 68, 68, 0.25)',
+            background: activeTab === 'threats' ? 'rgba(239, 68, 68, 0.18)' : 'rgba(239, 68, 68, 0.05)',
+            color: activeTab === 'threats' ? '#f87171' : 'var(--text-secondary)',
+            fontWeight: 700,
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <Bell size={18} style={{ color: (alertsHubData.unseen_count || 0) > 0 ? '#ef4444' : 'currentColor' }} />
+          🚨 Threats, Failures &amp; Logs
+          {(alertsHubData.unseen_count || 0) > 0 ? (
+            <span
+              style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 12,
+                fontWeight: 800,
+                backgroundColor: '#ef4444',
+                color: '#ffffff',
+              }}
+            >
+              {alertsHubData.unseen_count} New
+            </span>
+          ) : (
+            <span
+              style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 12,
+                fontWeight: 700,
+                backgroundColor: 'rgba(16, 185, 129, 0.16)',
+                color: '#34d399',
+              }}
+            >
+              {alertsHubData.open_count || 0} Open
+            </span>
+          )}
         </button>
       </div>
 
@@ -2653,6 +2803,332 @@ export default function AdminPage() {
                             <Download size={13} />
                             <span>Download .xlsx</span>
                           </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 5: 🚨 SECURITY THREATS, SYSTEM FAILURES & ERROR LOGS HUB (ADMIN ONLY)
+         ========================================================================= */}
+      {activeTab === 'threats' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginBottom: 32 }}>
+          {/* Summary KPI Row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #ef4444' }}>
+              <div style={{ fontSize: 11, color: '#f87171', fontWeight: 700, textTransform: 'uppercase' }}>Critical Incidents Open</div>
+              <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, fontFamily: 'monospace' }}>{alertsHubData.critical_count || 0}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Security threats, Celery crashes, 500s</div>
+            </div>
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #f59e0b' }}>
+              <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700, textTransform: 'uppercase' }}>Total Unresolved Alerts</div>
+              <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, fontFamily: 'monospace' }}>{alertsHubData.open_count || 0}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Unread: {alertsHubData.unread_count || 0}</div>
+            </div>
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #38bdf8' }}>
+              <div style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase' }}>Captured App Logs</div>
+              <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, fontFamily: 'monospace' }}>{(alertsHubData.recent_logs || []).length}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>WARNING / ERROR / CRITICAL buffer</div>
+            </div>
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #10b981' }}>
+              <div style={{ fontSize: 11, color: '#34d399', fontWeight: 700, textTransform: 'uppercase' }}>Sentinel Health Score</div>
+              <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, fontFamily: 'monospace' }}>
+                {alertsHubData.sentinel_summary?.health_score ?? 100}/100
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                {alertsHubData.sentinel_summary?.overall_status || 'OPERATIONAL'}
+              </div>
+            </div>
+          </div>
+
+          {/* Admin Important System Announcement Broadcaster */}
+          <div className="card" style={{ padding: 18, border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 15, marginBottom: 10, color: '#38bdf8' }}>
+              <Megaphone size={17} />
+              <span>Broadcast Important System Notice to All Users&apos; 🔔 Notifications Tab</span>
+            </div>
+            <form onSubmit={handleBroadcastSystemNotice} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(260px, 2fr) 130px auto', gap: 10, alignItems: 'center' }}>
+              <input
+                className="input"
+                placeholder="Notice title (e.g. NSE Holiday / Server Upgrade)"
+                value={noticeForm.title}
+                onChange={(e) => setNoticeForm({ ...noticeForm, title: e.target.value })}
+                required
+              />
+              <input
+                className="input"
+                placeholder="Important message shown inside every user's 🔔 Notifications inbox..."
+                value={noticeForm.message}
+                onChange={(e) => setNoticeForm({ ...noticeForm, message: e.target.value })}
+                required
+              />
+              <select
+                className="input"
+                value={noticeForm.priority}
+                onChange={(e) => setNoticeForm({ ...noticeForm, priority: e.target.value })}
+              >
+                <option value="INFO">INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="HIGH">HIGH</option>
+              </select>
+              <button type="submit" className="btn btn-primary" disabled={broadcastingNotice}>
+                {broadcastingNotice ? 'Sending...' : 'Broadcast'}
+              </button>
+            </form>
+          </div>
+
+          {/* Controls + Sub-View Switcher */}
+          <div className="card" style={{ padding: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {[
+                  { key: 'ALERTS', label: `Unified Incidents & Threats (${(alertsHubData.alerts || []).length})` },
+                  { key: 'LOGS', label: `Wrong Logs / Errors (${(alertsHubData.recent_logs || []).length})` },
+                  { key: 'AUDIT_LOG', label: `Security Audit Log (${(alertsHubData.security_audit_tail || []).length})` },
+                ].map((sv) => (
+                  <button
+                    key={sv.key}
+                    type="button"
+                    className={threatsSubView === sv.key ? 'btn btn-primary' : 'btn btn-secondary'}
+                    style={{ fontSize: 12, padding: '6px 12px' }}
+                    onClick={() => setThreatsSubView(sv.key as any)}
+                  >
+                    {sv.label}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12, padding: '6px 12px' }}
+                  onClick={() => fetchAdminAlertsHub(true)}
+                  disabled={alertsHubLoading}
+                >
+                  <RefreshCw size={13} className={alertsHubLoading ? 'spin' : ''} /> Refresh
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12, padding: '6px 12px', color: '#34d399', borderColor: 'rgba(16,185,129,0.4)' }}
+                  onClick={() => handleAcknowledgeAdminAlert(undefined, 'ACKNOWLEDGE', true)}
+                >
+                  <CheckCheck size={13} /> Acknowledge All
+                </button>
+              </div>
+            </div>
+
+            {threatsSubView === 'ALERTS' && (
+              <>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+                  <select className="input" style={{ maxWidth: 200 }} value={threatsCategory} onChange={(e) => setThreatsCategory(e.target.value)}>
+                    <option value="ALL">All Categories</option>
+                    <option value="SECURITY_THREAT">🛡️ Security Threats</option>
+                    <option value="SYSTEM_FAILURE">💥 System Failures</option>
+                    <option value="ERROR_LOG">🐞 Wrong Logs / Errors</option>
+                    <option value="CELERY_FAILURE">⚙️ Celery Task Crashes</option>
+                    <option value="BROKER_FEED">📡 Fyers &amp; Data Feed</option>
+                  </select>
+                  <select className="input" style={{ maxWidth: 160 }} value={threatsSeverity} onChange={(e) => setThreatsSeverity(e.target.value)}>
+                    <option value="ALL">All Severities</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="INFO">INFO</option>
+                  </select>
+                  <select className="input" style={{ maxWidth: 160 }} value={threatsStatus} onChange={(e) => setThreatsStatus(e.target.value)}>
+                    <option value="ALL">All Statuses</option>
+                    <option value="OPEN">OPEN</option>
+                    <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
+                    <option value="RESOLVED">RESOLVED</option>
+                  </select>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 200 }}>
+                    <Search size={14} style={{ color: 'var(--text-secondary)' }} />
+                    <input
+                      className="input"
+                      placeholder="Filter by IP, Trace ID, title, or module..."
+                      value={threatsSearch}
+                      onChange={(e) => setThreatsSearch(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && fetchAdminAlertsHub(true)}
+                    />
+                  </div>
+                </div>
+
+                {(alertsHubData.alerts || []).length === 0 ? (
+                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                    ✅ No matching threats, failures, or error logs recorded.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {(alertsHubData.alerts || []).map((a: any) => {
+                      const isCrit = a.severity === 'CRITICAL';
+                      return (
+                        <div
+                          key={a.id}
+                          style={{
+                            padding: 14,
+                            borderRadius: 10,
+                            border: `1px solid ${isCrit ? 'rgba(239,68,68,0.4)' : 'rgba(245,158,11,0.3)'}`,
+                            background: isCrit ? 'rgba(239,68,68,0.06)' : 'rgba(255,255,255,0.02)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 800,
+                                  padding: '2px 7px',
+                                  borderRadius: 6,
+                                  background: isCrit ? '#ef4444' : '#f59e0b',
+                                  color: isCrit ? '#fff' : '#000',
+                                }}
+                              >
+                                {a.severity}
+                              </span>
+                              <span className="badge badge-secondary" style={{ fontSize: 10 }}>{a.category}</span>
+                              <span className="badge badge-secondary" style={{ fontSize: 10 }}>{a.subsystem}</span>
+                              {a.occurrence_count > 1 && (
+                                <span style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24' }}>×{a.occurrence_count}</span>
+                              )}
+                              <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{a.status}</span>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
+                              <span>{a.last_seen_ist || a.last_seen_at}</span>
+                              {a.status !== 'RESOLVED' && (
+                                <>
+                                  {a.status === 'OPEN' && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary"
+                                      style={{ padding: '3px 8px', fontSize: 11 }}
+                                      onClick={() => handleAcknowledgeAdminAlert(a.id, 'ACKNOWLEDGE')}
+                                    >
+                                      Acknowledge
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ padding: '3px 8px', fontSize: 11, background: '#10b981', borderColor: '#10b981' }}
+                                    onClick={() => handleAcknowledgeAdminAlert(a.id, 'RESOLVE')}
+                                  >
+                                    Resolve
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <div style={{ fontWeight: 700, fontSize: 14, marginTop: 8 }}>{a.title}</div>
+                          <pre
+                            style={{
+                              marginTop: 6,
+                              padding: 10,
+                              borderRadius: 6,
+                              background: 'rgba(0,0,0,0.35)',
+                              fontSize: 11,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              maxHeight: 160,
+                              overflowY: 'auto',
+                            }}
+                          >
+                            {a.detail}
+                          </pre>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginTop: 8, fontSize: 11, color: 'var(--text-secondary)' }}>
+                            <span>💡 {a.suggested_action || 'Inspect details and telemetry.'}</span>
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                              {a.ip_address && <span>IP: <code className="mono">{a.ip_address}</code></span>}
+                              {a.trace_id && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost"
+                                  style={{ padding: '2px 6px', fontSize: 11 }}
+                                  onClick={() => handleCopyText(a.trace_id, `trace-${a.id}`)}
+                                >
+                                  <Copy size={11} /> {copiedSnippet === `trace-${a.id}` ? 'Copied Trace!' : `Trace: ${a.trace_id.slice(0, 12)}`}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {threatsSubView === 'LOGS' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {(alertsHubData.recent_logs || []).length === 0 ? (
+                  <div style={{ padding: 28, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                    No application WARNING/ERROR/CRITICAL logs captured yet in current runtime buffer.
+                  </div>
+                ) : (
+                  (alertsHubData.recent_logs || []).map((logItem: any, idx: number) => (
+                    <div
+                      key={`${logItem.id}-${idx}`}
+                      style={{
+                        padding: 12,
+                        borderRadius: 8,
+                        border: '1px solid var(--border-color)',
+                        background: logItem.level === 'ERROR' || logItem.level === 'CRITICAL' ? 'rgba(239,68,68,0.06)' : 'rgba(245,158,11,0.05)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 700, color: logItem.level === 'WARNING' ? '#fbbf24' : '#f87171' }}>
+                          <Bug size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                          [{logItem.level}] {logItem.logger} ({logItem.location}) {logItem.count > 1 ? `· ×${logItem.count}` : ''}
+                        </span>
+                        <span style={{ color: 'var(--text-secondary)' }}>{logItem.timestamp_ist || logItem.timestamp}</span>
+                      </div>
+                      <div className="mono" style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{logItem.message}</div>
+                      {logItem.traceback && (
+                        <pre style={{ marginTop: 6, fontSize: 11, opacity: 0.85, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 140, overflowY: 'auto' }}>
+                          {logItem.traceback}
+                        </pre>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {threatsSubView === 'AUDIT_LOG' && (
+              <div className="table-container" style={{ overflowX: 'auto' }}>
+                <table className="table" style={{ minWidth: 820, margin: 0 }}>
+                  <thead>
+                    <tr>
+                      <th>Time (IST)</th>
+                      <th>Severity</th>
+                      <th>Event Type</th>
+                      <th>IP Address</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(alertsHubData.security_audit_tail || []).map((entry: any, idx: number) => (
+                      <tr key={idx}>
+                        <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{entry.timestamp_ist || entry.timestamp || '—'}</td>
+                        <td>
+                          <span className="badge" style={{ fontSize: 10, background: entry.severity === 'CRITICAL' ? '#ef4444' : entry.severity === 'WARNING' ? '#f59e0b' : 'rgba(59,130,246,0.2)', color: entry.severity === 'WARNING' ? '#000' : '#fff' }}>
+                            {entry.severity || 'INFO'}
+                          </span>
+                        </td>
+                        <td className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{entry.event_type}</td>
+                        <td className="mono" style={{ fontSize: 11 }}>{entry.ip_address || '—'}</td>
+                        <td className="mono" style={{ fontSize: 11, maxWidth: 420, wordBreak: 'break-word' }}>
+                          {JSON.stringify(entry.details || {})}
                         </td>
                       </tr>
                     ))}

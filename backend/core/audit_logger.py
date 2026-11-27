@@ -66,3 +66,41 @@ def log_security_event(
         audit_logger.info(json.dumps(entry))
     except Exception as e:
         logging.getLogger(__name__).error(f"Failed to write security audit log: {e}")
+
+    # Forward high-signal security threats & 500 system failures into Admin Threats/Logs Hub
+    THREAT_OR_FAILURE_EVENTS = {
+        "AUTH_CREDENTIAL_STUFFING_ALERT",
+        "AUTH_ACCOUNT_LOCKED",
+        "AUTH_LOCKOUT_BLOCKED",
+        "AUTH_LOGIN_FRAUD_BLOCKED",
+        "AUTH_GEO_VELOCITY_ANOMALY",
+        "UNAUTHORIZED_ADMIN_ACCESS_ATTEMPT",
+        "IDEMPOTENCY_RACE_DETECTED",
+        "UNHANDLED_EXCEPTION",
+        "RATE_LIMIT_BLOCKED",
+        "AUTH_LOGIN_FAILED",
+        "AUTH_OTP_DISPOSABLE_BLOCKED",
+        "AUTH_REGISTER_DISPOSABLE_BLOCKED",
+    }
+    if severity.upper() in ("WARNING", "CRITICAL") or event_type in THREAT_OR_FAILURE_EVENTS:
+        try:
+            from backend.services.admin_alerts_service import schedule_admin_alert_nonblocking
+
+            cat = "SYSTEM_FAILURE" if event_type == "UNHANDLED_EXCEPTION" else "SECURITY_THREAT"
+            sev = severity.upper() if severity.upper() in ("CRITICAL", "WARNING", "INFO") else "WARNING"
+            if event_type == "AUTH_LOGIN_FAILED" and sev == "INFO":
+                sev = "WARNING"
+            schedule_admin_alert_nonblocking(
+                category=cat,
+                subsystem="SECURITY" if cat == "SECURITY_THREAT" else "API_GATEWAY",
+                severity=sev,
+                title=f"{event_type.replace('_', ' ')} ({ip_address or 'unknown'})",
+                detail=json.dumps(sanitized_details),
+                suggested_action="Inspect Trace ID and client IP in Security Audit Logs; block offending IP or review failing route if recurring.",
+                trace_id=trace_id if trace_id and trace_id != "N/A" else None,
+                ip_address=ip_address,
+                user_id_ref=user_id,
+                metadata={"event_type": event_type, **sanitized_details},
+            )
+        except Exception:
+            pass

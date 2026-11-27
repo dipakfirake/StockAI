@@ -26,12 +26,44 @@ import { ReconnectingBanner } from './components/ReconnectingBanner'
 import ProtectedRoute from './components/ProtectedRoute'
 import CookieConsentBanner from './components/CookieConsentBanner'
 import { alertWebSocket } from './services/websocket'
+import { triggerDesktopPushNotification } from './utils/notificationSound'
 import { useEffect } from 'react'
 
 export default function App() {
   useEffect(() => {
-    // Listen for server-side alerts, real-time trigger toasts, and creation events
+    // Listen for server-side alerts, persisted Notification inbox pushes, Admin threats, and toasts
     alertWebSocket.onAlert((payload: any) => {
+      if (payload.type === 'NOTIFICATION_NEW' && payload.notification) {
+        const n = payload.notification
+        triggerDesktopPushNotification({
+          title: n.title || 'StockAI Notification',
+          body: n.message || '',
+          severity: n.priority || 'INFO',
+          tag: `notif-${n.id}`,
+          url: n.metadata?.link || '/alerts?tab=INBOX',
+        })
+        window.dispatchEvent(new CustomEvent('stockai:notifications-updated', { detail: n }))
+        return
+      }
+
+      if (payload.type === 'ADMIN_ALERT_NEW' && payload.alert) {
+        const a = payload.alert
+        triggerDesktopPushNotification({
+          title: `🚨 [ADMIN] ${a.title}`,
+          body: a.detail || '',
+          severity: a.severity || 'CRITICAL',
+          tag: `admin-alert-${a.id}`,
+          url: '/admin?tab=threats',
+        })
+        if (a.severity === 'CRITICAL') {
+          toast.error(`🚨 ${a.title}`, (a.detail || '').slice(0, 140))
+        } else {
+          toast.warning(`⚠️ ${a.title}`, (a.detail || '').slice(0, 140))
+        }
+        window.dispatchEvent(new CustomEvent('stockai:admin-alerts-updated', { detail: a }))
+        return
+      }
+
       if (payload.type === 'alert_toast' && payload.data) {
         const { title, message, type } = payload.data
         if (type === 'success') toast.success(title, message)
@@ -55,6 +87,7 @@ export default function App() {
         } else {
           toast.info(`🔔 ${payload.symbol} Alert Triggered`, payload.message)
         }
+        window.dispatchEvent(new CustomEvent('stockai:notifications-updated'))
       } else if (payload.type === 'ALERT_CREATED') {
         toast.info(`🔔 Alert Active: ${payload.symbol}`, payload.message)
       }

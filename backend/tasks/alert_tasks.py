@@ -265,7 +265,11 @@ async def _evaluate_alerts_async():
                             user_id=alert.user_id,
                             title=f"{alert.symbol} Alert",
                             message=user_msg,
-                            priority=alert.priority
+                            priority=alert.priority,
+                            category="ALERT_TRIGGERED",
+                            symbol=alert.symbol.upper(),
+                            is_seen=False,
+                            is_read=False,
                         )
                         res = db.add(notif)
                         if asyncio.iscoroutine(res):

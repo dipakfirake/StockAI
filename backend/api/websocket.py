@@ -201,12 +201,31 @@ async def general_websocket(websocket: WebSocket, token: str = ""):
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id = str(payload["sub"])
+        is_admin_flag = bool(payload.get("is_admin", False))
     except (JWTError, KeyError):
         await websocket.close(code=1008, reason="Authentication required")
         return
+
+    if not is_admin_flag:
+        try:
+            import uuid as _uuid
+            from sqlalchemy import select as _select
+            from backend.core.database import AsyncSessionLocal
+            from backend.models.user import User as _User
+            async with AsyncSessionLocal() as _db:
+                _res = await _db.execute(_select(_User.is_admin).where(_User.id == _uuid.UUID(user_id)))
+                is_admin_flag = bool(_res.scalar_one_or_none() or False)
+        except Exception:
+            is_admin_flag = False
+
     await websocket.accept()
     conn_id = str(id(websocket))
-    _market_connections[conn_id] = {"ws": websocket, "symbols": set(), "user_id": user_id}
+    _market_connections[conn_id] = {
+        "ws": websocket,
+        "symbols": set(),
+        "user_id": user_id,
+        "is_admin": is_admin_flag,
+    }
     logger.info(f"WebSocket connected: {conn_id}")
 
     try:
@@ -385,6 +404,28 @@ async def broadcast_alert(alert_payload: dict, user_id: str | None = None):
 
     for conn_id, conn_data in list(_market_connections.items()):
         if user_id is not None and conn_data.get("user_id") != user_id:
+            continue
+        ws = conn_data.get("ws")
+        if ws:
+            tasks.append(ws.send_text(payload_str))
+            active_conn_ids.append(conn_id)
+
+    if tasks:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for conn_id, res in zip(active_conn_ids, results):
+            if isinstance(res, Exception):
+                _unregister_connection(conn_id)
+
+
+async def broadcast_admin_alert(alert_payload: dict):
+    """Deliver real-time security, failure, and error-log alerts ONLY to authenticated Admin WebSockets."""
+    envelope = alert_payload if "type" in alert_payload else {"type": "ADMIN_ALERT_NEW", "alert": alert_payload}
+    payload_str = json.dumps(envelope)
+    tasks = []
+    active_conn_ids = []
+
+    for conn_id, conn_data in list(_market_connections.items()):
+        if not conn_data.get("is_admin"):
             continue
         ws = conn_data.get("ws")
         if ws:
