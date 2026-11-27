@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { alertsApi, stocksApi } from '../services/api'
+import { alertsApi, stocksApi, paperTradingApi } from '../services/api'
 import { 
   Bell, PlusCircle, Trash2, BellOff, ShieldAlert, ShieldCheck, 
   Target, TrendingUp, TrendingDown, RefreshCw, AlertTriangle, 
@@ -92,9 +92,8 @@ export default function AlertsPage() {
   const [loadingHoldings, setLoadingHoldings] = useState(true)
   const [syncingHoldings, setSyncingHoldings] = useState(false)
 
-  // Zerodha Order Modal for Sell / Exit
-  const [sellModalData, setSellModalData] = useState<any | null>(null)
-  const [sellModalOpen, setSellModalOpen] = useState(false)
+  // Direct Exit state for closing held BUY positions cleanly (without creating conflicting SHORTs)
+  const [exitingTradeId, setExitingTradeId] = useState<string | null>(null)
 
   // Zerodha Kite GTT Creation Modal State
   const [showGttSearchPrompt, setShowGttSearchPrompt] = useState(false)
@@ -110,6 +109,9 @@ export default function AlertsPage() {
       currentPrice: candidate.cmp,
       bestBuyPrice: candidate.best_buy_price,
       targetPrice: candidate.target_price,
+      target1: candidate.target_1 ?? undefined,
+      target2: candidate.target_2 ?? undefined,
+      target3: candidate.target_3 ?? undefined,
       stopLoss: candidate.stop_loss,
     })
     setGttOrderModalOpen(true)
@@ -117,6 +119,7 @@ export default function AlertsPage() {
 
   const handleSetRadarAlert = async (candidate: any) => {
     setSettingSingleAlertSym(candidate.symbol)
+    const activeProx = Math.max(0.5, Math.min(5.0, radarProximityPct))
     try {
       await alertsApi.screenerSetup({
         symbol: candidate.symbol,
@@ -124,11 +127,11 @@ export default function AlertsPage() {
         best_buy_price: candidate.best_buy_price,
         target_price: candidate.target_price,
         stop_loss: candidate.stop_loss,
-        proximity_pct: 1.0,
+        proximity_pct: activeProx,
       })
       toast.success(
         `Coupled Alerts Set: ${candidate.symbol}`,
-        `⚡ Pre-Buy Alert at ₹${(candidate.best_buy_price * 1.01).toFixed(2)}, 🎯 Sell Pre-Alert at ₹${(candidate.target_price * 0.99).toFixed(2)}, and SL protection!`
+        `⚡ Pre-Buy Alert (+${activeProx}%) at ₹${(candidate.best_buy_price * (1 + activeProx / 100)).toFixed(2)}, 🎯 Sell Pre-Alert at ₹${(candidate.target_price * (1 - activeProx / 100)).toFixed(2)}, and SL protection!`
       )
       await loadAlerts()
     } catch (err: any) {
@@ -141,6 +144,7 @@ export default function AlertsPage() {
   const handleBulkSetRadarAlerts = async () => {
     if (!radarData?.candidates?.length) return
     setSettingBulkAlerts(true)
+    const activeProx = Math.max(0.5, Math.min(5.0, radarProximityPct))
     try {
       const items = radarData.candidates.map((c: any) => ({
         symbol: c.symbol,
@@ -148,7 +152,7 @@ export default function AlertsPage() {
         best_buy_price: c.best_buy_price,
         target_price: c.target_price,
         stop_loss: c.stop_loss,
-        proximity_pct: 1.0,
+        proximity_pct: activeProx,
       }))
       const res = await alertsApi.bulkScreenerSetup(items)
       toast.success(
@@ -163,10 +167,10 @@ export default function AlertsPage() {
     }
   }
 
-  const loadRadar = async (sec = radarSector, prox = radarProximityPct, stg = radarStage, silent = false) => {
+  const loadRadar = async (sec = radarSector, prox = radarProximityPct, stg = radarStage, silent = false, forceRefresh = false) => {
     if (!silent) setLoadingRadar(true)
     try {
-      const res = await alertsApi.getScreenerRadar(sec, prox, 60.0, stg)
+      const res = await alertsApi.getScreenerRadar(sec, prox, 60.0, stg, forceRefresh)
       setRadarData(res.data || { candidates: [], summary: { at_best_buy: 0, near_best_buy: 0, approaching: 0, sell_pre_alerts: 0, pre_buy_prime: 0 }, total_candidates: 0 })
     } catch (err: any) {
       console.error('Failed to load screener proximity radar:', err)
@@ -200,8 +204,16 @@ export default function AlertsPage() {
   }
 
   useEffect(() => {
-    loadRadar(radarSector, radarProximityPct, radarStage)
+    loadRadar(radarSector, radarProximityPct, radarStage, false, false)
   }, [radarSector, radarProximityPct, radarStage])
+
+  useEffect(() => {
+    if (activeTab !== 'SCREENER_RADAR') return
+    const radarTimer = setInterval(() => {
+      loadRadar(radarSector, radarProximityPct, radarStage, true, false)
+    }, 30000)
+    return () => clearInterval(radarTimer)
+  }, [activeTab, radarSector, radarProximityPct, radarStage])
 
   useEffect(() => {
     loadAlerts()
@@ -291,9 +303,29 @@ export default function AlertsPage() {
     toast.info('Alert Deactivated')
   }
 
-  const handleOpenExitModal = (holding: any) => {
-    setSellModalData(holding)
-    setSellModalOpen(true)
+  const handleDirectExitHolding = async (holding: any) => {
+    if (!holding?.trade_id) return
+    const qty = holding.quantity || 0
+    const entry = Number(holding.entry_price || 0).toFixed(2)
+    const cmp = Number(holding.cmp || 0).toFixed(2)
+    if (!confirm(`Close/Sell ${qty} shares of ${holding.symbol} (${holding.product_type}) bought @ ₹${entry} at current market price ₹${cmp}?`)) {
+      return
+    }
+    setExitingTradeId(holding.trade_id)
+    try {
+      const res = await paperTradingApi.close(holding.trade_id)
+      const pnlVal = Number(res.data?.realized_pnl ?? 0)
+      const exitP = Number(res.data?.exit_price ?? holding.cmp ?? 0)
+      toast.success(
+        `Closed ${holding.symbol} @ ₹${exitP.toFixed(2)}`,
+        `Realized Net P&L: ${pnlVal >= 0 ? '+' : ''}₹${pnlVal.toFixed(2)}. Orphan exit alerts cleared automatically.`
+      )
+      await Promise.all([loadHoldingsMonitor(), loadAlerts()])
+    } catch (err: any) {
+      toast.error('Failed to exit holding', err?.response?.data?.detail || err.message)
+    } finally {
+      setExitingTradeId(null)
+    }
   }
 
   // Filter Radar alerts (Proximity and Screener pre-alerts)
@@ -566,7 +598,7 @@ export default function AlertsPage() {
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
                   className="btn btn-secondary"
-                  onClick={() => loadRadar(radarSector, radarProximityPct)}
+                  onClick={() => loadRadar(radarSector, radarProximityPct, radarStage, false, true)}
                   disabled={loadingRadar}
                   style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                 >
@@ -637,8 +669,26 @@ export default function AlertsPage() {
                 </select>
               </div>
 
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
-                Showing <strong>{radarData?.total_candidates || 0}</strong> setups ({radarStage === 'PRE_BUY' ? 'Pre-Buy Corridor' : radarStage === 'SELL_PRE_ALERT' ? 'Near Target' : `within ${radarProximityPct}%`})
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginLeft: 'auto', textAlign: 'right' }}>
+                <div>
+                  Showing <strong>{radarData?.total_candidates || 0}</strong> setups ({
+                    radarStage === 'PRE_BUY'
+                      ? 'Strict Pre-Buy Corridor (>0.5% above Best Buy)'
+                      : radarStage === 'AT_BEST_BUY'
+                      ? 'At Best Buy Zone (±0.5%)'
+                      : radarStage === 'SELL_PRE_ALERT'
+                      ? 'Near Target (<=2.5%)'
+                      : `within ±${radarProximityPct}%`
+                  })
+                </div>
+                {radarData?.generated_at && (
+                  <div style={{ fontSize: 11, marginTop: 2, color: '#38bdf8' }}>
+                    Live Quotes ({radarData.quotes_live_count ?? radarData.total_candidates}/{radarData.total_candidates}) · Updated {new Date(radarData.generated_at).toLocaleTimeString('en-IN', { hour12: true })} IST
+                    {Array.isArray(radarData.sectors_loaded) && radarData.sectors_loaded.length > 0 && radarSector === 'ALL'
+                      ? ` · ${radarData.sectors_loaded.length} sector feed${radarData.sectors_loaded.length > 1 ? 's' : ''}`
+                      : ''}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1065,7 +1115,8 @@ export default function AlertsPage() {
 
                           <td style={{ textAlign: 'right' }}>
                             <button
-                              onClick={() => handleOpenExitModal(h)}
+                              onClick={() => handleDirectExitHolding(h)}
+                              disabled={exitingTradeId === h.trade_id}
                               style={{
                                 background: '#ff5722',
                                 color: '#ffffff',
@@ -1074,14 +1125,15 @@ export default function AlertsPage() {
                                 padding: '5px 12px',
                                 fontSize: 12,
                                 fontWeight: 700,
-                                cursor: 'pointer',
+                                cursor: exitingTradeId === h.trade_id ? 'wait' : 'pointer',
+                                opacity: exitingTradeId === h.trade_id ? 0.7 : 1,
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: 4,
                               }}
-                              title="Open Zerodha Kite-style Sell window to exit position"
+                              title="Close this open holding immediately at current market price"
                             >
-                              Exit / Sell
+                              {exitingTradeId === h.trade_id ? 'Closing...' : 'Exit / Sell'}
                             </button>
                           </td>
                         </tr>
@@ -1282,23 +1334,6 @@ export default function AlertsPage() {
         </div>
       )}
 
-      {/* Zerodha Sell / Exit Modal */}
-      {sellModalData && (
-        <ZerodhaOrderModal
-          isOpen={sellModalOpen}
-          onClose={() => setSellModalOpen(false)}
-          symbol={sellModalData.symbol}
-          currentPrice={sellModalData.cmp}
-          targetPrice={sellModalData.target_price}
-          stopLoss={sellModalData.stop_loss}
-          defaultDirection="SELL"
-          onOrderSuccess={() => {
-            loadHoldingsMonitor()
-            loadAlerts()
-          }}
-        />
-      )}
-
       {/* Quick GTT Stock Selector Modal */}
       {showGttSearchPrompt && (
         <div style={{
@@ -1366,6 +1401,9 @@ export default function AlertsPage() {
           currentPrice={gttOrderData.currentPrice}
           bestBuyPrice={gttOrderData.bestBuyPrice}
           targetPrice={gttOrderData.targetPrice}
+          target1={gttOrderData.target1}
+          target2={gttOrderData.target2}
+          target3={gttOrderData.target3}
           stopLoss={gttOrderData.stopLoss}
           defaultDirection="BUY"
           isGttMode={true}

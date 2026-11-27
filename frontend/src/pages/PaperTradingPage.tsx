@@ -392,28 +392,67 @@ export default function PaperTradingPage() {
         )}
 
         {activeTab === 'HISTORY' && (
-          <table className="table" style={{ margin: 0, minWidth: '650px' }}>
+          <table className="table" style={{ margin: 0, minWidth: '880px' }}>
             <thead style={{ background: 'var(--color-bg-card-hover)' }}>
               <tr>
-                <th>Instrument</th><th>Direction</th><th>Qty.</th><th>Avg. Cost</th><th>Exit Price</th><th>Realized P&L</th><th>Date</th>
+                <th>Instrument</th><th>Direction</th><th>Qty.</th><th>Avg. Cost</th><th>Exit Price</th><th>Charges &amp; Limits</th><th>Realized P&amp;L</th><th>Sold By</th><th>Closed Date</th>
               </tr>
             </thead>
             <tbody>
               {closedTrades.length === 0 ? (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>No trade history</td></tr>
-              ) : closedTrades.slice(0, 30).map(t => (
-                <tr key={t.trade_id}>
-                  <td className="mono" style={{ fontWeight: 600 }}>{t.symbol}</td>
-                  <td><span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction}</span></td>
-                  <td>{t.quantity}</td>
-                  <td className="mono">{t.entry_price ? formatNumber2Dec(t.entry_price) : '—'}</td>
-                  <td className="mono">{t.exit_price ? formatNumber2Dec(t.exit_price) : '—'}</td>
-                  <td className={t.realized_pnl >= 0 ? 'positive mono' : 'negative mono'} style={{ fontWeight: 600 }}>
-                    {t.realized_pnl !== undefined ? `${t.realized_pnl >= 0 ? '+' : ''}${formatNumber2Dec(t.realized_pnl)}` : '—'}
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{t.closed_at ? new Date(t.closed_at).toLocaleDateString() : '—'}</td>
-                </tr>
-              ))}
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>No trade history</td></tr>
+              ) : closedTrades.slice(0, 50).map(t => {
+                const isAuto = t.closed_by === 'AUTO_SYSTEM'
+                return (
+                  <tr key={t.trade_id}>
+                    <td className="mono" style={{ fontWeight: 600 }}>
+                      <div>{t.symbol}</div>
+                      <div style={{ fontSize: 10, color: 'var(--color-text-muted)', fontWeight: 400 }}>
+                        {t.product_type} · Held {t.holding_duration_label || `${t.days_held ?? 0}d`}
+                      </div>
+                    </td>
+                    <td><span className={`badge ${t.direction === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>{t.direction}</span></td>
+                    <td>{t.quantity}</td>
+                    <td className="mono">{t.entry_price ? formatNumber2Dec(t.entry_price) : '—'}</td>
+                    <td className="mono">{t.exit_price ? formatNumber2Dec(t.exit_price) : '—'}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      <div>Chg: ₹{formatNumber2Dec(t.total_charges ?? ((t.commission || 0) + (t.stt_tax || 0)))}</div>
+                      {(t.target_price || t.stop_loss) && (
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                          {t.target_price ? `T ₹${Number(t.target_price).toFixed(0)}` : ''}{t.target_price && t.stop_loss ? ' · ' : ''}{t.stop_loss ? `SL ₹${Number(t.stop_loss).toFixed(0)}` : ''}
+                        </div>
+                      )}
+                    </td>
+                    <td className={t.realized_pnl >= 0 ? 'positive mono' : 'negative mono'} style={{ fontWeight: 600 }}>
+                      <div>{t.realized_pnl !== undefined && t.realized_pnl !== null ? `${t.realized_pnl >= 0 ? '+' : ''}${formatNumber2Dec(t.realized_pnl)}` : '—'}</div>
+                      {t.pnl_pct != null && (
+                        <div style={{ fontSize: 10, opacity: 0.9 }}>
+                          ({t.pnl_pct >= 0 ? '+' : ''}{Number(t.pnl_pct).toFixed(2)}%)
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <span
+                        className="badge"
+                        style={{
+                          fontSize: 10,
+                          background: isAuto ? 'rgba(99, 102, 241, 0.16)' : 'rgba(245, 158, 11, 0.14)',
+                          color: isAuto ? '#a5b4fc' : '#fcd34d',
+                          border: `1px solid ${isAuto ? 'rgba(99, 102, 241, 0.35)' : 'rgba(245, 158, 11, 0.35)'}`,
+                        }}
+                      >
+                        {isAuto ? '🤖 System Auto' : '👤 User'}
+                      </span>
+                      {t.exit_reason_label && (
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>{t.exit_reason_label}</div>
+                      )}
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                      {t.sell_date_formatted || (t.closed_at ? new Date(t.closed_at).toLocaleString() : '—')}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

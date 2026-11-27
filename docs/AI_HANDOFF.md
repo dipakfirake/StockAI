@@ -12,7 +12,27 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 - API docs: `http://localhost:8000/docs`
 - Demo admin: `admin@stockai.com` / `admin` (local development only)
 
-## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25 / 2026-11-26)
+## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25 / 2026-11-26 / 2026-11-27)
+
+- **ALERTS PROXIMITY RADAR FIX, HOLDINGS GUARD REPAIR & PORTFOLIO SOLD STOCKS LEDGER (COMPLETE & VERIFIED - 2026-11-27):**
+  - **Issues Investigated & Resolved**:
+    1. **Alerts Radar `PRE_BUY` Filter & Stale/Inconsistent Radar Bugs (`backend/api/alerts.py`, `backend/services/alerts_radar_service.py`, `backend/services/screener.py`, `frontend/src/pages/AlertsPage.tsx`, `frontend/src/services/api.ts`)**:
+       - `is_pre_buy` previously included `0.00%` `AT_BEST_BUY` setups (`TITAN.NS`, `ASIANPAINT.NS`) under `PRE_BUY`; fixed to strictly require `distance_pct > 0.5 and distance_pct <= proximity_pct`.
+       - `ALL` stage lacked lower proximity bound (`abs_dist <= proximity_pct`), allowing deeply discounted stocks below `-proximity_pct` to match.
+       - KPI summary cards (`at_best_buy`, `near_best_buy`, `sell_pre_alerts`) counted pre-filter setups (`Pre-Buy: 3` while `Total: 0`); reconciled to count strictly over matching filtered setups.
+       - Removed frozen 1-hour `alerts_screener_radar:*` CMP response cache; decoupled screener setups (`run_all_sectors_screener` TTL aligned to `get_dynamic_screener_ttl()` + `screener_all_sectors_lkg`, merging all 10 cached/LKG sectors when `sector="ALL"`) from **1 single live `fetch_quotes_bulk(..., use_fallback=True, bypass_cache=force_refresh)`** overlay with `generated_at`, `quote_timestamp`, `scan_timestamp`, `sectors_loaded`, and `target_1/2/3`.
+       - Fixed `AlertsPage.tsx` `Refresh Radar` (passing `radarStage` + `forceRefresh=true`), 30s live polling on the Radar tab, `handleBulkSetRadarAlerts`/`handleSetRadarAlert` passing `radarProximityPct`, GTT passing `target1/2/3`, and **Holdings Guard `Exit / Sell`** directly closing `h.trade_id` via `paperTradingApi.close` instead of placing a conflicting new SHORT order.
+    2. **Portfolio Missing Exits Audit & Sold Stocks History Ledger (`backend/models/paper_trade.py`, `backend/core/database.py`, `backend/services/paper_trading.py`, `backend/tasks/trading_tasks.py`, `backend/api/paper_trading.py`, `backend/api/portfolio.py`, `frontend/src/pages/PortfolioPage.tsx`, `frontend/src/pages/PaperTradingPage.tsx`)**:
+       - Confirmed live `PERSISTENT.NS` (`+₹5,139.41`, Target hit at NSE open `2026-11-26 09:15 IST`) and `TCS.NS` (`+₹325.55`, Target hit `2026-11-26 14:46 IST`) were **auto-sold by `evaluate_open_trades`** (plus 4 October exits), leaving 4 open `TITAN.NS` lots (`+₹1,255.39` unrealized after `₹187.01` est. exit STT).
+       - Fixed `/api/paper-trades` missing `exit_price` (`"—"`), closed `days_held` (was `now - opened_at`), and `DELIVERY` unrealized STT parity (`float(t.stt_tax or 0) > 0`, eliminating the `+₹1,255.39` vs `+₹1,442.40` discrepancy).
+       - Added `closed_by` (`AUTO_SYSTEM` / `USER_MANUAL`) and `exit_reason` columns + idempotent `DO $$` Postgres migration + deterministic `resolve_trade_exit_details()` (covering legacy rows retroactively) + `_deactivate_exit_alerts_if_flat()` on final exit and `sync_holdings_alerts` orphan cleanup/deduplication.
+       - Exposed `closed_trades_list`, `sold_today_count`, `auto_sold_count`, `user_sold_count` in `/api/portfolio` and rendered the interactive **Sold Stocks History (Realized Exits)** ledger on `PortfolioPage` & enriched `HISTORY` on `PaperTradingPage`.
+  - **Verification Evidence**:
+    - `py_compile` across all modified/new backend files: **exit code 0**.
+    - `pytest` across 10 suites (`test_alerts_radar_and_sold_portfolio.py`, `test_screener_proximity_radar.py`, `test_holdings_and_proximity_alerts.py`, `test_portfolio_holdings_analytics.py`, `test_paper_trading_pending_and_celery_fd.py`, `test_high_precision_ratchet_and_cycle_fix.py`, `test_alert_tasks.py`, `test_endpoint_crash_and_math_audit.py`, `test_cybersecurity.py`, `test_system_design.py`): **71 passed, 0 failed in 76.70s**.
+    - FastAPI `ASGITransport` smoke test on `/api/alerts/screener-proximity-radar` (`PRE_BUY`, `force_refresh=true`) & `/api/portfolio` (`closed_trades_list`): **HTTP 200 OK (`ASGI_SMOKE_OK`)**.
+    - Frontend build (`npm --prefix frontend run build` / `tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 17.53s**.
+  - **Exact Next Safe Step**: Commit & push locally (`git add -A && git commit && git push origin main`), and run on Oracle server: `cd /home/opc/StockAI && git pull origin main && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend`.
 
 - **CONTINUOUS LIVE PRICE TICKER FIX, FYERS DATA SOCKET SUBSCRIPTION REPAIR & FULL ENDPOINT/LIMITS AUDIT (COMPLETE & VERIFIED - 2026-11-26):**
   - **Issues Investigated & Resolved**:

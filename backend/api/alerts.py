@@ -258,265 +258,25 @@ async def get_screener_proximity_radar(
     proximity_pct: float = 3.0,
     min_score: float = 60.0,
     stage: str = "ALL",
+    force_refresh: bool = False,
     current_user=Depends(get_current_user),
 ):
     """
     Zero-Rate-Limit Calibrated Swing Screener Best Buy Proximity Radar:
-    Scans swing setups across the requested sector (or ALL 10 sectors)
-    and identifies stocks whose current market price is closely tracking
-    their ML Best Buy value.
-
-    Features:
-    - Pre-Buy Opportunities: strictly BEFORE the buy price is reached (descending from above).
-    - Sell Pre-Alerts: detects stocks within proximity of Target to prepare profit-taking.
-    - Top Analyzer Verification: multi-factor constraints (RSI accumulation, asymmetric R:R, ML probability).
-    - Zero Rate Limit Guarantees: 1 single bulk call via FyersRateGovernor, cached in Redis.
+    Scans swing setups across the requested sector (or ALL 10 sectors),
+    overlays fresh LIVE bulk quotes in 1 single API call on every request,
+    applies strict PRE_BUY / AT_BEST_BUY / SELL_PRE_ALERT / ±proximity bounds,
+    and reconciles summary counts with displayed setups.
     """
-    from backend.services.screener import ScreenerService, SECTOR_UNIVERSES
-    from backend.core.cache import cache_get, cache_set
-    from backend.core.market_hours import get_dynamic_screener_ttl
+    from backend.services.alerts_radar_service import build_screener_proximity_radar
 
-    norm_sector = sector.upper().replace(" ", "_") if sector else "ALL"
-    norm_stage = stage.upper() if stage else "ALL"
-    cache_key = f"alerts_screener_radar:{norm_sector}:{proximity_pct}:{min_score}:{norm_stage}"
-    cached = await cache_get(cache_key)
-    if cached and isinstance(cached, dict) and "candidates" in cached:
-        return cached
-
-    # Collect candidate stocks from screener cache or lightweight run
-    candidates_raw: list[dict] = []
-
-    if norm_sector == "ALL":
-        # 1. Try aggregated screener cache
-        cached_agg = await cache_get("screener_all_sectors_aggregated")
-        if cached_agg and isinstance(cached_agg, dict) and "buy_stocks" in cached_agg:
-            candidates_raw = cached_agg["buy_stocks"]
-        else:
-            # Check individual sector caches
-            for sec_name in SECTOR_UNIVERSES.keys():
-                sec_cached = await cache_get(f"screener_results_{sec_name}")
-                if sec_cached and isinstance(sec_cached, dict) and "buy_stocks" in sec_cached:
-                    for s in sec_cached["buy_stocks"]:
-                        s_copy = dict(s)
-                        s_copy.setdefault("sector", sec_name)
-                        candidates_raw.append(s_copy)
-
-            # If all caches cold, run screener for NIFTY_50 as fast fallback
-            if not candidates_raw:
-                try:
-                    res = await ScreenerService.run_screener(sector="NIFTY_50", force_refresh=False)
-                    if res and "buy_stocks" in res:
-                        candidates_raw.extend(res["buy_stocks"])
-                except Exception:
-                    pass
-    else:
-        # Specific sector requested
-        sec_cached = await cache_get(f"screener_results_{norm_sector}")
-        if sec_cached and isinstance(sec_cached, dict) and "buy_stocks" in sec_cached:
-            candidates_raw = sec_cached["buy_stocks"]
-        else:
-            # Run or read sector screener
-            try:
-                res = await ScreenerService.run_screener(sector=norm_sector, force_refresh=False)
-                if res and "buy_stocks" in res:
-                    candidates_raw = res["buy_stocks"]
-            except Exception:
-                candidates_raw = []
-
-    # Filter candidates with valid trade plans and scores
-    valid_candidates = []
-    seen_symbols = set()
-    for s in candidates_raw:
-        sym = s.get("symbol")
-        if not sym or sym in seen_symbols:
-            continue
-        plan = s.get("trade_plan") or {}
-        best_buy = plan.get("best_buy_price") or plan.get("optimal_entry_price") or plan.get("entry_price")
-        score = float(s.get("total_score") or 0.0)
-        if best_buy and best_buy > 0 and score >= min_score:
-            seen_symbols.add(sym)
-            valid_candidates.append(s)
-
-    if not valid_candidates:
-        empty_res = {
-            "sector": norm_sector,
-            "stage": norm_stage,
-            "proximity_threshold_pct": proximity_pct,
-            "total_candidates": 0,
-            "summary": {"at_best_buy": 0, "near_best_buy": 0, "pre_buy_prime": 0, "approaching": 0, "sell_pre_alerts": 0, "below_buy": 0},
-            "candidates": [],
-        }
-        await cache_set(cache_key, empty_res, ttl=get_dynamic_screener_ttl())
-        return empty_res
-
-    # Pre-fetch live quotes in ONE SINGLE BULK CALL via FyersRateGovernor
-    symbols_to_quote = list(seen_symbols)
-    quotes_map = {}
-    try:
-        quotes_map = await market_data_service.fetch_quotes_bulk(symbols_to_quote)
-    except Exception:
-        quotes_map = {}
-
-    radar_items = []
-    at_best_buy_count = 0
-    near_best_buy_count = 0
-    approaching_count = 0
-    sell_pre_alert_count = 0
-    below_buy_count = 0
-
-    for s in valid_candidates:
-        sym = s.get("symbol")
-        plan = s.get("trade_plan") or {}
-        best_buy = float(plan.get("best_buy_price") or plan.get("optimal_entry_price") or plan.get("entry_price") or 0.0)
-        target = float(plan.get("target_price") or 0.0)
-        sl = float(plan.get("stop_loss") or 0.0)
-
-        quote = quotes_map.get(sym) or {}
-        cmp = float(quote.get("price") or plan.get("current_price") or plan.get("cmp") or best_buy)
-        if cmp <= 0:
-            cmp = best_buy
-
-        distance_pct = round(((cmp - best_buy) / best_buy) * 100.0, 2) if best_buy > 0 else 0.0
-        abs_dist = abs(distance_pct)
-
-        # 1. Pre-Buy Determination: Strictly BEFORE hitting Best Buy from above
-        is_pre_buy = (cmp >= best_buy) and (distance_pct <= proximity_pct)
-        pre_buy_diff = round(max(0.0, cmp - best_buy), 2)
-        pre_buy_buffer_pct = max(0.0, distance_pct)
-
-        # 2. Target Proximity & Sell Pre-Alert Determination
-        if target > 0 and cmp > 0:
-            target_distance_pct = round(((target - cmp) / cmp) * 100.0, 2)
-            is_near_target = (0.0 <= target_distance_pct <= 2.5)
-            is_target_hit = (target_distance_pct <= 0.0)
-        else:
-            target_distance_pct = 999.0
-            is_near_target = False
-            is_target_hit = False
-
-        if is_near_target:
-            sell_pre_alert_count += 1
-            sell_pre_alert_label = f"🎯 Near Target (Sell Pre-Alert: +{target_distance_pct}% to T2: ₹{target:.2f})"
-        elif is_target_hit:
-            sell_pre_alert_label = f"🚀 Target Reached (CMP ₹{cmp:.2f} >= Target ₹{target:.2f})"
-        else:
-            sell_pre_alert_label = None
-
-        # 3. Proximity status categorization
-        if abs_dist <= 0.5:
-            status = "AT_BEST_BUY"
-            status_label = "🎯 At Best Buy (Optimal Immediate Entry)"
-            at_best_buy_count += 1
-        elif 0.5 < distance_pct <= 2.0:
-            status = "NEAR_BEST_BUY"
-            status_label = f"⚡ Pre-Buy Zone (+{distance_pct}% before Best Buy)"
-            near_best_buy_count += 1
-        elif 2.0 < distance_pct <= 4.0:
-            status = "APPROACHING"
-            status_label = f"⏳ Approaching Pre-Buy (+{distance_pct}% before Best Buy)"
-            approaching_count += 1
-        elif distance_pct < -0.5:
-            status = "BELOW_BUY"
-            status_label = f"🏷️ Slipped Below Buy ({distance_pct}% discount)"
-            below_buy_count += 1
-        else:
-            status = "EXTENDED"
-            status_label = f"🚀 Extended from Best Buy (+{distance_pct}%)"
-
-        # 4. Top Analyzers Multi-Factor Constraints Verification
-        indicators = s.get("indicators") or {}
-        rsi = float(indicators.get("rsi_14") or s.get("rsi") or 50.0)
-        ai_res = s.get("ai_analysis") or {}
-        ml_conf = float(ai_res.get("confidence") or s.get("confidence") or (s.get("total_score", 70) / 100.0))
-        ml_prob_buy = float(ai_res.get("probabilities", {}).get("buy", 0.60))
-        rr_ratio = round(float(plan.get("risk_reward_ratio") or 2.0), 2)
-
-        passed_constraints = []
-        if 30.0 <= rsi <= 65.0:
-            passed_constraints.append("RSI Momentum in Accumulation Zone (30-65)")
-        if rr_ratio >= 1.7:
-            passed_constraints.append(f"Favorable Asymmetric R:R ({rr_ratio}:1)")
-        if ml_prob_buy >= 0.50:
-            passed_constraints.append(f"ML Directional Conviction ({int(ml_prob_buy*100)}% Buy Prob)")
-        if float(s.get("total_score") or 0.0) >= 65.0:
-            passed_constraints.append("Multi-Factor Confluence (Score >= 65)")
-        if cmp > sl:
-            passed_constraints.append("Structural Stop Loss Buffer Intact")
-
-        is_verified = len(passed_constraints) >= 3
-        verdict = "TOP_ANALYZER_VERIFIED" if is_verified else "STANDARD_SETUP"
-        verdict_label = "✓ Top Analyzer Verified" if is_verified else "⚡ Standard Setup"
-
-        # 5. Filter by Stage selection
-        matches_stage = True
-        if norm_stage == "PRE_BUY":
-            matches_stage = is_pre_buy and distance_pct <= proximity_pct
-        elif norm_stage == "SELL_PRE_ALERT":
-            matches_stage = is_near_target
-        elif norm_stage == "AT_BEST_BUY":
-            matches_stage = (abs_dist <= 0.5)
-        else: # "ALL"
-            matches_stage = (distance_pct <= proximity_pct) or is_near_target
-
-        if matches_stage:
-            radar_items.append({
-                "symbol": sym,
-                "name": s.get("name") or sym,
-                "sector": s.get("sector") or norm_sector,
-                "action": s.get("action", "BUY"),
-                "total_score": round(float(s.get("total_score") or 0.0), 1),
-                "cmp": cmp,
-                "best_buy_price": best_buy,
-                "entry_type": plan.get("entry_type", "PULLBACK_DIP"),
-                "distance_pct": distance_pct,
-                "abs_distance_pct": abs_dist,
-                "is_pre_buy": is_pre_buy,
-                "pre_buy_diff": pre_buy_diff,
-                "pre_buy_buffer_pct": pre_buy_buffer_pct,
-                "is_near_target": is_near_target,
-                "target_distance_pct": target_distance_pct,
-                "sell_pre_alert_label": sell_pre_alert_label,
-                "proximity_status": status,
-                "proximity_label": status_label,
-                "target_price": target,
-                "stop_loss": sl,
-                "expected_gain_pct": round(float(plan.get("expected_gain_pct") or 0.0), 1),
-                "risk_reward_ratio": rr_ratio,
-                "risk_buffer_pct": round(((cmp - sl) / cmp) * 100.0, 2) if sl > 0 and cmp > 0 else 0.0,
-                "technical_verification": {
-                    "verified": is_verified,
-                    "verdict": verdict,
-                    "verdict_label": verdict_label,
-                    "rsi": round(rsi, 1),
-                    "risk_reward": rr_ratio,
-                    "ml_confidence": round(ml_conf, 2),
-                    "ml_buy_prob": round(ml_prob_buy, 2),
-                    "passed_constraints": passed_constraints,
-                    "total_constraints_passed": len(passed_constraints),
-                }
-            })
-
-    # Sort closest to Best Buy first
-    radar_items.sort(key=lambda x: (x["abs_distance_pct"], -x["total_score"]))
-
-    response_payload = {
-        "sector": norm_sector,
-        "stage": norm_stage,
-        "proximity_threshold_pct": proximity_pct,
-        "total_candidates": len(radar_items),
-        "summary": {
-            "at_best_buy": at_best_buy_count,
-            "near_best_buy": near_best_buy_count,
-            "pre_buy_prime": near_best_buy_count,
-            "approaching": approaching_count,
-            "sell_pre_alerts": sell_pre_alert_count,
-            "below_buy": below_buy_count,
-        },
-        "candidates": radar_items,
-    }
-
-    await cache_set(cache_key, response_payload, ttl=get_dynamic_screener_ttl())
-    return response_payload
+    return await build_screener_proximity_radar(
+        sector=sector,
+        proximity_pct=proximity_pct,
+        min_score=min_score,
+        stage=stage,
+        force_refresh=force_refresh,
+    )
 
 
 @router.post("/screener-bulk-setup")
@@ -760,54 +520,94 @@ async def sync_holdings_alerts(
         select(Alert).where(Alert.user_id == current_user.id, Alert.is_active == True)
     )
     existing_alerts = alerts_res.scalars().all()
-    existing_symbols = {a.symbol for a in existing_alerts}
+
+    def _canon(sym: str | None) -> str:
+        return (sym or "").upper().strip().replace(".NS", "").replace(".BO", "")
+
+    open_canons = {_canon(t.symbol) for t in open_holdings}
+    closed_canons = {_canon(t.symbol) for t in trades if t.status in ("CLOSED", "CANCELLED") and _canon(t.symbol) not in open_canons}
+    watchlist_buy_canons = {_canon(a.symbol) for a in existing_alerts if a.is_active and a.condition_type == "BUY_PROXIMITY"}
+
+    # Clean up orphan exit alerts for positions that already closed and have no active BUY watchlist alert
+    deactivated_orphans = 0
+    for a in existing_alerts:
+        c_sym = _canon(a.symbol)
+        if (
+            a.is_active
+            and a.condition_type in {"TARGET_PROXIMITY", "TARGET_HIT", "STOP_LOSS_PROXIMITY", "STOP_LOSS_HIT"}
+            and c_sym in closed_canons
+            and c_sym not in watchlist_buy_canons
+        ):
+            a.is_active = False
+            deactivated_orphans += 1
+
+    existing_pairs = {(_canon(a.symbol), a.condition_type) for a in existing_alerts if a.is_active}
+
+    # Group multiple lots of the same holding symbol so Holdings Guard creates 1 clean protection set per symbol
+    grouped_holdings: dict[str, list] = {}
+    for t in open_holdings:
+        grouped_holdings.setdefault(_canon(t.symbol), []).append(t)
 
     synced_count = 0
-    for t in open_holdings:
-        if t.symbol not in existing_symbols:
-            entry_p = float(t.entry_price) if t.entry_price else 100.0
-            tgt = float(t.target_price) if t.target_price else round(entry_p * 1.08, 2)
-            sl = float(t.stop_loss) if t.stop_loss else round(entry_p * 0.96, 2)
+    for c_sym, sym_trades in grouped_holdings.items():
+        primary = sym_trades[0]
+        entry_p = float(primary.entry_price) if primary.entry_price else 100.0
+        tgt_vals = [float(x.target_price) for x in sym_trades if x.target_price and float(x.target_price) > 0]
+        sl_vals = [float(x.stop_loss) for x in sym_trades if x.stop_loss and float(x.stop_loss) > 0]
+        tgt = min(tgt_vals) if tgt_vals else round(entry_p * 1.08, 2)
+        sl = max(sl_vals) if sl_vals else round(entry_p * 0.96, 2)
 
-            # Target Proximity
+        added_for_sym = False
+        if (c_sym, "TARGET_PROXIMITY") not in existing_pairs:
             tgt_prox = round(tgt * 0.99, 2)
             db.add(Alert(
                 user_id=current_user.id,
-                symbol=t.symbol,
+                symbol=primary.symbol,
                 condition_type="TARGET_PROXIMITY",
                 condition_value=tgt_prox,
-                message=f"{t.symbol}: Approaching Target! Price near ₹{tgt_prox:.2f} — Prepare to sell.",
+                message=f"{primary.symbol}: Approaching Target! Price near ₹{tgt_prox:.2f} — Prepare to sell.",
                 priority="HIGH",
                 delivery_method="IN_APP",
                 is_active=True,
             ))
-            # Stop Loss Proximity
+            existing_pairs.add((c_sym, "TARGET_PROXIMITY"))
+            added_for_sym = True
+
+        if (c_sym, "STOP_LOSS_PROXIMITY") not in existing_pairs:
             sl_prox = round(sl * 1.015, 2)
             db.add(Alert(
                 user_id=current_user.id,
-                symbol=t.symbol,
+                symbol=primary.symbol,
                 condition_type="STOP_LOSS_PROXIMITY",
                 condition_value=sl_prox,
-                message=f"{t.symbol}: ⚠️ Approaching Stop Loss! Price near ₹{sl_prox:.2f}",
+                message=f"{primary.symbol}: ⚠️ Approaching Stop Loss! Price near ₹{sl_prox:.2f}",
                 priority="HIGH",
                 delivery_method="IN_APP",
                 is_active=True,
             ))
-            # Stop Loss Hit
+            existing_pairs.add((c_sym, "STOP_LOSS_PROXIMITY"))
+            added_for_sym = True
+
+        if (c_sym, "STOP_LOSS_HIT") not in existing_pairs:
             db.add(Alert(
                 user_id=current_user.id,
-                symbol=t.symbol,
+                symbol=primary.symbol,
                 condition_type="STOP_LOSS_HIT",
                 condition_value=sl,
-                message=f"{t.symbol}: 🛑 Stop Loss Breached at ₹{sl:.2f}! Cut losses.",
+                message=f"{primary.symbol}: 🛑 Stop Loss Breached at ₹{sl:.2f}! Cut losses.",
                 priority="HIGH",
                 delivery_method="IN_APP",
                 is_active=True,
             ))
+            existing_pairs.add((c_sym, "STOP_LOSS_HIT"))
+            added_for_sym = True
+
+        if added_for_sym:
             synced_count += 1
 
-    if synced_count > 0:
+    if synced_count > 0 or deactivated_orphans > 0:
         await db.flush()
+    if synced_count > 0:
         try:
             await broadcast_alert({
                 "type": "alert_toast",
@@ -820,7 +620,7 @@ async def sync_holdings_alerts(
         except Exception:
             pass
 
-    return {"synced_count": synced_count}
+    return {"synced_count": synced_count, "deactivated_orphans": deactivated_orphans}
 
 
 @router.delete("/{alert_id}")

@@ -55,6 +55,10 @@ async def get_portfolio(
             "open_trades": 0,
             "pending_orders": 0,
             "closed_trades": 0,
+            "closed_trades_list": [],
+            "sold_today_count": 0,
+            "auto_sold_count": 0,
+            "user_sold_count": 0,
             "win_rate": 0.0,
             "allocation": [],
             "pending_orders_list": [],
@@ -188,6 +192,66 @@ async def get_portfolio(
     total_pnl = total_realized + total_unrealized
     current_value = initial_capital + total_pnl
 
+    def _sort_closed_key(tr: PaperTrade) -> float:
+        dt = getattr(tr, "closed_at", None) or getattr(tr, "opened_at", None)
+        if not isinstance(dt, datetime):
+            return 0.0
+        dt_utc = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return dt_utc.timestamp()
+
+    closed_sorted = sorted(closed, key=_sort_closed_key, reverse=True)
+    closed_trades_list = []
+    sold_today_count = 0
+    auto_sold_count = 0
+    user_sold_count = 0
+    for c in closed_sorted:
+        c_open = c.opened_at if isinstance(getattr(c, "opened_at", None), datetime) else now_utc
+        c_open_utc = c_open if c_open.tzinfo else c_open.replace(tzinfo=timezone.utc)
+        c_close = getattr(c, "closed_at", None)
+        c_close_utc = (c_close if c_close.tzinfo else c_close.replace(tzinfo=timezone.utc)) if isinstance(c_close, datetime) else None
+        c_entry_p = float(c.entry_price) if getattr(c, "entry_price", None) is not None else None
+        exit_meta = paper_trading_service.resolve_trade_exit_details(c, now_utc=now_utc)
+        if exit_meta["is_sold_today"]:
+            sold_today_count += 1
+        if exit_meta["closed_by"] == "AUTO_SYSTEM":
+            auto_sold_count += 1
+        elif exit_meta["closed_by"] == "USER_MANUAL":
+            user_sold_count += 1
+        closed_trades_list.append({
+            "trade_id": str(c.id),
+            "symbol": c.symbol,
+            "direction": c.direction,
+            "order_type": c.order_type,
+            "product_type": c.product_type,
+            "quantity": c.quantity,
+            "entry_price": round(c_entry_p, 2) if c_entry_p is not None else None,
+            "exit_price": exit_meta["exit_price"],
+            "gross_pnl": exit_meta["gross_pnl"],
+            "realized_pnl": round(float(c.realized_pnl), 2) if c.realized_pnl is not None else None,
+            "pnl_pct": exit_meta["pnl_pct"],
+            "commission": round(float(c.commission or 0.0), 2),
+            "stt_tax": round(float(c.stt_tax or 0.0), 2),
+            "total_charges": exit_meta["total_charges"],
+            "target_price": float(c.target_price) if getattr(c, "target_price", None) is not None else None,
+            "target_1": float(c.target_1) if getattr(c, "target_1", None) is not None else None,
+            "target_2": float(c.target_2) if getattr(c, "target_2", None) is not None else None,
+            "target_3": float(c.target_3) if getattr(c, "target_3", None) is not None else None,
+            "stop_loss": float(c.stop_loss) if getattr(c, "stop_loss", None) is not None else None,
+            "initial_stop_loss": float(c.initial_stop_loss) if getattr(c, "initial_stop_loss", None) is not None else None,
+            "highest_price_recorded": float(c.highest_price_recorded) if getattr(c, "highest_price_recorded", None) is not None else None,
+            "ratchet_stage": getattr(c, "ratchet_stage", "INITIAL") or "INITIAL",
+            "opened_at": c_open_utc.isoformat(),
+            "closed_at": c_close_utc.isoformat() if c_close_utc else None,
+            "buy_date_formatted": exit_meta["buy_date_formatted"],
+            "sell_date_formatted": exit_meta["sell_date_formatted"],
+            "days_held": exit_meta["days_held"],
+            "holding_duration_label": exit_meta["holding_duration_label"],
+            "is_sold_today": exit_meta["is_sold_today"],
+            "closed_by": exit_meta["closed_by"],
+            "exit_reason": exit_meta["exit_reason"],
+            "exit_reason_label": exit_meta["exit_reason_label"],
+        })
+
     # Day's PnL percentage across all open holdings
     total_day_pnl_pct = round((total_day_pnl / total_prev_value) * 100.0, 2) if total_prev_value > 0 else 0.0
 
@@ -232,6 +296,10 @@ async def get_portfolio(
         "open_trades": len(open_trades),
         "pending_orders": len(pending),
         "closed_trades": len(closed),
+        "closed_trades_list": closed_trades_list,
+        "sold_today_count": sold_today_count,
+        "auto_sold_count": auto_sold_count,
+        "user_sold_count": user_sold_count,
         "win_rate": round(win_rate, 4),
         "allocation": allocation,
         "pending_orders_list": pending_orders_list,

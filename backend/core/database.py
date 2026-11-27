@@ -158,6 +158,8 @@ async def create_db_tables():
                         ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS lowest_price_recorded NUMERIC(12, 4);
                         ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS ratchet_stage VARCHAR(40) DEFAULT 'INITIAL';
                         ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trailing_enabled BOOLEAN DEFAULT TRUE;
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS closed_by VARCHAR(30);
+                        ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS exit_reason VARCHAR(60);
                     END IF;
                 END $$;
             """))

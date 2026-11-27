@@ -54,6 +54,8 @@ class PaperTrade(Base):
     
     status: Mapped[str] = mapped_column(String(10), default="PENDING", index=True)  # PENDING, OPEN, CLOSED, CANCELLED
     realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    closed_by: Mapped[str | None] = mapped_column(String(30), nullable=True)      # AUTO_SYSTEM, USER_MANUAL
+    exit_reason: Mapped[str | None] = mapped_column(String(60), nullable=True)    # SYSTEM_AUTO_TARGET, SYSTEM_AUTO_STOPLOSS, etc.
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

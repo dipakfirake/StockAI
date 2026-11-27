@@ -5826,3 +5826,28 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
 
 
 
+
+---
+
+### Session Entry 100
+- **Timestamp:** 2026-11-27 23:12:00 IST (17:42:00 UTC)
+- **User Prompt:**
+  `"Swing Screener Best Buy Proximity Radar ... is this filter not working in alerts component ... and following full alerts component is same as of i checked day before yesterday ... + Missing PERSISTENT.NS in Holdings audit + Add Sold Stocks History showing Auto-Sold by System vs User Sold."`
+- **Root Causes Diagnosed & Remediated:**
+  1. `backend/services/alerts_radar_service.py` + `backend/api/alerts.py` + `backend/services/screener.py`:
+     - Removed 1-hour frozen CMP response caching (`alerts_screener_radar:*`); decoupled cached screener setups (merging all 10 `SECTOR_UNIVERSES` + LKG snapshots when `sector="ALL"`, aligned `run_all_sectors_screener` TTL with `get_dynamic_screener_ttl()` + `screener_all_sectors_lkg`) from 1 single bulk `fetch_quotes_bulk(..., use_fallback=True, bypass_cache=force_refresh)` live overlay.
+     - Fixed `is_pre_buy` (`distance_pct > 0.5 and distance_pct <= proximity_pct`) so `0.00%` `AT_BEST_BUY` setups (`TITAN.NS`, `ASIANPAINT.NS`) no longer appear under `PRE_BUY`; fixed `ALL` stage lower proximity bound (`abs_dist <= prox`); reconciled `summary` KPI counts with filtered `candidates`; added `target_1/2/3`, `generated_at`, `quote_timestamp`, `scan_timestamp`, `sectors_loaded`, `quotes_live_count`.
+     - Fixed `sync_holdings_alerts` to deduplicate multi-lot holdings, guard against unrelated active alerts masking missing Target/SL protection, and deactivate orphan exit alerts for closed holdings.
+  2. `backend/models/paper_trade.py` + `backend/core/database.py` + `backend/services/paper_trading.py` + `backend/tasks/trading_tasks.py` + `backend/api/paper_trading.py` + `backend/api/portfolio.py`:
+     - Added `closed_by` & `exit_reason` columns (+ idempotent `ALTER TABLE` migration), automatic system vs manual attribution across `evaluate_open_trades`, `square_off_intraday`, and `close_paper_trade`, `_deactivate_exit_alerts_if_flat()`, and deterministic retroactive `resolve_trade_exit_details()` (deriving `exit_price`, `days_held`, charges, and exit trigger for legacy `PERSISTENT.NS` / `TCS.NS` / `COFORGE.NS` exits).
+     - Fixed `DELIVERY` unrealized exit STT parity across `/api/portfolio` & `/api/paper-trades` (`float(t.stt_tax or 0) > 0`), and exposed `closed_trades_list`, `sold_today_count`, `auto_sold_count`, `user_sold_count` on `GET /api/portfolio`.
+  3. Frontend (`frontend/src/services/api.ts`, `AlertsPage.tsx`, `PortfolioPage.tsx`, `PaperTradingPage.tsx`):
+     - Fixed `Refresh Radar` (`radarStage` + `forceRefresh=true`), 30s live polling on Radar tab, dynamic `radarProximityPct` alerts, GTT `target_1/2/3`, and Holdings Guard `Exit / Sell` button directly closing `h.trade_id` instead of opening a SHORT order.
+     - Built the **Sold Stocks History (Realized Exits)** ledger card on `PortfolioPage` with `All / Today / Auto-Sold / User Sold` filters and `Auto-Sold by System` vs `User Sold` attribution + enriched `PaperTradingPage` `HISTORY` tab.
+- **Verification Evidence:**
+  - `py_compile`: exit code 0.
+  - `pytest` across 10 suites (including new `backend/tests/test_alerts_radar_and_sold_portfolio.py`): **71 passed, 0 failed in 76.70s**.
+  - FastAPI `ASGITransport` HTTP smoke test (`/api/alerts/screener-proximity-radar` + `/api/portfolio`): **HTTP 200 OK**.
+  - `npm --prefix frontend run build` (`tsc && vite build`): **1,995 modules transformed, 0 TypeScript errors, built in 17.53s**.
+- **Next Safe Step:**
+  - Commit & push locally, then run on Oracle VM: `cd /home/opc/StockAI && git pull origin main && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend`.

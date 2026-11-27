@@ -139,17 +139,14 @@ async def list_paper_trades(
     quotes_map = await market_data_service.fetch_quotes_bulk(open_symbols) if open_symbols else {}
 
     now_utc = datetime.now(timezone.utc)
-    ist_tz = timezone(timedelta(hours=5, minutes=30))
-    now_ist = now_utc.astimezone(ist_tz)
     result = []
     for t in trades:
         opened_at = t.opened_at if isinstance(getattr(t, "opened_at", None), datetime) else now_utc
         opened_at_utc = opened_at if opened_at.tzinfo else opened_at.replace(tzinfo=timezone.utc)
-        delta_sec = max(0.0, (now_utc - opened_at_utc).total_seconds())
-        days_held = int(delta_sec // 86400)
-        buy_date_formatted = opened_at_utc.strftime("%d %b %Y, %I:%M %p")
-        opened_at_ist = opened_at_utc.astimezone(ist_tz)
-        is_bought_today = (opened_at_ist.date() == now_ist.date()) or (days_held == 0)
+        exit_meta = paper_trading_service.resolve_trade_exit_details(t, now_utc=now_utc)
+        days_held = exit_meta["days_held"]
+        buy_date_formatted = exit_meta["buy_date_formatted"]
+        is_bought_today = exit_meta["is_bought_today"]
 
         entry = {
             "trade_id": str(t.id),
@@ -159,6 +156,7 @@ async def list_paper_trades(
             "product_type": t.product_type,
             "quantity": t.quantity,
             "entry_price": float(t.entry_price) if t.entry_price is not None else None,
+            "exit_price": exit_meta["exit_price"],
             "limit_price": float(t.limit_price) if t.limit_price is not None else None,
             "stop_price": float(t.stop_price) if t.stop_price is not None else None,
             "target_price": float(t.target_price) if t.target_price is not None else None,
@@ -173,13 +171,22 @@ async def list_paper_trades(
             "trailing_enabled": bool(getattr(t, "trailing_enabled", True)),
             "commission": float(t.commission) if t.commission is not None else 0.0,
             "stt_tax": float(t.stt_tax) if t.stt_tax is not None else 0.0,
+            "total_charges": exit_meta["total_charges"],
             "status": t.status,
             "realized_pnl": float(t.realized_pnl) if t.realized_pnl is not None else None,
+            "gross_pnl": exit_meta["gross_pnl"],
+            "pnl_pct": exit_meta["pnl_pct"],
             "opened_at": opened_at_utc.isoformat(),
             "closed_at": t.closed_at.isoformat() if isinstance(getattr(t, "closed_at", None), datetime) else None,
             "days_held": days_held,
+            "holding_duration_label": exit_meta["holding_duration_label"],
             "buy_date_formatted": buy_date_formatted,
+            "sell_date_formatted": exit_meta["sell_date_formatted"],
             "is_bought_today": is_bought_today,
+            "is_sold_today": exit_meta["is_sold_today"],
+            "closed_by": exit_meta["closed_by"],
+            "exit_reason": exit_meta["exit_reason"],
+            "exit_reason_label": exit_meta["exit_reason_label"],
         }
         if t.status == "OPEN":
             quote = quotes_map.get(t.symbol)
@@ -191,7 +198,11 @@ async def list_paper_trades(
                 multiplier = 1 if t.direction == "BUY" else -1
                 entry_p = float(t.entry_price) if t.entry_price is not None else current_price
                 comm = float(t.commission) if t.commission is not None else 0.0
-                stt = float(t.stt_tax) if t.stt_tax is not None else (current_price * t.quantity * 0.001 if t.product_type == "DELIVERY" else 0.0)
+                stt = (
+                    float(t.stt_tax)
+                    if (t.stt_tax is not None and float(t.stt_tax) > 0)
+                    else (current_price * t.quantity * 0.001 if t.product_type == "DELIVERY" else 0.0)
+                )
                 gross_pnl = multiplier * (current_price - entry_p) * t.quantity
                 unrealized = gross_pnl - comm - stt
                 invested = entry_p * t.quantity
@@ -220,6 +231,8 @@ async def list_paper_trades(
                 entry["current_price"] = round(current_price, 2)
                 entry["unrealized_pnl"] = round(unrealized, 2)
                 entry["gross_pnl"] = round(gross_pnl, 2)
+                entry["stt_tax"] = round(stt, 2)
+                entry["total_charges"] = round(comm + stt, 2)
                 entry["pnl_pct"] = pnl_pct
                 entry["price_change_pct"] = price_change_pct
                 entry["invested"] = round(invested, 2)
@@ -250,13 +263,24 @@ async def close_paper_trade(
 
     try:
         trade = await paper_trading_service.close_trade(db, trade_id, str(current_user.id))
+        if trade.status == "CLOSED":
+            trade.closed_by = "USER_MANUAL"
+            trade.exit_reason = "USER_MANUAL_EXIT"
+            await paper_trading_service._deactivate_exit_alerts_if_flat(db, str(current_user.id), trade.symbol)
+        elif trade.status == "CANCELLED":
+            trade.closed_by = "USER_MANUAL"
+            trade.exit_reason = "USER_CANCELLED"
+        exit_meta = paper_trading_service.resolve_trade_exit_details(trade)
         return {
             "trade_id": str(trade.id),
-            "exit_price": float(trade.exit_price) if trade.exit_price is not None else None,
+            "exit_price": float(trade.exit_price) if trade.exit_price is not None else exit_meta["exit_price"],
             "realized_pnl": float(trade.realized_pnl) if trade.realized_pnl is not None else None,
             "commission": float(trade.commission) if trade.commission is not None else 0.0,
             "stt_tax": float(trade.stt_tax) if trade.stt_tax is not None else 0.0,
             "status": trade.status,
+            "closed_by": exit_meta["closed_by"],
+            "exit_reason": exit_meta["exit_reason"],
+            "exit_reason_label": exit_meta["exit_reason_label"],
             "closed_at": trade.closed_at.isoformat() if trade.closed_at else None,
         }
     except ValueError as e:

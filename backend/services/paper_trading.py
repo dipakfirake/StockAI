@@ -697,20 +697,274 @@ class PaperTradingService:
                         pass
             else:
                 # Standard fixed single Target / Stop-Loss check
+                fixed_exit_reason = None
                 if trade.direction == "BUY":
                     if trade.target_price and current_price >= float(trade.target_price):
                         triggered_exit = True
+                        fixed_exit_reason = "SYSTEM_AUTO_TARGET"
                     elif trade.stop_loss and current_price <= float(trade.stop_loss):
                         triggered_exit = True
+                        fixed_exit_reason = "SYSTEM_AUTO_STOPLOSS"
                 elif trade.direction == "SELL":
                     if trade.target_price and current_price <= float(trade.target_price):
                         triggered_exit = True
+                        fixed_exit_reason = "SYSTEM_AUTO_TARGET"
                     elif trade.stop_loss and current_price >= float(trade.stop_loss):
                         triggered_exit = True
+                        fixed_exit_reason = "SYSTEM_AUTO_STOPLOSS"
 
             if triggered_exit:
+                if trailing_on:
+                    stage_reason_map = {
+                        "TARGET_3_ACHIEVED": "SYSTEM_AUTO_TARGET_3",
+                        "TARGET_2_ACHIEVED": "SYSTEM_AUTO_TARGET_2",
+                        "TARGET_1_ACHIEVED": "SYSTEM_AUTO_TARGET_1",
+                        "STOPPED_IN_PROFIT": "SYSTEM_AUTO_STOP_IN_PROFIT",
+                        "STOPLOSS_HIT": "SYSTEM_AUTO_STOPLOSS",
+                    }
+                    reason_code = stage_reason_map.get(new_stage, "SYSTEM_AUTO_TARGET")
+                else:
+                    reason_code = fixed_exit_reason or "SYSTEM_AUTO_TARGET"
+                trade.closed_by = "AUTO_SYSTEM"
+                trade.exit_reason = reason_code
                 await PaperTradingService._execute_exit(trade, current_price)
-                logger.info(f"Auto-exited trade ({trade.ratchet_stage}): {trade.symbol} PnL={trade.realized_pnl}")
+                await PaperTradingService._deactivate_exit_alerts_if_flat(
+                    db, str(trade.user_id), trade.symbol, active_open_trades=open_trades
+                )
+                logger.info(f"Auto-exited trade ({trade.exit_reason} / {trade.ratchet_stage}): {trade.symbol} PnL={trade.realized_pnl}")
+
+    EXIT_REASON_LABELS = {
+        "SYSTEM_AUTO_TARGET": "System Auto-Sell (Target Hit)",
+        "SYSTEM_AUTO_TARGET_1": "System Auto-Sell (Target 1 Achieved)",
+        "SYSTEM_AUTO_TARGET_2": "System Auto-Sell (Target 2 Achieved)",
+        "SYSTEM_AUTO_TARGET_3": "System Auto-Sell (Target 3 Achieved)",
+        "SYSTEM_AUTO_STOP_IN_PROFIT": "System Auto-Sell (Trailing Profit Lock Hit)",
+        "SYSTEM_AUTO_STOPLOSS": "System Auto-Sell (Stop-Loss Triggered)",
+        "SYSTEM_AUTO_EOD_INTRADAY": "System Auto-Sell (15:20 IST Intraday Square-Off)",
+        "USER_MANUAL_EXIT": "User Manual Exit",
+        "USER_CANCELLED": "User Cancelled Order",
+    }
+
+    @staticmethod
+    def _canonical_symbol(sym: str | None) -> str:
+        if not sym:
+            return ""
+        return str(sym).upper().strip().replace(".NS", "").replace(".BO", "")
+
+    @staticmethod
+    async def _deactivate_exit_alerts_if_flat(
+        db: AsyncSession,
+        user_id_str: str,
+        symbol: str,
+        active_open_trades: list[PaperTrade] | None = None,
+    ) -> int:
+        """
+        When a user's final OPEN position for a symbol closes, deactivate lingering
+        TARGET_*, STOP_LOSS_*, and BUY_PROXIMITY alerts for that symbol so exited
+        positions do not continue firing false sell/risk alerts.
+        """
+        try:
+            target_canon = PaperTradingService._canonical_symbol(symbol)
+            if not target_canon or db is None:
+                return 0
+            uid = uuid.UUID(str(user_id_str))
+
+            still_open = False
+            if active_open_trades is not None:
+                for ot in active_open_trades:
+                    if (
+                        getattr(ot, "status", None) == "OPEN"
+                        and str(getattr(ot, "user_id", "")) == str(uid)
+                        and PaperTradingService._canonical_symbol(getattr(ot, "symbol", "")) == target_canon
+                    ):
+                        still_open = True
+                        break
+            else:
+                open_res = await db.execute(
+                    select(PaperTrade).where(
+                        PaperTrade.user_id == uid,
+                        PaperTrade.status == "OPEN",
+                    )
+                )
+                for ot in open_res.scalars().all():
+                    if PaperTradingService._canonical_symbol(getattr(ot, "symbol", "")) == target_canon:
+                        still_open = True
+                        break
+
+            if still_open:
+                return 0
+
+            from backend.models.alert import Alert
+            alert_res = await db.execute(
+                select(Alert).where(
+                    Alert.user_id == uid,
+                    Alert.is_active == True,
+                    Alert.condition_type.in_([
+                        "TARGET_PROXIMITY",
+                        "TARGET_HIT",
+                        "STOP_LOSS_PROXIMITY",
+                        "STOP_LOSS_HIT",
+                        "BUY_PROXIMITY",
+                    ]),
+                )
+            )
+            deactivated = 0
+            for alert in alert_res.scalars().all():
+                if not isinstance(alert, Alert):
+                    continue
+                if PaperTradingService._canonical_symbol(getattr(alert, "symbol", "")) == target_canon:
+                    alert.is_active = False
+                    deactivated += 1
+            return deactivated
+        except Exception as e:
+            logger.debug(f"Skip orphan alert cleanup for {symbol}: {e}")
+            return 0
+
+    @staticmethod
+    def resolve_trade_exit_details(trade: PaperTrade, now_utc: datetime | None = None) -> dict:
+        """
+        Deterministically compute exit price, holding duration, charges, net %, and
+        AUTO_SYSTEM vs USER_MANUAL attribution (including retroactive classification
+        for legacy closed trades whose closed_by/exit_reason columns are NULL).
+        """
+        from datetime import timedelta
+        now_ref = now_utc or datetime.now(timezone.utc)
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        now_ist = now_ref.astimezone(ist_tz)
+
+        opened_at_raw = getattr(trade, "opened_at", None)
+        opened_at_utc = (
+            opened_at_raw if isinstance(opened_at_raw, datetime) else now_ref
+        )
+        if opened_at_utc.tzinfo is None:
+            opened_at_utc = opened_at_utc.replace(tzinfo=timezone.utc)
+
+        closed_at_raw = getattr(trade, "closed_at", None)
+        closed_at_utc = None
+        if isinstance(closed_at_raw, datetime):
+            closed_at_utc = closed_at_raw if closed_at_raw.tzinfo else closed_at_raw.replace(tzinfo=timezone.utc)
+
+        status_str = str(getattr(trade, "status", "") or "").upper()
+        end_ref = closed_at_utc if (status_str in ("CLOSED", "CANCELLED") and closed_at_utc) else now_ref
+        delta_sec = max(0.0, (end_ref - opened_at_utc).total_seconds())
+        days_held = int(delta_sec // 86400)
+        rem_hours = int((delta_sec % 86400) // 3600)
+        rem_mins = int((delta_sec % 3600) // 60)
+        if days_held > 0:
+            holding_duration_label = f"{days_held}d {rem_hours}h"
+        elif rem_hours > 0:
+            holding_duration_label = f"{rem_hours}h {rem_mins}m"
+        else:
+            holding_duration_label = f"{max(1, rem_mins)}m"
+
+        opened_ist = opened_at_utc.astimezone(ist_tz)
+        buy_date_formatted = opened_ist.strftime("%d %b %Y, %I:%M %p IST")
+        is_bought_today = (opened_ist.date() == now_ist.date())
+
+        sell_date_formatted = None
+        is_sold_today = False
+        if closed_at_utc:
+            closed_ist = closed_at_utc.astimezone(ist_tz)
+            sell_date_formatted = closed_ist.strftime("%d %b %Y, %I:%M %p IST")
+            is_sold_today = (closed_ist.date() == now_ist.date())
+
+        entry_p = float(trade.entry_price) if getattr(trade, "entry_price", None) is not None else None
+        qty = int(getattr(trade, "quantity", 0) or 0)
+        comm = float(trade.commission) if getattr(trade, "commission", None) is not None else 0.0
+        stt = float(trade.stt_tax) if getattr(trade, "stt_tax", None) is not None else 0.0
+        total_charges = round(comm + stt, 2)
+        realized = float(trade.realized_pnl) if getattr(trade, "realized_pnl", None) is not None else None
+        multiplier = 1 if str(getattr(trade, "direction", "BUY")).upper() == "BUY" else -1
+
+        exit_p_raw = getattr(trade, "exit_price", None)
+        exit_p = round(float(exit_p_raw), 2) if (exit_p_raw is not None and float(exit_p_raw) > 0) else None
+        if exit_p is None and status_str == "CLOSED" and realized is not None and entry_p is not None and qty > 0:
+            gross_derived = realized + comm + stt
+            implied = entry_p + multiplier * (gross_derived / qty)
+            if implied > 0:
+                exit_p = round(implied, 2)
+
+        gross_pnl = None
+        pnl_pct = None
+        if status_str == "CLOSED" and realized is not None:
+            gross_pnl = round(realized + comm + stt, 2)
+            invested = (entry_p * qty) if (entry_p and qty > 0) else 0.0
+            if invested > 0:
+                pnl_pct = round((realized / invested) * 100.0, 2)
+
+        stored_closed_by = getattr(trade, "closed_by", None)
+        stored_reason = getattr(trade, "exit_reason", None)
+        ratchet_stage = str(getattr(trade, "ratchet_stage", "INITIAL") or "INITIAL")
+
+        if isinstance(stored_closed_by, str) and stored_closed_by and isinstance(stored_reason, str) and stored_reason:
+            closed_by = stored_closed_by
+            exit_reason = stored_reason
+        elif status_str == "CANCELLED":
+            closed_by = "USER_MANUAL"
+            exit_reason = "USER_CANCELLED"
+        elif status_str == "CLOSED":
+            stage_map = {
+                "TARGET_3_ACHIEVED": ("AUTO_SYSTEM", "SYSTEM_AUTO_TARGET_3"),
+                "TARGET_2_ACHIEVED": ("AUTO_SYSTEM", "SYSTEM_AUTO_TARGET_2"),
+                "TARGET_1_ACHIEVED": ("AUTO_SYSTEM", "SYSTEM_AUTO_TARGET_1"),
+                "STOPPED_IN_PROFIT": ("AUTO_SYSTEM", "SYSTEM_AUTO_STOP_IN_PROFIT"),
+                "STOPLOSS_HIT": ("AUTO_SYSTEM", "SYSTEM_AUTO_STOPLOSS"),
+            }
+            if ratchet_stage in stage_map:
+                closed_by, exit_reason = stage_map[ratchet_stage]
+            else:
+                tgt_candidates = [
+                    float(v) for v in (
+                        getattr(trade, "target_3", None),
+                        getattr(trade, "target_2", None),
+                        getattr(trade, "target_1", None),
+                        getattr(trade, "target_price", None),
+                    )
+                    if v is not None and float(v) > 0
+                ]
+                primary_tgt = max(tgt_candidates) if (multiplier == 1 and tgt_candidates) else (min(tgt_candidates) if tgt_candidates else None)
+                sl_val = float(trade.stop_loss) if getattr(trade, "stop_loss", None) is not None and float(trade.stop_loss) > 0 else None
+
+                closed_by = "USER_MANUAL"
+                exit_reason = "USER_MANUAL_EXIT"
+                if exit_p is not None:
+                    if multiplier == 1:
+                        if primary_tgt is not None and exit_p >= primary_tgt * 0.999:
+                            closed_by, exit_reason = "AUTO_SYSTEM", "SYSTEM_AUTO_TARGET"
+                        elif sl_val is not None and exit_p <= sl_val * 1.001:
+                            closed_by, exit_reason = "AUTO_SYSTEM", "SYSTEM_AUTO_STOPLOSS"
+                    else:
+                        if primary_tgt is not None and exit_p <= primary_tgt * 1.001:
+                            closed_by, exit_reason = "AUTO_SYSTEM", "SYSTEM_AUTO_TARGET"
+                        elif sl_val is not None and exit_p >= sl_val * 0.999:
+                            closed_by, exit_reason = "AUTO_SYSTEM", "SYSTEM_AUTO_STOPLOSS"
+
+                if closed_by == "USER_MANUAL" and str(getattr(trade, "product_type", "")).upper() == "INTRADAY" and closed_at_utc:
+                    closed_ist = closed_at_utc.astimezone(ist_tz)
+                    hm = closed_ist.hour * 60 + closed_ist.minute
+                    if (15 * 60 + 18) <= hm <= (15 * 60 + 30):
+                        closed_by, exit_reason = "AUTO_SYSTEM", "SYSTEM_AUTO_EOD_INTRADAY"
+        else:
+            closed_by = None
+            exit_reason = None
+
+        exit_reason_label = PaperTradingService.EXIT_REASON_LABELS.get(exit_reason) if exit_reason else None
+
+        return {
+            "exit_price": exit_p,
+            "gross_pnl": gross_pnl,
+            "total_charges": total_charges,
+            "pnl_pct": pnl_pct,
+            "days_held": days_held,
+            "holding_duration_label": holding_duration_label,
+            "buy_date_formatted": buy_date_formatted,
+            "sell_date_formatted": sell_date_formatted,
+            "is_bought_today": is_bought_today,
+            "is_sold_today": is_sold_today,
+            "closed_by": closed_by,
+            "exit_reason": exit_reason,
+            "exit_reason_label": exit_reason_label,
+        }
 
     @staticmethod
     async def get_all_trades(db: AsyncSession, user_id: str) -> list[PaperTrade]:

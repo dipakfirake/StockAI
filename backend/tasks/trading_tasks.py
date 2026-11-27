@@ -59,7 +59,11 @@ async def _square_off_intraday_async():
         count = 0
         for trade in open_intraday_trades:
             try:
-                await paper_trading_service.close_trade(db, str(trade.id), str(trade.user_id))
+                closed_trade = await paper_trading_service.close_trade(db, str(trade.id), str(trade.user_id))
+                if getattr(closed_trade, "status", None) == "CLOSED":
+                    closed_trade.closed_by = "AUTO_SYSTEM"
+                    closed_trade.exit_reason = "SYSTEM_AUTO_EOD_INTRADAY"
+                    await paper_trading_service._deactivate_exit_alerts_if_flat(db, str(trade.user_id), trade.symbol)
                 count += 1
             except Exception as e:
                 logger.error(f"Failed to square off trade {trade.id}: {str(e)}")

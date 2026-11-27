@@ -541,19 +541,92 @@ class ScreenerService:
             buy_stocks.sort(key=lambda x: float(x.get("total_score", 0) or 0), reverse=True)
 
             out = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "total_scanned": len(all_symbols),
                 "sectors_scanned": list(SECTOR_UNIVERSES.keys()),
                 "buy_stocks": buy_stocks,
                 "all_results": all_results,
                 "setups_found": len(buy_stocks),
             }
-            await cache_set(cache_key, out, ttl=300)
+            await cache_set(cache_key, out, ttl=get_dynamic_screener_ttl())
+            if all_results:
+                try:
+                    await cache_set("screener_all_sectors_lkg", out, ttl=43200)
+                except Exception:
+                    pass
             return out
 
         return await cache_manager.single_flight.execute(
             f"sf:screener:all_sectors:{min_score}:{bool(force_refresh)}",
             _run_all,
         )
+
+    @staticmethod
+    async def get_cached_multi_sector_snapshot() -> dict:
+        """
+        Assemble the richest multi-sector screener snapshot across all 10 SECTOR_UNIVERSES
+        from `screener_all_sectors_aggregated`, per-sector `screener_results_<SEC>` caches,
+        and LKG snapshots without re-scanning unaffected sectors.
+        """
+        combined_by_sym: dict[str, dict] = {}
+        sectors_loaded: list[str] = []
+        scan_timestamps: list[str] = []
+
+        def _ingest_payload(sec_label: str, payload: object, prefer: bool = False):
+            if not isinstance(payload, dict):
+                return
+            ts = payload.get("timestamp")
+            if isinstance(ts, str) and ts:
+                scan_timestamps.append(ts)
+            rows = payload.get("buy_stocks") or []
+            if not rows and payload.get("all_results"):
+                rows = [r for r in payload.get("all_results", []) if isinstance(r, dict) and r.get("action") == "BUY"]
+            if rows and sec_label not in sectors_loaded:
+                sectors_loaded.append(sec_label)
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                sym = str(r.get("symbol") or "").upper().strip()
+                if not sym:
+                    continue
+                if prefer or sym not in combined_by_sym:
+                    combined_by_sym[sym] = r
+
+        try:
+            agg = await cache_get("screener_all_sectors_aggregated")
+            if isinstance(agg, dict) and (agg.get("buy_stocks") or agg.get("all_results")):
+                _ingest_payload("AGGREGATED_10_SECTORS", agg, prefer=True)
+                for s in (agg.get("sectors_scanned") or []):
+                    if s not in sectors_loaded:
+                        sectors_loaded.append(s)
+        except Exception:
+            pass
+
+        for sec_key in SECTOR_UNIVERSES.keys():
+            try:
+                sec_res = await cache_get(f"screener_results_{sec_key}")
+                if isinstance(sec_res, dict) and (sec_res.get("buy_stocks") or sec_res.get("all_results")):
+                    _ingest_payload(sec_key, sec_res, prefer=True)
+                    continue
+                sec_lkg = await cache_get(f"screener_lkg_{sec_key}")
+                if isinstance(sec_lkg, dict) and (sec_lkg.get("buy_stocks") or sec_lkg.get("all_results")):
+                    _ingest_payload(sec_key, sec_lkg, prefer=False)
+            except Exception:
+                continue
+
+        if not combined_by_sym:
+            try:
+                agg_lkg = await cache_get("screener_all_sectors_lkg")
+                if isinstance(agg_lkg, dict):
+                    _ingest_payload("LKG_10_SECTORS", agg_lkg, prefer=False)
+            except Exception:
+                pass
+
+        return {
+            "buy_stocks": list(combined_by_sym.values()),
+            "sectors_loaded": sectors_loaded,
+            "scan_timestamp": max(scan_timestamps) if scan_timestamps else None,
+        }
 
     @staticmethod
     async def _analyze_symbol(
