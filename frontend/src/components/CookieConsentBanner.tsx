@@ -44,6 +44,7 @@ function persistConsent(pref: CookiePreferences) {
 export const CookieConsentBanner: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false)
   const [showCustomize, setShowCustomize] = useState(false)
+  const [hasStored, setHasStored] = useState(false)
   const [preferences, setPreferences] = useState<CookiePreferences>({
     essential: true,
     security: true,
@@ -57,7 +58,9 @@ export const CookieConsentBanner: React.FC = () => {
     if (!existing) {
       // First time visitor, display banner
       setIsOpen(true)
+      setHasStored(false)
     } else {
+      setHasStored(true)
       setPreferences(existing)
       // If user previously consented to location, we can refresh position if requested
       if (existing.location && navigator.geolocation) {
@@ -105,6 +108,7 @@ export const CookieConsentBanner: React.FC = () => {
     }
     setPreferences(newPref)
     persistConsent(newPref)
+    setHasStored(true)
     setIsOpen(false)
     setShowCustomize(false)
     requestGeoLocation(true)
@@ -120,6 +124,7 @@ export const CookieConsentBanner: React.FC = () => {
     }
     setPreferences(newPref)
     persistConsent(newPref)
+    setHasStored(true)
     setIsOpen(false)
     setShowCustomize(false)
     sessionStorage.removeItem('stockai_geo_telemetry')
@@ -132,6 +137,7 @@ export const CookieConsentBanner: React.FC = () => {
       timestamp: new Date().toISOString()
     }
     persistConsent(updatedPref)
+    setHasStored(true)
     setIsOpen(false)
     setShowCustomize(false)
     if (updatedPref.location) {
@@ -143,19 +149,18 @@ export const CookieConsentBanner: React.FC = () => {
 
   return (
     <>
-      {/* Floating Re-Open Button for DPDPA Ongoing Consent Modification */}
-      {!isOpen && (
+      {/* Show floating trigger only if consent has never been stored; afterward managed inside Settings */}
+      {!isOpen && !hasStored && (
         <button
           className="cookie-revisit-badge"
           onClick={() => {
             setShowCustomize(true)
             setIsOpen(true)
           }}
-          title="Review Indian DPDPA 2023 Privacy & Cookie Settings"
+          title="Review Privacy & Cookie Settings"
           aria-label="Privacy & Cookie Preferences"
         >
-          <span>🛡️</span>
-          <span>Privacy & Cookies</span>
+          <span>Privacy</span>
         </button>
       )}
 

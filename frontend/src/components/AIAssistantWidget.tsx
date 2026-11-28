@@ -24,11 +24,11 @@ const INITIAL_MSG = {
 }
 
 const QUICK_PROMPTS = [
-  '📊 Nifty Regime',
-  '💎 Should I buy TCS?',
-  '⚡ Polycab Setup',
-  '🌱 Analyze Suzlon',
-  '💡 What is Anchor VWAP?',
+  'Nifty Regime',
+  'Should I buy TCS?',
+  'Polycab Setup',
+  'Analyze Suzlon',
+  'What is Anchor VWAP?',
 ]
 
 function renderFormattedMessage(content: string) {
@@ -251,11 +251,12 @@ export default function AIAssistantWidget() {
         onClick={() => setIsOpen(true)}
         id="ai-assistant-toggle"
         className="ai-assistant-toggle-btn"
-        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.08)'; }}
+        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.06)'; }}
         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = ''; }}
-        title="AI Assistant (ask me anything!)"
+        title="Market Assistant"
+        aria-label="Open Market Assistant"
       >
-        <Sparkles size={20} />
+        <MessageSquare size={18} />
       </button>
     )
   }
@@ -266,19 +267,16 @@ export default function AIAssistantWidget() {
     >
       {/* Header */}
       <div style={{
-        background: 'linear-gradient(135deg, #1e3a5f, #2d1b69)',
-        padding: '14px 16px',
-        borderBottom: '1px solid rgba(59,130,246,0.3)',
+        background: 'var(--color-bg-secondary)',
+        padding: '13px 16px',
+        borderBottom: '1px solid var(--color-border)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: 'white', fontSize: 14 }}>
-          <Sparkles size={16} color="#8b5cf6" />
-          StockAI Assistant
-          <span style={{ fontSize: 10, background: 'rgba(16, 185, 129, 0.25)', color: '#34d399', padding: '2px 6px', borderRadius: 10, marginLeft: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-            <Zap size={10} /> Groq + RAG
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: 'var(--color-text-primary)', fontSize: 14 }}>
+          <MessageSquare size={16} color="var(--color-accent-blue)" />
+          <span>Market Assistant</span>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           <button

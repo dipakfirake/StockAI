@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Target, Activity, ShieldAlert, Zap, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Target, Activity, ShieldAlert, Zap, TrendingUp, TrendingDown, RefreshCw, ExternalLink } from 'lucide-react'
 import api from '../services/api'
-import { formatINR } from '../utils/formatters'
+import { formatINR, formatISTTimestamp } from '../utils/formatters'
 
 // TradePlan removed, replaced by multi-timeframe POI approach
 
@@ -35,6 +36,7 @@ const gradeColors: Record<string, string> = {
 }
 
 export default function SMCWatchlist() {
+  const navigate = useNavigate()
   const [zones, setZones] = useState<Record<string, SMCZoneData>>({})
   const [loading, setLoading] = useState(false)
 
@@ -58,129 +60,139 @@ export default function SMCWatchlist() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 className="page-title"><Target size={24} style={{ marginRight: 8, display: 'inline' }} /> Institutional Liquidity Watchlist</h1>
-          <p className="page-subtitle">Multi-Timeframe SMC: Daily Points of Interest (POI) zones. The Auto-Trader monitors these for 15-minute reversals.</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Target size={22} /> Institutional Liquidity Watchlist
+          </h1>
+          <p className="page-subtitle">Daily Smart Money Fair Value Gaps monitored for 15-minute reversal setups</p>
         </div>
         <button onClick={fetchInstitutionalZones} className="btn btn-primary" disabled={loading} style={{ flexShrink: 0 }}>
-          <RefreshCw size={16} className={loading ? 'spin' : ''} /> {loading ? 'Scanning...' : 'Refresh Zones'}
+          <RefreshCw size={15} className={loading ? 'spin' : ''} /> {loading ? 'Scanning…' : 'Refresh'}
         </button>
       </div>
 
       {loading ? (
-        <div className="text-center" style={{ padding: 40 }}>Scanning daily candles for institutional volume traps...</div>
+        <div className="text-center" style={{ padding: 40, color: 'var(--color-text-muted)' }}>Scanning daily candles for institutional liquidity zones…</div>
       ) : Object.keys(zones).length === 0 ? (
         <div className="card text-center" style={{ padding: 40 }}>
-          <ShieldAlert size={32} style={{ color: 'var(--color-text-muted)', marginBottom: 16 }} />
+          <ShieldAlert size={28} style={{ color: 'var(--color-text-muted)', marginBottom: 12 }} />
           <h3>No Institutional Zones Found</h3>
-          <p className="text-muted">The AI did not find any high-probability FVG setups for today.</p>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>No high-probability FVG setups detected for today.</p>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: '16px' }}>
           {Object.entries(zones).map(([symbol, data]) => (
-            <div key={symbol} className="card" style={{ borderTop: '4px solid #8b5cf6', padding: 20 }}>
+            <div key={symbol} className="card" style={{ borderTop: '3px solid var(--color-accent-blue)', padding: 18 }}>
               {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, gap: 8 }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: '1.3rem' }}>{symbol.replace('.NS', '')}</h2>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>LTP: {formatINR(data.last_price)}</span>
+                  <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{symbol.replace('.NS', '')}</h2>
+                  <span className="mono" style={{ fontSize: '0.84rem', color: 'var(--color-text-muted)' }}>LTP {formatINR(data.last_price)}</span>
                 </div>
-                <span className="badge" style={{ backgroundColor: 'rgba(139, 92, 246, 0.2)', color: '#a78bfa', padding: '4px 10px' }}>
-                  <Activity size={12} style={{ marginRight: 4 }} /> SMC Target
-                </span>
+                <button
+                  type="button"
+                  onClick={() => navigate('/chart', { state: { symbol } })}
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12, padding: '5px 10px' }}
+                >
+                  <ExternalLink size={13} /> Chart
+                </button>
               </div>
 
               {/* FVG Zones */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {data.fvgs.map((fvg, idx) => (
                   <div key={idx} style={{
-                    padding: 14,
-                    backgroundColor: 'rgba(255,255,255,0.03)',
-                    borderRadius: 10,
-                    borderLeft: `4px solid ${fvg.type === 'bullish_fvg' ? 'var(--color-bullish)' : 'var(--color-bearish)'}`
+                    padding: 12,
+                    backgroundColor: 'var(--color-bg-secondary)',
+                    borderRadius: 8,
+                    borderLeft: `3px solid ${fvg.type === 'bullish_fvg' ? 'var(--color-bullish)' : 'var(--color-bearish)'}`
                   }}>
                     {/* FVG Type + Grade */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {fvg.type === 'bullish_fvg'
-                          ? <TrendingUp size={16} color="var(--color-bullish)" />
-                          : <TrendingDown size={16} color="var(--color-bearish)" />}
-                        <strong style={{ fontSize: '0.95rem' }}>{fvg.type === 'bullish_fvg' ? 'BULLISH FVG' : 'BEARISH FVG'}</strong>
+                          ? <TrendingUp size={15} color="var(--color-bullish)" />
+                          : <TrendingDown size={15} color="var(--color-bearish)" />}
+                        <strong style={{ fontSize: '0.88rem' }}>{fvg.type === 'bullish_fvg' ? 'Bullish FVG' : 'Bearish FVG'}</strong>
                       </div>
                       <span style={{
-                        padding: '2px 10px',
-                        borderRadius: 12,
-                        fontSize: '0.8rem',
+                        padding: '2px 8px',
+                        borderRadius: 10,
+                        fontSize: '0.75rem',
                         fontWeight: 700,
                         backgroundColor: `${gradeColors[fvg.confluence?.grade] || '#666'}22`,
                         color: gradeColors[fvg.confluence?.grade] || '#666',
                       }}>
-                        Grade {fvg.confluence?.grade} ({fvg.confluence?.score}/100)
+                        Grade {fvg.confluence?.grade} · {fvg.confluence?.score}/100
                       </span>
                     </div>
 
                     {/* Zone + Gap % */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: 6 }}>
-                      <span>Zone: <strong>{formatINR(fvg.bottom)} – {formatINR(fvg.top)}</strong></span>
-                      <span style={{ color: 'var(--color-text-muted)' }}>Gap: {fvg.gap_pct}%</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
+                      <span className="mono">Zone: <strong>{formatINR(fvg.bottom)} – {formatINR(fvg.top)}</strong></span>
+                      <span className="mono" style={{ color: 'var(--color-text-muted)' }}>Gap {Number(fvg.gap_pct || 0).toFixed(2)}%</span>
                     </div>
 
                     {/* Zone Proximity Indicator */}
                     <div style={{
-                      marginTop: 8,
-                      padding: '8px 10px',
+                      marginTop: 6,
+                      padding: '7px 10px',
                       borderRadius: 6,
-                      backgroundColor: data.last_price >= fvg.bottom && data.last_price <= fvg.top 
-                        ? 'rgba(16,185,129,0.1)' 
-                        : 'rgba(255,255,255,0.05)',
-                      border: data.last_price >= fvg.bottom && data.last_price <= fvg.top 
-                        ? '1px solid rgba(16,185,129,0.3)'
-                        : '1px solid transparent',
+                      backgroundColor: data.last_price >= fvg.bottom && data.last_price <= fvg.top
+                        ? 'var(--color-bullish-dim)'
+                        : 'var(--color-bg-card)',
+                      border: data.last_price >= fvg.bottom && data.last_price <= fvg.top
+                        ? '1px solid rgba(16,185,129,0.35)'
+                        : '1px solid var(--color-border)',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 8,
-                      fontSize: '0.85rem'
+                      gap: 7,
+                      fontSize: '0.8rem'
                     }}>
                       {data.last_price >= fvg.bottom && data.last_price <= fvg.top ? (
                         <>
-                          <Zap size={14} color="#10b981" className="pulse" />
-                          <span style={{ color: '#10b981', fontWeight: 600 }}>PRICE IN ZONE: Monitoring 15m for Reversal</span>
+                          <Zap size={14} color="var(--color-bullish)" />
+                          <span style={{ color: 'var(--color-bullish)', fontWeight: 600 }}>Price in zone · Watching 15m reversal</span>
                         </>
                       ) : (
                         <>
                           <Target size={14} color="var(--color-text-muted)" />
                           <span style={{ color: 'var(--color-text-muted)' }}>
-                            {fvg.type === 'bullish_fvg' 
-                              ? `Needs to drop ₹${(data.last_price - fvg.top).toFixed(2)} to enter zone`
-                              : `Needs to rise ₹${(fvg.bottom - data.last_price).toFixed(2)} to enter zone`}
+                            {fvg.type === 'bullish_fvg'
+                              ? `Needs ₹${Math.abs(data.last_price - fvg.top).toFixed(2)} pullback`
+                              : `Needs ₹${Math.abs(fvg.bottom - data.last_price).toFixed(2)} upside`}
                           </span>
                         </>
                       )}
                     </div>
 
-                    {/* Confluence Factors */}
+                    {/* Confluence Factors (deduplicate redundant gap strings) */}
                     {fvg.confluence?.factors?.length > 0 && (
                       <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {fvg.confluence.factors.map((f, fi) => (
-                          <span key={fi} style={{
-                            padding: '2px 8px',
-                            borderRadius: 6,
-                            backgroundColor: 'rgba(255,255,255,0.05)',
-                            fontSize: '0.75rem',
-                            color: 'var(--color-text-muted)',
-                          }}>
-                            {f}
-                          </span>
-                        ))}
+                        {fvg.confluence.factors
+                          .filter((f) => !/\bgap\b/i.test(f))
+                          .map((f, fi) => (
+                            <span key={fi} style={{
+                              padding: '2px 8px',
+                              borderRadius: 6,
+                              backgroundColor: 'var(--color-bg-card)',
+                              border: '1px solid var(--color-border)',
+                              fontSize: '0.72rem',
+                              color: 'var(--color-text-muted)',
+                            }}>
+                              {f}
+                            </span>
+                          ))}
                       </div>
                     )}
                   </div>
                 ))}
               </div>
 
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 12, textAlign: 'right' }}>
-                Generated: {new Date(data.generated_at).toLocaleTimeString()}
+              <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: 10, textAlign: 'right' }}>
+                Updated {formatISTTimestamp(data.generated_at)}
               </div>
             </div>
           ))}

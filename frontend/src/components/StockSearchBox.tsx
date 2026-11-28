@@ -73,6 +73,7 @@ export default function StockSearchBox({
   const [isOpen, setIsOpen] = useState(false)
   
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const userTypedRef = useRef(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -86,6 +87,9 @@ export default function StockSearchBox({
   }, [])
 
   useEffect(() => {
+    if (!userTypedRef.current) {
+      return
+    }
     const delayDebounceFn = setTimeout(async () => {
       if (query.trim().length >= 2) {
         setIsLoading(true)
@@ -96,11 +100,11 @@ export default function StockSearchBox({
             symbol: normalizeOptionSymbol(item.symbol),
           }))
           setResults(apiResults.length > 0 ? apiResults : getFallbackResults(query))
-          setIsOpen(true)
+          if (userTypedRef.current) setIsOpen(true)
         } catch (error) {
           console.error("Search failed:", error)
           setResults(getFallbackResults(query))
-          setIsOpen(true)
+          if (userTypedRef.current) setIsOpen(true)
         } finally {
           setIsLoading(false)
         }
@@ -114,6 +118,7 @@ export default function StockSearchBox({
   }, [query])
 
   const handleSelect = (symbol: string) => {
+    userTypedRef.current = false
     setIsOpen(false)
 
     const normalizedSelection = normalizeOptionSymbol(symbol)
@@ -142,7 +147,7 @@ export default function StockSearchBox({
       aria-haspopup="listbox"
       aria-expanded={isOpen}
       aria-owns="stock-search-results"
-      style={{ position: 'relative', width }}
+      style={{ position: 'relative', width, maxWidth: '100%' }}
       className={className}
     >
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -152,7 +157,10 @@ export default function StockSearchBox({
           className="input"
           placeholder={placeholder}
           value={query}
-          onChange={(e) => handleQueryChange(e.target.value)}
+          onChange={(e) => {
+            userTypedRef.current = true
+            handleQueryChange(e.target.value)
+          }}
           onFocus={() => { if (results.length > 0) setIsOpen(true) }}
           aria-autocomplete="list"
           aria-controls="stock-search-results"

@@ -21,41 +21,41 @@ import {
 } from '../utils/notificationSound'
 
 const SECTORS = [
-  { value: 'ALL', label: '🌐 All Sectors (100+ Stocks)' },
-  { value: 'NIFTY_50', label: '🏛️ Nifty 50 Large Cap' },
-  { value: 'BANKING', label: '🏦 Banking & Financials' },
-  { value: 'IT', label: '💻 IT & Technology' },
-  { value: 'AUTO', label: '🚗 Automobiles & OEMs' },
-  { value: 'PHARMA', label: '💊 Healthcare & Pharma' },
-  { value: 'ENERGY', label: '⚡ Energy, Oil & Power' },
-  { value: 'FMCG', label: '🛒 FMCG & Consumer Goods' },
-  { value: 'METAL', label: '🏗️ Metal & Mining' },
-  { value: 'MID_CAP', label: '📈 Mid Cap Growth' },
-  { value: 'SMALL_CAP', label: '🚀 Small Cap High Alpha' },
+  { value: 'ALL', label: 'All Sectors' },
+  { value: 'NIFTY_50', label: 'Nifty 50' },
+  { value: 'BANKING', label: 'Banking & Financials' },
+  { value: 'IT', label: 'IT & Technology' },
+  { value: 'AUTO', label: 'Automobiles' },
+  { value: 'PHARMA', label: 'Pharma & Healthcare' },
+  { value: 'ENERGY', label: 'Energy & Power' },
+  { value: 'FMCG', label: 'FMCG & Consumer' },
+  { value: 'METAL', label: 'Metals & Mining' },
+  { value: 'MID_CAP', label: 'Mid Cap' },
+  { value: 'SMALL_CAP', label: 'Small Cap' },
 ]
 
 const PROXIMITY_FILTERS = [
-  { value: 1.0, label: '🎯 Within 1.0% (Immediate Entry Zone)' },
-  { value: 2.0, label: '⚡ Within 2.0% (Prime Pullback Setup)' },
-  { value: 3.0, label: '⏳ Within 3.0% (Approaching Watchlist)' },
-  { value: 5.0, label: '🔭 Within 5.0% (Broad Proximity)' },
+  { value: 1.0, label: 'Within 1.0%' },
+  { value: 2.0, label: 'Within 2.0%' },
+  { value: 3.0, label: 'Within 3.0%' },
+  { value: 5.0, label: 'Within 5.0%' },
 ]
 
 const STAGE_FILTERS = [
-  { value: 'ALL', label: '🌐 All Opportunities (Pre-Buy & Targets)' },
-  { value: 'PRE_BUY', label: '⚡ Pre-Buy Opportunities (Before Buy Price)' },
-  { value: 'SELL_PRE_ALERT', label: '🎯 Sell Pre-Alerts (Near Target Price)' },
-  { value: 'AT_BEST_BUY', label: '🎯 At Best Buy Zone (Optimal Entry)' },
+  { value: 'ALL', label: 'All Setups' },
+  { value: 'PRE_BUY', label: 'Pre-Buy Watch' },
+  { value: 'SELL_PRE_ALERT', label: 'Near Target' },
+  { value: 'AT_BEST_BUY', label: 'At Best Buy Zone' },
 ]
 
 const CONDITION_TYPES = [
   { value: 'PRICE_ABOVE', label: 'Price Above' },
   { value: 'PRICE_BELOW', label: 'Price Below' },
-  { value: 'BUY_PROXIMITY', label: 'Buy Zone Approaching (Pre-Alert)' },
-  { value: 'TARGET_PROXIMITY', label: 'Target Approaching (Sell Pre-Alert)' },
-  { value: 'TARGET_HIT', label: 'Target Reached (Sell Trigger)' },
-  { value: 'STOP_LOSS_PROXIMITY', label: 'Stop Loss Approaching' },
-  { value: 'STOP_LOSS_HIT', label: 'Stop Loss Breached' },
+  { value: 'BUY_PROXIMITY', label: 'Near Buy Price' },
+  { value: 'TARGET_PROXIMITY', label: 'Near Target' },
+  { value: 'TARGET_HIT', label: 'Target Reached' },
+  { value: 'STOP_LOSS_PROXIMITY', label: 'Near Stop Loss' },
+  { value: 'STOP_LOSS_HIT', label: 'Stop Loss Hit' },
   { value: 'RSI_ABOVE', label: 'RSI Above' },
   { value: 'RSI_BELOW', label: 'RSI Below' },
   { value: 'MACD_CROSS_UP', label: 'MACD Cross Up' },
@@ -431,86 +431,73 @@ export default function AlertsPage() {
   return (
     <div style={{ maxWidth: 1300, margin: '0 auto', paddingBottom: 60 }}>
       {/* Page Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-        <div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Bell size={24} style={{ color: 'var(--color-accent-blue, #387ed1)' }} />
-            Institutional Alerts & Risk Guard
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>
+        <div style={{ minWidth: 0 }}>
+          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Bell size={22} style={{ color: 'var(--color-accent-blue)' }} />
+            Alerts &amp; Risk Guard
           </h1>
           <p className="page-subtitle">
-            Pre-alerts for swing screener entries, real-time target proximity sell warnings, and automated downside stop loss protection.
+            Entry proximity radar, target/stop-loss monitoring, GTT triggers, and auto-sell notifications.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button 
-            className="btn btn-secondary" 
-            onClick={() => setShowGttSearchPrompt(true)} 
-            style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
-            title="Create a new Zerodha Kite GTT (Good-Till-Triggered) Trigger Order"
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowGttSearchPrompt(true)}
+            style={{ gap: 6, color: 'var(--color-accent-blue)' }}
           >
-            <Target size={15} /> + Create GTT Trigger
+            <Target size={14} /> New GTT
           </button>
 
-          <button 
-            className="btn btn-secondary" 
-            onClick={handleSyncHoldings} 
+          <button
+            className="btn btn-secondary"
+            onClick={handleSyncHoldings}
             disabled={syncingHoldings}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-            title="Ensure all open holdings have coupled Target & Stop Loss alerts"
+            style={{ gap: 6 }}
           >
-            <ShieldCheck size={15} style={{ color: '#10b981' }} />
-            {syncingHoldings ? 'Syncing...' : 'Sync Holdings Guard'}
+            <ShieldCheck size={14} style={{ color: '#10b981' }} />
+            {syncingHoldings ? 'Syncing…' : 'Sync Guard'}
           </button>
 
-          <button className="btn btn-primary" onClick={() => setShowForm(!showForm)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <PlusCircle size={15} /> New Custom Alert
+          <button className="btn btn-primary" onClick={() => setShowForm(!showForm)} style={{ gap: 6 }}>
+            <PlusCircle size={14} /> New Alert
           </button>
         </div>
       </div>
 
       {/* Primary Tab Navigation */}
-      <div style={{
+      <div className="mobile-scroll-tabs" style={{
         display: 'flex',
-        gap: 8,
-        borderBottom: '1px solid var(--color-border, #2d3343)',
-        marginBottom: 20,
+        gap: 6,
+        borderBottom: '1px solid var(--color-border)',
+        marginBottom: 18,
         paddingBottom: 2,
-        overflowX: 'auto',
       }}>
         <button
           onClick={() => setActiveTab('SCREENER_RADAR')}
           style={{
-            padding: '10px 18px',
-            fontSize: 14,
-            fontWeight: 700,
+            padding: '10px 14px',
+            fontSize: 13.5,
+            fontWeight: 600,
             border: 'none',
-            borderBottom: activeTab === 'SCREENER_RADAR' ? '3px solid #38bdf8' : '3px solid transparent',
+            borderBottom: activeTab === 'SCREENER_RADAR' ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
             background: 'transparent',
-            color: activeTab === 'SCREENER_RADAR' ? 'var(--color-text-primary, #ffffff)' : 'var(--color-text-muted, #8a92a6)',
+            color: activeTab === 'SCREENER_RADAR' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
             cursor: 'pointer',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            transition: 'all 0.15s ease',
+            gap: 7,
             whiteSpace: 'nowrap',
+            flexShrink: 0,
           }}
         >
-          <Zap size={16} style={{ color: activeTab === 'SCREENER_RADAR' ? '#38bdf8' : 'inherit' }} />
-          <span>⚡ Best Buy Proximity Radar ({radarData.total_candidates || 0})</span>
+          <Zap size={15} style={{ color: activeTab === 'SCREENER_RADAR' ? 'var(--color-accent-blue)' : 'inherit' }} />
+          <span>Proximity Radar ({radarData.total_candidates || 0})</span>
           {radarData.summary?.at_best_buy > 0 && (
-            <span style={{ background: '#10b981', color: '#000', fontSize: 11, padding: '1px 6px', borderRadius: 10, fontWeight: 800 }}>
-              {radarData.summary.at_best_buy} At Best Buy
-            </span>
-          )}
-          {(radarData.summary?.pre_buy_prime > 0 || radarData.summary?.near_best_buy > 0) && (
-            <span style={{ background: '#0ea5e9', color: '#000', fontSize: 11, padding: '1px 6px', borderRadius: 10, fontWeight: 800 }}>
-              {radarData.summary.pre_buy_prime || radarData.summary.near_best_buy} Pre-Buy
-            </span>
-          )}
-          {radarData.summary?.sell_pre_alerts > 0 && (
-            <span style={{ background: '#f59e0b', color: '#000', fontSize: 11, padding: '1px 6px', borderRadius: 10, fontWeight: 800 }}>
-              {radarData.summary.sell_pre_alerts} Near Target
+            <span style={{ background: 'var(--color-bullish-dim)', color: 'var(--color-bullish)', fontSize: 10.5, padding: '1px 6px', borderRadius: 10, fontWeight: 700 }}>
+              {radarData.summary.at_best_buy} Optimal
             </span>
           )}
         </button>
@@ -518,31 +505,26 @@ export default function AlertsPage() {
         <button
           onClick={() => setActiveTab('HOLDINGS')}
           style={{
-            padding: '10px 18px',
-            fontSize: 14,
-            fontWeight: 700,
+            padding: '10px 14px',
+            fontSize: 13.5,
+            fontWeight: 600,
             border: 'none',
-            borderBottom: activeTab === 'HOLDINGS' ? '3px solid var(--color-accent-blue, #387ed1)' : '3px solid transparent',
+            borderBottom: activeTab === 'HOLDINGS' ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
             background: 'transparent',
-            color: activeTab === 'HOLDINGS' ? 'var(--color-text-primary, #ffffff)' : 'var(--color-text-muted, #8a92a6)',
+            color: activeTab === 'HOLDINGS' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
             cursor: 'pointer',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            transition: 'all 0.15s ease',
+            gap: 7,
             whiteSpace: 'nowrap',
+            flexShrink: 0,
           }}
         >
-          <Briefcase size={16} style={{ color: activeTab === 'HOLDINGS' ? '#387ed1' : 'inherit' }} />
-          <span>Active Holdings Guard ({holdings.length})</span>
-          {holdingsSummary.targets_approaching > 0 && (
-            <span style={{ background: '#10b981', color: '#000', fontSize: 11, padding: '1px 6px', borderRadius: 10, fontWeight: 800 }}>
-              {holdingsSummary.targets_approaching} Target Close
-            </span>
-          )}
+          <Briefcase size={15} />
+          <span>Holdings Guard ({holdings.length})</span>
           {holdingsSummary.sl_warnings > 0 && (
-            <span style={{ background: '#ef4444', color: '#fff', fontSize: 11, padding: '1px 6px', borderRadius: 10, fontWeight: 800 }}>
-              {holdingsSummary.sl_warnings} SL Warning
+            <span style={{ background: '#ef4444', color: '#fff', fontSize: 10.5, padding: '1px 6px', borderRadius: 10, fontWeight: 700 }}>
+              {holdingsSummary.sl_warnings} SL
             </span>
           )}
         </button>
@@ -550,45 +532,45 @@ export default function AlertsPage() {
         <button
           onClick={() => setActiveTab('RADAR')}
           style={{
-            padding: '10px 18px',
-            fontSize: 14,
-            fontWeight: 700,
+            padding: '10px 14px',
+            fontSize: 13.5,
+            fontWeight: 600,
             border: 'none',
-            borderBottom: activeTab === 'RADAR' ? '3px solid var(--color-accent-blue, #387ed1)' : '3px solid transparent',
+            borderBottom: activeTab === 'RADAR' ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
             background: 'transparent',
-            color: activeTab === 'RADAR' ? 'var(--color-text-primary, #ffffff)' : 'var(--color-text-muted, #8a92a6)',
+            color: activeTab === 'RADAR' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
             cursor: 'pointer',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            transition: 'all 0.15s ease',
+            gap: 7,
             whiteSpace: 'nowrap',
+            flexShrink: 0,
           }}
         >
-          <Target size={16} style={{ color: activeTab === 'RADAR' ? '#38bdf8' : 'inherit' }} />
-          <span>⚡ GTT Triggers & Proximity Radar ({radarAlerts.length})</span>
+          <Target size={15} />
+          <span>GTT Triggers ({radarAlerts.length})</span>
         </button>
 
         <button
           onClick={() => { setActiveTab('CUSTOM'); setSearchParams({}) }}
           style={{
-            padding: '10px 18px',
-            fontSize: 14,
-            fontWeight: 700,
+            padding: '10px 14px',
+            fontSize: 13.5,
+            fontWeight: 600,
             border: 'none',
-            borderBottom: activeTab === 'CUSTOM' ? '3px solid var(--color-accent-blue, #387ed1)' : '3px solid transparent',
+            borderBottom: activeTab === 'CUSTOM' ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
             background: 'transparent',
-            color: activeTab === 'CUSTOM' ? 'var(--color-text-primary, #ffffff)' : 'var(--color-text-muted, #8a92a6)',
+            color: activeTab === 'CUSTOM' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
             cursor: 'pointer',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            transition: 'all 0.15s ease',
+            gap: 7,
             whiteSpace: 'nowrap',
+            flexShrink: 0,
           }}
         >
-          <Bell size={16} style={{ color: activeTab === 'CUSTOM' ? '#387ed1' : 'inherit' }} />
-          <span>Custom Technical Alerts ({customAlerts.length})</span>
+          <Bell size={15} />
+          <span>Custom ({customAlerts.length})</span>
         </button>
 
         <button
@@ -597,40 +579,30 @@ export default function AlertsPage() {
             setSearchParams({ tab: 'INBOX' })
           }}
           style={{
-            padding: '10px 18px',
-            fontSize: 14,
-            fontWeight: 700,
+            padding: '10px 14px',
+            fontSize: 13.5,
+            fontWeight: 600,
             border: 'none',
-            borderBottom: activeTab === 'INBOX' ? '3px solid #ef4444' : '3px solid transparent',
+            borderBottom: activeTab === 'INBOX' ? '2px solid #ef4444' : '2px solid transparent',
             background: activeTab === 'INBOX' ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
-            color: activeTab === 'INBOX' ? 'var(--color-text-primary, #ffffff)' : 'var(--color-text-muted, #8a92a6)',
+            color: activeTab === 'INBOX' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
             cursor: 'pointer',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            transition: 'all 0.15s ease',
+            gap: 7,
             whiteSpace: 'nowrap',
+            flexShrink: 0,
           }}
         >
-          <Bell size={16} style={{ color: inboxUnseenCount > 0 ? '#ef4444' : activeTab === 'INBOX' ? '#38bdf8' : 'inherit' }} />
-          <span>🔔 Notifications &amp; Auto-Sells</span>
+          <Bell size={15} style={{ color: inboxUnseenCount > 0 ? '#ef4444' : activeTab === 'INBOX' ? 'var(--color-accent-blue)' : 'inherit' }} />
+          <span>Notifications &amp; Auto-Sells</span>
           {inboxUnseenCount > 0 ? (
-            <span
-              style={{
-                background: '#ef4444',
-                color: '#ffffff',
-                fontSize: 11,
-                padding: '1px 7px',
-                borderRadius: 999,
-                fontWeight: 800,
-                boxShadow: '0 0 8px rgba(239, 68, 68, 0.5)',
-              }}
-            >
+            <span style={{ background: '#ef4444', color: '#ffffff', fontSize: 10.5, padding: '1px 6px', borderRadius: 999, fontWeight: 700 }}>
               {inboxUnseenCount}
             </span>
           ) : inboxUnreadCount > 0 ? (
-            <span style={{ background: 'rgba(56, 189, 248, 0.18)', color: '#38bdf8', fontSize: 11, padding: '1px 7px', borderRadius: 10, fontWeight: 700 }}>
-              {inboxUnreadCount} Unread
+            <span style={{ background: 'rgba(59, 130, 246, 0.16)', color: 'var(--color-accent-blue)', fontSize: 10.5, padding: '1px 6px', borderRadius: 10, fontWeight: 700 }}>
+              {inboxUnreadCount}
             </span>
           ) : null}
         </button>
@@ -638,12 +610,12 @@ export default function AlertsPage() {
 
       {/* Create Alert Form (Collapsible) */}
       {showForm && (
-        <div className="card" style={{ marginBottom: 20, border: '1px solid var(--color-accent-blue, #387ed1)' }}>
-          <div className="card-title" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-            <span>Create New Custom Alert</span>
-            <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setShowForm(false)}>Close</button>
+        <div className="card" style={{ marginBottom: 18, border: '1px solid var(--color-accent-blue)' }}>
+          <div className="card-title" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>New Custom Alert</span>
+            <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setShowForm(false)}>Close</button>
           </div>
-          <form onSubmit={handleCreate} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+          <form onSubmit={handleCreate} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 200px), 1fr))', gap: 12 }}>
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Symbol</label>
               <StockSearchBox 
@@ -658,13 +630,13 @@ export default function AlertsPage() {
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Priority</label>
               <select className="input" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value as typeof form.priority })}>
-                <option value="LOW">Low — in-app</option><option value="MEDIUM">Medium — in-app</option><option value="HIGH">High — can email</option>
+                <option value="LOW">Low — In-App</option><option value="MEDIUM">Medium — In-App</option><option value="HIGH">High — Email Eligible</option>
               </select>
             </div>
             <div>
               <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Delivery</label>
               <select className="input" value={form.delivery_method} onChange={e => setForm({ ...form, delivery_method: e.target.value as typeof form.delivery_method })}>
-                <option value="IN_APP">In-app notification</option><option value="EMAIL">Email (HIGH only)</option><option value="BOTH">In-app + email (HIGH only)</option>
+                <option value="IN_APP">In-App</option><option value="EMAIL">Email</option><option value="BOTH">In-App + Email</option>
               </select>
             </div>
             <div>
@@ -685,7 +657,7 @@ export default function AlertsPage() {
               )}
             </div>
             <div>
-              <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Custom Message (optional)</label>
+              <label style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'block' }}>Note</label>
               <input className="input" placeholder="Optional note…" value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} />
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -696,372 +668,228 @@ export default function AlertsPage() {
         </div>
       )}
 
-      {/* TAB 0: SWING SCREENER BEST BUY PROXIMITY RADAR */}
+      {/* TAB 0: PROXIMITY RADAR */}
       {activeTab === 'SCREENER_RADAR' && (
         <div>
-          {/* Top Control & Zero-Rate-Limit Banner */}
-          <div className="card" style={{
-            background: 'linear-gradient(90deg, rgba(56, 189, 248, 0.08), rgba(16, 185, 129, 0.08))',
-            border: '1px solid rgba(56, 189, 248, 0.25)',
-            marginBottom: 20,
-            padding: '16px 20px',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
+          {/* Compact Filter & Refresh Bar */}
+          <div className="card" style={{ marginBottom: 16, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 700, color: '#38bdf8' }}>
-                  <Zap size={20} />
-                  <span>Swing Screener Best Buy Proximity Radar</span>
-                  <span style={{ fontSize: 11, background: 'rgba(56, 189, 248, 0.2)', padding: '2px 8px', borderRadius: 12, border: '1px solid #38bdf8', color: '#e0f2fe' }}>
-                    Fyers Single-Flight Calibrated
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                  <Zap size={17} color="var(--color-accent-blue)" />
+                  <span>Entry &amp; Target Proximity Radar</span>
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4, maxWidth: 750 }}>
-                  Real-time monitoring of swing setups trading closely to their ML optimal Best Buy price across all 10 market sectors.
-                  Live quotes are pre-fetched in 1 single bulk request via Fyers Rate Governor to guarantee zero rate limit exceedance.
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                  Stocks trading near optimal screener entry or exit levels with live quote overlay.
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
                   className="btn btn-secondary"
                   onClick={() => loadRadar(radarSector, radarProximityPct, radarStage, false, true)}
                   disabled={loadingRadar}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  style={{ gap: 6, fontSize: 12.5 }}
                 >
-                  <RefreshCw size={14} className={loadingRadar ? 'spin' : ''} />
-                  {loadingRadar ? 'Updating...' : 'Refresh Radar'}
+                  <RefreshCw size={13} className={loadingRadar ? 'spin' : ''} />
+                  {loadingRadar ? 'Updating…' : 'Refresh'}
                 </button>
 
                 <button
-                  className="btn btn-primary"
+                  className="btn btn-success"
                   onClick={handleBulkSetRadarAlerts}
                   disabled={settingBulkAlerts || !radarData?.candidates?.length}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#10b981', borderColor: '#10b981' }}
-                  title="Activate coupled Buy Proximity, Target, and Stop Loss alerts for all stocks listed below"
+                  style={{ gap: 6, fontSize: 12.5 }}
                 >
-                  <CheckCircle2 size={15} />
-                  {settingBulkAlerts ? 'Activating...' : `Set Alerts for All (${radarData?.total_candidates || 0})`}
+                  <CheckCircle2 size={14} />
+                  {settingBulkAlerts ? 'Activating…' : `Alert All (${radarData?.total_candidates || 0})`}
                 </button>
               </div>
             </div>
 
             {/* Filter Controls Row */}
-            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Layers size={14} /> Sector Universe:
-                </span>
-                <select
-                  className="input"
-                  style={{ padding: '6px 12px', fontSize: 13, minWidth: 220 }}
-                  value={radarSector}
-                  onChange={(e) => setRadarSector(e.target.value)}
-                >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 10, alignItems: 'end', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--color-border)' }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: 4 }}>
+                  Sector
+                </label>
+                <select className="input" style={{ padding: '7px 10px', fontSize: 13 }} value={radarSector} onChange={(e) => setRadarSector(e.target.value)}>
                   {SECTORS.map(s => (
                     <option key={s.value} value={s.value}>{s.label}</option>
                   ))}
                 </select>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Zap size={14} /> Stage Filter:
-                </span>
-                <select
-                  className="input"
-                  style={{ padding: '6px 12px', fontSize: 13, minWidth: 240 }}
-                  value={radarStage}
-                  onChange={(e) => setRadarStage(e.target.value)}
-                >
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: 4 }}>
+                  Stage
+                </label>
+                <select className="input" style={{ padding: '7px 10px', fontSize: 13 }} value={radarStage} onChange={(e) => setRadarStage(e.target.value)}>
                   {STAGE_FILTERS.map(st => (
                     <option key={st.value} value={st.value}>{st.label}</option>
                   ))}
                 </select>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Filter size={14} /> Proximity Filter:
-                </span>
-                <select
-                  className="input"
-                  style={{ padding: '6px 12px', fontSize: 13, minWidth: 200 }}
-                  value={radarProximityPct}
-                  onChange={(e) => setRadarProximityPct(parseFloat(e.target.value))}
-                >
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: 4 }}>
+                  Distance
+                </label>
+                <select className="input" style={{ padding: '7px 10px', fontSize: 13 }} value={radarProximityPct} onChange={(e) => setRadarProximityPct(parseFloat(e.target.value))}>
                   {PROXIMITY_FILTERS.map(p => (
                     <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
                 </select>
               </div>
 
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginLeft: 'auto', textAlign: 'right' }}>
+              <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)', textAlign: 'left' }}>
                 <div>
-                  Showing <strong>{radarData?.total_candidates || 0}</strong> setups ({
-                    radarStage === 'PRE_BUY'
-                      ? 'Strict Pre-Buy Corridor (>0.5% above Best Buy)'
-                      : radarStage === 'AT_BEST_BUY'
-                      ? 'At Best Buy Zone (±0.5%)'
-                      : radarStage === 'SELL_PRE_ALERT'
-                      ? 'Near Target (<=2.5%)'
-                      : `within ±${radarProximityPct}%`
-                  })
+                  <strong>{radarData?.total_candidates || 0}</strong> setups ·{' '}
+                  {radarData?.summary?.at_best_buy || 0} Optimal ·{' '}
+                  {radarData?.summary?.pre_buy_prime || radarData?.summary?.near_best_buy || 0} Pre-Buy
                 </div>
                 {radarData?.generated_at && (
-                  <div style={{ fontSize: 11, marginTop: 2, color: '#38bdf8' }}>
-                    Live Quotes ({radarData.quotes_live_count ?? radarData.total_candidates}/{radarData.total_candidates}) · Updated {new Date(radarData.generated_at).toLocaleTimeString('en-IN', { hour12: true })} IST
-                    {Array.isArray(radarData.sectors_loaded) && radarData.sectors_loaded.length > 0 && radarSector === 'ALL'
-                      ? ` · ${radarData.sectors_loaded.length} sector feed${radarData.sectors_loaded.length > 1 ? 's' : ''}`
-                      : ''}
+                  <div style={{ fontSize: 11, marginTop: 2, color: 'var(--color-accent-blue)' }}>
+                    Live {radarData.quotes_live_count ?? radarData.total_candidates}/{radarData.total_candidates} · {new Date(radarData.generated_at).toLocaleTimeString('en-IN', { hour12: true })} IST
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Metric Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 20 }}>
-            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #38bdf8' }}>
-              <div style={{ fontSize: 11, color: '#38bdf8', textTransform: 'uppercase', fontWeight: 600 }}>
-                Total Radar Setups
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4 }}>
-                {radarData?.total_candidates || 0}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Calibrated across {radarSector === 'ALL' ? '10 sectors' : radarSector}
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #0ea5e9' }}>
-              <div style={{ fontSize: 11, color: '#0ea5e9', textTransform: 'uppercase', fontWeight: 600 }}>
-                ⚡ Pre-Buy Opportunities
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, color: '#0ea5e9' }}>
-                {radarData?.summary?.pre_buy_prime || radarData?.summary?.near_best_buy || 0}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Before buy price (descending from above)
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #10b981' }}>
-              <div style={{ fontSize: 11, color: '#10b981', textTransform: 'uppercase', fontWeight: 600 }}>
-                🎯 At Best Buy Zone
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, color: '#10b981' }}>
-                {radarData?.summary?.at_best_buy || 0}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Within ±0.5% — Immediate execution
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #f59e0b' }}>
-              <div style={{ fontSize: 11, color: '#f59e0b', textTransform: 'uppercase', fontWeight: 600 }}>
-                🎯 Sell Pre-Alerts (Near Target)
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, color: '#f59e0b' }}>
-                {radarData?.summary?.sell_pre_alerts || 0}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Within 2.5% of Target — Prepare to lock gains
-              </div>
-            </div>
-          </div>
-
-          {/* Radar Table */}
+          {/* Radar Table & Mobile Cards */}
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Target size={18} style={{ color: '#38bdf8' }} />
-                <span>Closely Priced Stocks to Best Buy Value ({radarData?.candidates?.length || 0})</span>
+                <Target size={16} style={{ color: 'var(--color-accent-blue)' }} />
+                <span>Actionable Proximity Setups ({radarData?.candidates?.length || 0})</span>
               </div>
             </div>
 
             {loadingRadar && (!radarData?.candidates || radarData.candidates.length === 0) && (
-              <div className="loading" style={{ padding: '40px 20px', textAlign: 'center' }}>
-                <RefreshCw size={24} className="spin" style={{ marginBottom: 10, opacity: 0.5 }} />
-                <div>Scanning sector setups and pre-fetching bulk live prices...</div>
+              <div className="loading" style={{ padding: '36px 16px' }}>
+                Scanning setups &amp; live quotes…
               </div>
             )}
 
             {!loadingRadar && (!radarData?.candidates || radarData.candidates.length === 0) && (
-              <div className="empty-state" style={{ padding: '40px 20px', textAlign: 'center' }}>
-                <Target size={36} style={{ marginBottom: 10, opacity: 0.3 }} />
-                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>No Setups Found for {radarSector} ({radarStage})</div>
-                <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
-                  Try switching Stage Filter to "All Opportunities" or selecting "All Sectors" to discover stocks approaching high-conviction entry zones.
-                </div>
+              <div className="empty-state" style={{ padding: '36px 16px' }}>
+                No setups found for {radarSector} within ±{radarProximityPct}%.
               </div>
             )}
 
             {radarData?.candidates && radarData.candidates.length > 0 && (
-              <div className="table-container">
-                <table className="table" style={{ minWidth: '980px' }}>
-                  <thead>
-                    <tr>
-                      <th>Stock & Sector</th>
-                      <th>CMP</th>
-                      <th>Best Buy Value</th>
-                      <th>Distance to Best Buy</th>
-                      <th>Proximity Status</th>
-                      <th>Target & Gain</th>
-                      <th>Stop Loss</th>
-                      <th style={{ textAlign: 'right' }}>Action Controls</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {radarData.candidates.map((c: any) => {
-                      const isAtBuy = c.proximity_status === 'AT_BEST_BUY'
-                      const isNearBuy = c.proximity_status === 'NEAR_BEST_BUY'
-                      const isBelowBuy = c.proximity_status === 'BELOW_BUY'
-                      const isSetting = settingSingleAlertSym === c.symbol
-
-                      let badgeStyle: React.CSSProperties = { background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid #38bdf8' }
-                      if (isAtBuy) {
-                        badgeStyle = { background: 'rgba(16, 185, 129, 0.25)', color: '#10b981', border: '1px solid #10b981' }
-                      } else if (isBelowBuy) {
-                        badgeStyle = { background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid #a855f7' }
-                      } else if (c.proximity_status === 'APPROACHING') {
-                        badgeStyle = { background: 'rgba(245, 158, 11, 0.18)', color: '#fbbf24', border: '1px solid #f59e0b' }
-                      }
-
-                      return (
-                        <tr key={c.symbol} style={{ background: isAtBuy ? 'rgba(16, 185, 129, 0.04)' : isNearBuy ? 'rgba(56, 189, 248, 0.03)' : 'transparent' }}>
-                          <td>
-                            <div style={{ fontWeight: 700, fontSize: 14 }}>{c.symbol}</div>
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: 10, background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: 3, color: 'var(--color-text-muted)' }}>
-                                {c.sector}
-                              </span>
-                              <span style={{ fontSize: 10, background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', padding: '1px 5px', borderRadius: 3 }}>
-                                {c.entry_type.replace('_', ' ')}
-                              </span>
-                              <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
-                                Score: {c.total_score}
-                              </span>
-                              {c.technical_verification?.verified && (
-                                <span 
-                                  title={`Verified by Top Analyzers: ${c.technical_verification.passed_constraints?.join(' • ')}`}
-                                  style={{ fontSize: 10, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.4)', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}
-                                >
-                                  ✓ Verified Setup
-                                </span>
+              <>
+                <div className="table-container desktop-only-table" style={{ marginBottom: 0 }}>
+                  <table className="table" style={{ minWidth: '900px' }}>
+                    <thead>
+                      <tr>
+                        <th>Stock</th>
+                        <th>LTP</th>
+                        <th>Best Buy</th>
+                        <th>Distance</th>
+                        <th>Status</th>
+                        <th>Target</th>
+                        <th>Stop Loss</th>
+                        <th style={{ textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {radarData.candidates.map((c: any) => {
+                        const isAtBuy = c.proximity_status === 'AT_BEST_BUY'
+                        const isBelowBuy = c.proximity_status === 'BELOW_BUY'
+                        const isSetting = settingSingleAlertSym === c.symbol
+                        return (
+                          <tr key={c.symbol}>
+                            <td>
+                              <div style={{ fontWeight: 700, fontSize: 13.5 }}>{c.symbol}</div>
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2, fontSize: 11, color: 'var(--color-text-muted)' }}>
+                                <span>{c.sector}</span>
+                                <span>· Score {c.total_score}</span>
+                                {c.technical_verification?.verified && <span style={{ color: 'var(--color-bullish)', fontWeight: 600 }}>· Verified</span>}
+                              </div>
+                            </td>
+                            <td className="mono" style={{ fontWeight: 700 }}>₹{c.cmp.toFixed(2)}</td>
+                            <td>
+                              <div className="mono" style={{ fontWeight: 700, color: 'var(--color-accent-blue)' }}>₹{c.best_buy_price.toFixed(2)}</div>
+                              {c.is_pre_buy && c.pre_buy_diff > 0 && (
+                                <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)' }}>₹{c.pre_buy_diff.toFixed(2)} away</div>
                               )}
-                            </div>
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ fontWeight: 700, fontSize: 14 }}>
-                              ₹{c.cmp.toFixed(2)}
-                            </div>
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ fontWeight: 700, color: '#38bdf8', fontSize: 14 }}>
-                              ₹{c.best_buy_price.toFixed(2)}
-                            </div>
-                            {c.is_pre_buy && c.pre_buy_diff > 0 && (
-                              <div style={{ fontSize: 10, color: '#0ea5e9', fontWeight: 600 }}>
-                                ⚡ ₹{c.pre_buy_diff.toFixed(2)} before Buy
+                            </td>
+                            <td>
+                              <div className="mono" style={{ fontWeight: 700, color: isAtBuy ? 'var(--color-bullish)' : isBelowBuy ? '#a78bfa' : 'var(--color-accent-blue)' }}>
+                                {c.distance_pct > 0 ? '+' : ''}{c.distance_pct.toFixed(2)}%
                               </div>
-                            )}
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ fontWeight: 700, color: isAtBuy ? '#10b981' : isBelowBuy ? '#c084fc' : '#38bdf8' }}>
-                              {c.distance_pct > 0 ? '+' : ''}{c.distance_pct.toFixed(2)}%
-                            </div>
-                            <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
-                              ₹{(c.cmp - c.best_buy_price).toFixed(2)} diff
-                            </div>
-                          </td>
-
-                          <td>
-                            <span style={{
-                              ...badgeStyle,
-                              padding: '3px 8px',
-                              borderRadius: 6,
-                              fontSize: 11,
-                              fontWeight: 700,
-                              display: 'inline-block',
-                            }}>
-                              {c.proximity_label}
-                            </span>
-                            {c.is_near_target && c.sell_pre_alert_label && (
-                              <div style={{ marginTop: 4 }}>
-                                <span style={{ background: 'rgba(245, 158, 11, 0.18)', color: '#fbbf24', border: '1px solid #f59e0b', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
-                                  {c.sell_pre_alert_label}
-                                </span>
+                            </td>
+                            <td>
+                              <span className={`badge ${isAtBuy ? 'badge-buy' : 'badge-watch'}`} style={{ fontSize: 10.5 }}>
+                                {c.proximity_label}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="mono" style={{ fontWeight: 700, color: 'var(--color-bullish)' }}>₹{c.target_price.toFixed(2)}</div>
+                              <div style={{ fontSize: 11, color: 'var(--color-bullish)' }}>+{c.expected_gain_pct}%</div>
+                            </td>
+                            <td>
+                              <div className="mono" style={{ fontWeight: 700, color: 'var(--color-bearish)' }}>₹{c.stop_loss.toFixed(2)}</div>
+                              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{c.risk_buffer_pct}% risk</div>
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6 }}>
+                                <button
+                                  onClick={() => handleSetRadarAlert(c)}
+                                  disabled={isSetting}
+                                  className="btn btn-secondary"
+                                  style={{ padding: '5px 10px', fontSize: 11.5 }}
+                                >
+                                  <Bell size={12} /> {isSetting ? '…' : 'Alert'}
+                                </button>
+                                <button
+                                  onClick={() => handleOpenRadarGtt(c)}
+                                  className="btn btn-primary"
+                                  style={{ padding: '5px 10px', fontSize: 11.5 }}
+                                >
+                                  <Target size={12} /> GTT
+                                </button>
                               </div>
-                            )}
-                          </td>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
 
-                          <td>
-                            <div className="mono" style={{ fontWeight: 700, color: '#10b981' }}>
-                              ₹{c.target_price.toFixed(2)}
-                            </div>
-                            <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>
-                              +{c.expected_gain_pct}% gain
-                            </div>
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ fontWeight: 700, color: '#ef4444' }}>
-                              ₹{c.stop_loss.toFixed(2)}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                              {c.risk_buffer_pct}% buffer
-                            </div>
-                          </td>
-
-                          <td style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: 6 }}>
-                              <button
-                                onClick={() => handleSetRadarAlert(c)}
-                                disabled={isSetting}
-                                className="btn btn-secondary"
-                                style={{
-                                  padding: '4px 10px',
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 4,
-                                  borderColor: 'rgba(56, 189, 248, 0.4)',
-                                  color: '#38bdf8',
-                                }}
-                                title="Activate coupled Pre-Buy Alert, Sell Pre-Alert (near target), and Stop Loss"
-                              >
-                                <Bell size={12} />
-                                {isSetting ? '...' : '⚡ Pre-Alerts'}
-                              </button>
-
-                              <button
-                                onClick={() => handleOpenRadarGtt(c)}
-                                className="btn btn-primary"
-                                style={{
-                                  padding: '4px 10px',
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 4,
-                                }}
-                                title="Open Zerodha Kite GTT order modal pre-filled with Best Buy Price"
-                              >
-                                <Target size={12} />
-                                GTT
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                <div className="mobile-only-cards">
+                  {radarData.candidates.map((c: any) => {
+                    const isAtBuy = c.proximity_status === 'AT_BEST_BUY'
+                    const isSetting = settingSingleAlertSym === c.symbol
+                    return (
+                      <div key={c.symbol} style={{ padding: 12, borderRadius: 8, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 6 }}>
+                          <strong>{c.symbol.replace('.NS', '')}</strong>
+                          <span className={`badge ${isAtBuy ? 'badge-buy' : 'badge-watch'}`} style={{ fontSize: 10 }}>
+                            {c.distance_pct > 0 ? '+' : ''}{c.distance_pct.toFixed(2)}%
+                          </span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, fontSize: 12, marginBottom: 10 }}>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>LTP</div><strong className="mono">₹{c.cmp.toFixed(2)}</strong></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Entry</div><strong className="mono" style={{ color: 'var(--color-accent-blue)' }}>₹{c.best_buy_price.toFixed(2)}</strong></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Target</div><strong className="mono" style={{ color: 'var(--color-bullish)' }}>₹{c.target_price.toFixed(2)}</strong></div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={() => handleSetRadarAlert(c)} disabled={isSetting} className="btn btn-secondary" style={{ flex: 1, fontSize: 12 }}>
+                            <Bell size={12} /> Alert
+                          </button>
+                          <button onClick={() => handleOpenRadarGtt(c)} className="btn btn-primary" style={{ flex: 1, fontSize: 12 }}>
+                            <Target size={12} /> GTT
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -1073,16 +901,16 @@ export default function AlertsPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
             <div>
               <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Bell size={18} style={{ color: '#ef4444' }} />
-                <span>System Auto-Sells &amp; Important Notifications</span>
+                <Bell size={17} style={{ color: '#ef4444' }} />
+                <span>Auto-Sells &amp; Notifications</span>
                 {inboxUnreadCount > 0 && (
-                  <span style={{ background: 'rgba(56, 189, 248, 0.16)', color: '#38bdf8', fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>
+                  <span style={{ background: 'rgba(59, 130, 246, 0.16)', color: 'var(--color-accent-blue)', fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>
                     {inboxUnreadCount} Unread
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 3 }}>
-                One persistent notification per Auto-Sold stock (Target / Ratchet Profit Lock / Stop-Loss / EOD Square-Off), executed orders, and system notices. Red bell markers stay lit until you open this tab.
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                Per-stock automated exits, order fills, and system notices.
               </div>
             </div>
 
@@ -1155,13 +983,13 @@ export default function AlertsPage() {
           </div>
 
           {/* Category Filter Pills */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
             {[
-              { key: 'ALL', label: 'All Notifications' },
-              { key: 'AUTO_SELL', label: '🤖 System Auto-Sold Stocks' },
-              { key: 'ORDER_FILL', label: '✅ Order Fills' },
-              { key: 'SYSTEM_NOTICE', label: '📢 System Notices' },
-              { key: 'ALERT_TRIGGERED', label: '⚡ Triggered Alerts' },
+              { key: 'ALL', label: 'All' },
+              { key: 'AUTO_SELL', label: 'Auto-Sells' },
+              { key: 'ORDER_FILL', label: 'Order Fills' },
+              { key: 'SYSTEM_NOTICE', label: 'System Notices' },
+              { key: 'ALERT_TRIGGERED', label: 'Alert Triggers' },
             ].map((pill) => (
               <button
                 key={pill.key}
@@ -1183,7 +1011,7 @@ export default function AlertsPage() {
               style={{ fontSize: 12, padding: '5px 12px' }}
               onClick={() => setInboxUnreadOnly((v) => !v)}
             >
-              Unread Only ({inboxUnreadCount})
+              Unread ({inboxUnreadCount})
             </button>
           </div>
 
@@ -1306,200 +1134,190 @@ export default function AlertsPage() {
         </div>
       )}
 
-      {/* TAB 1: ACTIVE HOLDINGS GUARD */}
+      {/* TAB 1: HOLDINGS GUARD */}
       {activeTab === 'HOLDINGS' && (
         <div>
-          {/* Summary Metric Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 20 }}>
-            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #387ed1' }}>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-                Total Active Holdings
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4 }}>
-                {holdings.length}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Monitored for target exit and stop-loss
-              </div>
+          {/* Compact 3-Metric Strip */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 10, marginBottom: 16 }}>
+            <div className="card" style={{ padding: '12px 14px', borderLeft: '3px solid var(--color-accent-blue)' }}>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Monitored</div>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>{holdings.length}</div>
             </div>
-
-            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #10b981' }}>
-              <div style={{ fontSize: 11, color: '#10b981', textTransform: 'uppercase', fontWeight: 600 }}>
-                Approaching Target (Sell Warning)
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, color: '#10b981' }}>
-                {holdingsSummary.targets_approaching}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Within 1.0% of profit target — prepare exit
-              </div>
+            <div className="card" style={{ padding: '12px 14px', borderLeft: '3px solid var(--color-bullish)' }}>
+              <div style={{ fontSize: 11, color: 'var(--color-bullish)', textTransform: 'uppercase', fontWeight: 600 }}>Near Target</div>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700, marginTop: 2, color: 'var(--color-bullish)' }}>{holdingsSummary.targets_approaching}</div>
             </div>
-
-            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #ef4444' }}>
-              <div style={{ fontSize: 11, color: '#ef4444', textTransform: 'uppercase', fontWeight: 600 }}>
-                Stop Loss Warnings
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, color: '#ef4444' }}>
-                {holdingsSummary.sl_warnings}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Downside risk alert active
-              </div>
+            <div className="card" style={{ padding: '12px 14px', borderLeft: '3px solid var(--color-bearish)' }}>
+              <div style={{ fontSize: 11, color: 'var(--color-bearish)', textTransform: 'uppercase', fontWeight: 600 }}>SL Warnings</div>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700, marginTop: 2, color: 'var(--color-bearish)' }}>{holdingsSummary.sl_warnings}</div>
             </div>
           </div>
 
-          {/* Holdings Table */}
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div className="card-header">
               <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <ShieldCheck size={18} style={{ color: '#10b981' }} />
-                <span>Real-Time Position Alerts & Proximity Monitor</span>
+                <ShieldCheck size={16} style={{ color: '#10b981' }} />
+                <span>Position Risk Monitor</span>
               </div>
-              <button 
-                onClick={() => loadHoldingsMonitor()} 
-                className="btn btn-ghost" 
-                style={{ padding: '4px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}
-              >
+              <button onClick={() => loadHoldingsMonitor()} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }}>
                 <RefreshCw size={13} className={loadingHoldings ? 'spin' : ''} /> Refresh
               </button>
             </div>
 
-            {loadingHoldings && holdings.length === 0 && <div className="loading">Loading holdings risk monitor…</div>}
-            
+            {loadingHoldings && holdings.length === 0 && <div className="loading">Loading holdings monitor…</div>}
+
             {!loadingHoldings && holdings.length === 0 && (
-              <div className="empty-state" style={{ padding: '40px 20px', textAlign: 'center' }}>
-                <Briefcase size={36} style={{ marginBottom: 10, opacity: 0.3 }} />
-                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>No Active Bought Holdings</div>
-                <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
-                  Use the Swing Screener to discover high-conviction setups and place orders via the Zerodha execution modal. Your bought stocks will automatically appear here with live Target & Stop Loss alerts!
-                </div>
+              <div className="empty-state" style={{ padding: '32px 16px' }}>
+                No active holdings to monitor right now.
               </div>
             )}
 
             {holdings.length > 0 && (
-              <div className="table-container">
-                <table className="table" style={{ minWidth: '900px' }}>
+              <>
+                <div className="table-container desktop-only-table" style={{ marginBottom: 0 }}>
+                  <table className="table" style={{ minWidth: '860px' }}>
+                    <thead>
+                      <tr>
+                        <th>Stock</th>
+                        <th>Qty &amp; Entry</th>
+                        <th>LTP</th>
+                        <th>P&amp;L</th>
+                        <th>Target</th>
+                        <th>Stop Loss</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: 'right' }}>Exit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {holdings.map(h => {
+                        const isProfit = h.unrealized_pnl >= 0
+                        const pnlColor = isProfit ? 'var(--color-bullish)' : 'var(--color-bearish)'
+                        const statusMap: Record<string, { label: string; cls: string }> = {
+                          TARGET_HIT: { label: 'Target Reached', cls: 'badge-buy' },
+                          TARGET_APPROACHING: { label: `Near Target (${h.distance_to_target_pct}%)`, cls: 'badge-watch' },
+                          SL_HIT: { label: 'Stop Loss Hit', cls: 'badge-sell' },
+                          SL_APPROACHING: { label: `Near SL (${h.distance_to_sl_pct}%)`, cls: 'badge-hold' },
+                        }
+                        const st = statusMap[h.risk_status] || { label: 'Safe Zone', cls: 'badge-buy' }
+                        return (
+                          <tr key={h.trade_id}>
+                            <td>
+                              <div style={{ fontWeight: 700 }}>{h.symbol}</div>
+                              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{h.product_type}</div>
+                            </td>
+                            <td className="mono">{h.quantity} @ ₹{h.entry_price.toFixed(2)}</td>
+                            <td className="mono" style={{ fontWeight: 700 }}>₹{h.cmp.toFixed(2)}</td>
+                            <td className="mono" style={{ color: pnlColor, fontWeight: 700 }}>
+                              <div>{isProfit ? '+' : ''}₹{h.unrealized_pnl.toFixed(2)}</div>
+                              <div style={{ fontSize: 11 }}>{isProfit ? '+' : ''}{h.pnl_pct.toFixed(2)}%</div>
+                            </td>
+                            <td className="mono" style={{ color: 'var(--color-bullish)', fontWeight: 600 }}>₹{h.target_price.toFixed(2)}</td>
+                            <td className="mono" style={{ color: 'var(--color-bearish)', fontWeight: 600 }}>₹{h.stop_loss.toFixed(2)}</td>
+                            <td><span className={`badge ${st.cls}`} style={{ fontSize: 10.5 }}>{st.label}</span></td>
+                            <td style={{ textAlign: 'right' }}>
+                              <button onClick={() => handleDirectExitHolding(h)} disabled={exitingTradeId === h.trade_id} className="btn btn-danger" style={{ padding: '4px 10px', fontSize: 12 }}>
+                                {exitingTradeId === h.trade_id ? 'Closing…' : 'Exit'}
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mobile-only-cards">
+                  {holdings.map(h => {
+                    const isProfit = h.unrealized_pnl >= 0
+                    const pnlColor = isProfit ? 'var(--color-bullish)' : 'var(--color-bearish)'
+                    return (
+                      <div key={h.trade_id} style={{ padding: 12, borderRadius: 8, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <strong>{h.symbol.replace('.NS', '')} · {h.quantity} qty</strong>
+                          <strong className="mono" style={{ color: pnlColor }}>{isProfit ? '+' : ''}₹{h.unrealized_pnl.toFixed(2)}</strong>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, fontSize: 11.5, marginBottom: 8 }}>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>LTP</div><strong className="mono">₹{h.cmp.toFixed(2)}</strong></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Target</div><strong className="mono" style={{ color: 'var(--color-bullish)' }}>₹{h.target_price.toFixed(2)}</strong></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>SL</div><strong className="mono" style={{ color: 'var(--color-bearish)' }}>₹{h.stop_loss.toFixed(2)}</strong></div>
+                        </div>
+                        <button onClick={() => handleDirectExitHolding(h)} disabled={exitingTradeId === h.trade_id} className="btn btn-danger w-100" style={{ fontSize: 12 }}>
+                          {exitingTradeId === h.trade_id ? 'Closing…' : 'Exit Position'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: GTT TRIGGERS */}
+      {activeTab === 'RADAR' && (
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Target size={16} style={{ color: 'var(--color-accent-blue)' }} />
+                <span>GTT Triggers ({radarAlerts.length})</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                Good-Till-Triggered price alerts for entry, target, and stop levels.
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={() => setShowGttSearchPrompt(true)} style={{ fontSize: 12, padding: '6px 12px' }}>
+              <Target size={13} /> New GTT
+            </button>
+          </div>
+
+          {loadingAlerts && <div className="loading">Loading GTT triggers…</div>}
+
+          {!loadingAlerts && radarAlerts.length === 0 && (
+            <div className="empty-state" style={{ padding: '28px 16px' }}>
+              No GTT triggers active yet.
+            </div>
+          )}
+
+          {radarAlerts.length > 0 && (
+            <>
+              <div className="table-container desktop-only-table" style={{ marginBottom: 0 }}>
+                <table className="table" style={{ minWidth: '680px' }}>
                   <thead>
                     <tr>
-                      <th>Stock</th>
-                      <th>Qty & Buy Price</th>
-                      <th>CMP</th>
-                      <th>P&L</th>
-                      <th>Target & Proximity</th>
-                      <th>Stop Loss & Risk</th>
-                      <th>Risk Status</th>
-                      <th style={{ textAlign: 'right' }}>Actions</th>
+                      <th>Symbol</th>
+                      <th>Trigger Type</th>
+                      <th>Level</th>
+                      <th>Status</th>
+                      <th>Rule</th>
+                      <th>Last Triggered</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {holdings.map(h => {
-                      const isProfit = h.unrealized_pnl >= 0
-                      const pnlColor = isProfit ? '#10b981' : '#ef4444'
-
-                      let statusBadge = (
-                        <span style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
-                          🟢 In Safe Zone
-                        </span>
-                      )
-                      if (h.risk_status === 'TARGET_HIT') {
-                        statusBadge = (
-                          <span style={{ background: '#10b981', color: '#000', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800 }}>
-                            🚀 Target Hit (Sell!)
-                          </span>
-                        )
-                      } else if (h.risk_status === 'TARGET_APPROACHING') {
-                        statusBadge = (
-                          <span style={{ background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', border: '1px solid #38bdf8', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
-                            🎯 Approaching Target ({h.distance_to_target_pct}% away)
-                          </span>
-                        )
-                      } else if (h.risk_status === 'SL_HIT') {
-                        statusBadge = (
-                          <span style={{ background: '#ef4444', color: '#fff', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800 }}>
-                            🛑 Stop Loss Breached
-                          </span>
-                        )
-                      } else if (h.risk_status === 'SL_APPROACHING') {
-                        statusBadge = (
-                          <span style={{ background: 'rgba(239, 68, 68, 0.18)', color: '#ef4444', border: '1px solid #ef4444', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
-                            ⚠️ Approaching SL ({h.distance_to_sl_pct}% buffer)
-                          </span>
-                        )
+                    {radarAlerts.map(a => {
+                      const typeLabelMap: Record<string, { label: string; cls: string }> = {
+                        TARGET_PROXIMITY: { label: 'Near Target', cls: 'badge-buy' },
+                        TARGET_HIT: { label: 'Target Hit', cls: 'badge-buy' },
+                        STOP_LOSS_PROXIMITY: { label: 'Near SL', cls: 'badge-sell' },
+                        STOP_LOSS_HIT: { label: 'SL Hit', cls: 'badge-sell' },
+                        BUY_PROXIMITY: { label: 'Pullback Entry', cls: 'badge-watch' },
                       }
-
+                      const info = typeLabelMap[a.condition_type] || { label: a.condition_type, cls: 'badge-watch' }
                       return (
-                        <tr key={h.trade_id} style={{ background: h.is_target_approaching ? 'rgba(56, 189, 248, 0.04)' : h.is_sl_approaching ? 'rgba(239, 68, 68, 0.04)' : 'transparent' }}>
+                        <tr key={a.alert_id}>
+                          <td className="mono" style={{ fontWeight: 700 }}>{a.symbol}</td>
+                          <td><span className={`badge ${info.cls}`} style={{ fontSize: 10.5 }}>{info.label}</span></td>
+                          <td className="mono" style={{ fontWeight: 600 }}>₹{a.condition_value}</td>
+                          <td style={{ color: a.is_active ? 'var(--color-bullish)' : 'var(--color-text-muted)', fontSize: 12.5 }}>{a.is_active ? 'Active' : 'Inactive'}</td>
+                          <td style={{ fontSize: 12, color: 'var(--color-text-secondary)', maxWidth: 240 }}>{a.message || '—'}</td>
+                          <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>{a.triggered_at ? new Date(a.triggered_at).toLocaleString('en-IN') : 'Pending'}</td>
                           <td>
-                            <div style={{ fontWeight: 700, fontSize: 14 }}>{h.symbol}</div>
-                            <span style={{ fontSize: 10, background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: 3, color: 'var(--color-text-muted)' }}>
-                              {h.product_type}
-                            </span>
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ fontWeight: 600 }}>{h.quantity} shares</div>
-                            <div className="mono" style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>@ ₹{h.entry_price.toFixed(2)}</div>
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ fontWeight: 700, fontSize: 14 }}>
-                              ₹{h.cmp.toFixed(2)}
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              {a.is_active && <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => handleDeactivate(a.alert_id)}><BellOff size={13} /></button>}
+                              <button className="btn btn-danger" style={{ padding: '4px 8px' }} onClick={() => handleDelete(a.alert_id)}><Trash2 size={13} /></button>
                             </div>
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ color: pnlColor, fontWeight: 700 }}>
-                              {isProfit ? '+' : ''}₹{h.unrealized_pnl.toFixed(2)}
-                            </div>
-                            <div className="mono" style={{ color: pnlColor, fontSize: 11 }}>
-                              {isProfit ? '+' : ''}{h.pnl_pct.toFixed(2)}%
-                            </div>
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ fontWeight: 700, color: '#10b981' }}>
-                              ₹{h.target_price.toFixed(2)}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                              {h.distance_to_target_pct > 0 ? `${h.distance_to_target_pct}% to target` : 'Target reached'}
-                            </div>
-                          </td>
-
-                          <td>
-                            <div className="mono" style={{ fontWeight: 700, color: '#ef4444' }}>
-                              ₹{h.stop_loss.toFixed(2)}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                              {h.distance_to_sl_pct > 0 ? `${h.distance_to_sl_pct}% risk buffer` : 'SL breached'}
-                            </div>
-                          </td>
-
-                          <td>
-                            {statusBadge}
-                          </td>
-
-                          <td style={{ textAlign: 'right' }}>
-                            <button
-                              onClick={() => handleDirectExitHolding(h)}
-                              disabled={exitingTradeId === h.trade_id}
-                              style={{
-                                background: '#ff5722',
-                                color: '#ffffff',
-                                border: 'none',
-                                borderRadius: 6,
-                                padding: '5px 12px',
-                                fontSize: 12,
-                                fontWeight: 700,
-                                cursor: exitingTradeId === h.trade_id ? 'wait' : 'pointer',
-                                opacity: exitingTradeId === h.trade_id ? 0.7 : 1,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                              }}
-                              title="Close this open holding immediately at current market price"
-                            >
-                              {exitingTradeId === h.trade_id ? 'Closing...' : 'Exit / Sell'}
-                            </button>
                           </td>
                         </tr>
                       )
@@ -1507,124 +1325,22 @@ export default function AlertsPage() {
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
-        </div>
-      )}
 
-      {/* TAB 2: ZERODHA GTT TRIGGERS & PROXIMITY RADAR */}
-      {activeTab === 'RADAR' && (
-        <div className="card">
-          {/* Zerodha GTT Information & Action Banner */}
-          <div style={{
-            background: 'linear-gradient(90deg, rgba(56, 126, 209, 0.12), rgba(16, 185, 129, 0.12))',
-            border: '1px solid rgba(56, 189, 248, 0.25)',
-            borderRadius: 8,
-            padding: '12px 18px',
-            marginBottom: 16,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: 12,
-          }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Target size={16} />
-                <span>Zerodha Kite GTT (Good-Till-Triggered) & Proximity Radar</span>
+              <div className="mobile-only-cards">
+                {radarAlerts.map(a => (
+                  <div key={a.alert_id} style={{ padding: 12, borderRadius: 8, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <div>
+                      <strong className="mono">{a.symbol.replace('.NS', '')} · ₹{a.condition_value}</strong>
+                      <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>{a.condition_type.replace(/_/g, ' ')}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {a.is_active && <button className="btn btn-ghost" style={{ padding: '5px 8px' }} onClick={() => handleDeactivate(a.alert_id)}><BellOff size={13} /></button>}
+                      <button className="btn btn-danger" style={{ padding: '5px 8px' }} onClick={() => handleDelete(a.alert_id)}><Trash2 size={13} /></button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Automated OCO trigger orders valid until triggered. Monitors market prices and executes your buy/sell plans without keeping the terminal open.
-              </div>
-            </div>
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowGttSearchPrompt(true)}
-              style={{ fontSize: 12, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
-            >
-              <Target size={14} /> + Create GTT Trigger
-            </button>
-          </div>
-
-          <div className="card-title" style={{ marginBottom: 14 }}>
-            Active GTT Trigger Orders ({radarAlerts.length})
-          </div>
-
-          {loadingAlerts && <div className="loading">Loading GTT radar alerts…</div>}
-          
-          {!loadingAlerts && radarAlerts.length === 0 && (
-            <div className="empty-state" style={{ padding: '30px 20px', textAlign: 'center' }}>
-              <Target size={32} style={{ marginBottom: 8, opacity: 0.3 }} />
-              <div>No GTT proximity alerts set yet.</div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                Click <strong>+ Create GTT Trigger</strong> above or navigate to the <strong>Swing Screener</strong> and click the <strong>⚡ GTT</strong> button on any stock!
-              </div>
-            </div>
-          )}
-
-          {radarAlerts.length > 0 && (
-            <div className="table-container">
-              <table className="table" style={{ minWidth: '700px' }}>
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>GTT Trigger Type</th>
-                    <th>Trigger Value</th>
-                    <th>Status</th>
-                    <th>Trigger Rule / Message</th>
-                    <th>Last Triggered</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {radarAlerts.map(a => {
-                    let badge = <span style={{ color: '#38bdf8', fontWeight: 600 }}>⚡ {a.condition_type}</span>
-                    if (a.condition_type === 'TARGET_PROXIMITY') {
-                      badge = <span style={{ color: '#10b981', fontWeight: 700 }}>🎯 GTT TARGET (Sell Pre-Alert)</span>
-                    } else if (a.condition_type === 'TARGET_HIT') {
-                      badge = <span style={{ color: '#10b981', fontWeight: 800 }}>🚀 GTT TARGET (Hit)</span>
-                    } else if (a.condition_type === 'STOP_LOSS_PROXIMITY') {
-                      badge = <span style={{ color: '#ef4444', fontWeight: 700 }}>⚠️ GTT STOP LOSS (Warning)</span>
-                    } else if (a.condition_type === 'STOP_LOSS_HIT') {
-                      badge = <span style={{ color: '#ef4444', fontWeight: 800 }}>🛑 GTT STOP LOSS (Hit)</span>
-                    } else if (a.condition_type === 'BUY_PROXIMITY') {
-                      badge = <span style={{ color: '#387ed1', fontWeight: 700 }}>⚡ GTT BUY (Pullback Entry)</span>
-                    }
-
-                    return (
-                      <tr key={a.alert_id}>
-                        <td><span className="mono" style={{ fontWeight: 700 }}>{a.symbol}</span></td>
-                        <td>{badge}</td>
-                        <td className="mono" style={{ fontWeight: 600 }}>₹{a.condition_value}</td>
-                        <td>
-                          <span style={{ color: a.is_active ? 'var(--color-bullish)' : 'var(--color-text-muted)', fontSize: 13 }}>
-                            {a.is_active ? '● Active' : '○ Inactive'}
-                          </span>
-                        </td>
-                        <td style={{ fontSize: 12, color: 'var(--color-text-secondary)', maxWidth: 260 }}>
-                          {a.message || '—'}
-                        </td>
-                        <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
-                          {a.triggered_at ? new Date(a.triggered_at).toLocaleString('en-IN') : 'Waiting for trigger'}
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            {a.is_active && (
-                              <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => handleDeactivate(a.alert_id)}>
-                                <BellOff size={13} />
-                              </button>
-                            )}
-                            <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => handleDelete(a.alert_id)}>
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+            </>
           )}
         </div>
       )}
@@ -1633,68 +1349,68 @@ export default function AlertsPage() {
       {activeTab === 'CUSTOM' && (
         <div className="card">
           <div className="card-title" style={{ marginBottom: 14 }}>
-            Custom Technical & Indicator Alerts
+            Custom Technical Alerts ({customAlerts.length})
           </div>
 
           {loadingAlerts && <div className="loading">Loading custom alerts…</div>}
-          
+
           {!loadingAlerts && customAlerts.length === 0 && (
-            <div className="empty-state" style={{ padding: '30px 20px', textAlign: 'center' }}>
-              <Bell size={32} style={{ marginBottom: 8, opacity: 0.3 }} />
-              <div>No custom technical alerts configured yet.</div>
+            <div className="empty-state" style={{ padding: '28px 16px' }}>
+              No custom technical alerts configured yet.
             </div>
           )}
 
           {customAlerts.length > 0 && (
-            <div className="table-container">
-              <table className="table" style={{ minWidth: '600px' }}>
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>Condition</th>
-                    <th>Value</th>
-                    <th>Status</th>
-                    <th>Last Triggered</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {customAlerts.map(a => (
-                    <tr key={a.alert_id}>
-                      <td><span className="mono" style={{ fontWeight: 600 }}>{a.symbol}</span></td>
-                      <td style={{ color: 'var(--color-text-secondary)' }}>
-                        {CONDITION_TYPES.find(c => c.value === a.condition_type)?.label || a.condition_type}
-                      </td>
-                      <td className="mono">
-                        {a.condition_type === 'PATTERN' 
-                          ? (PATTERN_TYPES.find(p => String(p.value) === String(a.condition_value))?.label || a.condition_value)
-                          : a.condition_value}
-                      </td>
-                      <td>
-                        <span style={{ color: a.is_active ? 'var(--color-bullish)' : 'var(--color-text-muted)', fontSize: 13 }}>
-                          {a.is_active ? '● Active' : '○ Inactive'}
-                        </span>
-                      </td>
-                      <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
-                        {a.triggered_at ? new Date(a.triggered_at).toLocaleString('en-IN') : 'Never'}
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {a.is_active && (
-                            <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => handleDeactivate(a.alert_id)}>
-                              <BellOff size={13} />
-                            </button>
-                          )}
-                          <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => handleDelete(a.alert_id)}>
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
+            <>
+              <div className="table-container desktop-only-table" style={{ marginBottom: 0 }}>
+                <table className="table" style={{ minWidth: '600px' }}>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Condition</th>
+                      <th>Value</th>
+                      <th>Status</th>
+                      <th>Last Triggered</th>
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {customAlerts.map(a => (
+                      <tr key={a.alert_id}>
+                        <td className="mono" style={{ fontWeight: 600 }}>{a.symbol}</td>
+                        <td style={{ color: 'var(--color-text-secondary)' }}>{CONDITION_TYPES.find(c => c.value === a.condition_type)?.label || a.condition_type}</td>
+                        <td className="mono">{a.condition_type === 'PATTERN' ? (PATTERN_TYPES.find(p => String(p.value) === String(a.condition_value))?.label || a.condition_value) : a.condition_value}</td>
+                        <td style={{ color: a.is_active ? 'var(--color-bullish)' : 'var(--color-text-muted)', fontSize: 12.5 }}>{a.is_active ? 'Active' : 'Inactive'}</td>
+                        <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>{a.triggered_at ? new Date(a.triggered_at).toLocaleString('en-IN') : 'Never'}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            {a.is_active && <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => handleDeactivate(a.alert_id)}><BellOff size={13} /></button>}
+                            <button className="btn btn-danger" style={{ padding: '4px 8px' }} onClick={() => handleDelete(a.alert_id)}><Trash2 size={13} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mobile-only-cards">
+                {customAlerts.map(a => (
+                  <div key={a.alert_id} style={{ padding: 12, borderRadius: 8, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <div>
+                      <strong className="mono">{a.symbol.replace('.NS', '')}</strong>
+                      <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>
+                        {CONDITION_TYPES.find(c => c.value === a.condition_type)?.label || a.condition_type}: {a.condition_value}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {a.is_active && <button className="btn btn-ghost" style={{ padding: '5px 8px' }} onClick={() => handleDeactivate(a.alert_id)}><BellOff size={13} /></button>}
+                      <button className="btn btn-danger" style={{ padding: '5px 8px' }} onClick={() => handleDelete(a.alert_id)}><Trash2 size={13} /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}

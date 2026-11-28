@@ -5879,3 +5879,28 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - `npm --prefix frontend run build` (`tsc && vite build`): **1,997 modules transformed, 0 TypeScript errors, built in 20.33s**.
 - **Next Safe Step:**
   - Commit & push locally (`git add -A && git commit && git push origin main`), then execute on Oracle VM: `cd /home/opc/StockAI && git pull origin main && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend`.
+
+---
+
+### Session Entry 102
+- **Timestamp:** 2026-11-28 11:13:00 IST (05:43:00 UTC)
+- **User Prompt:**
+  `"i want clean ui for my system there are so many duplicates and all in it and some are in brackets() to tell me i want much cleaner ui and not want any bloatwares in it and check all website for mobile friendly ui also ... make it professional ... give me suggestions"` + `"ok you can go further with plan and all things but it want not affect the current workings of the system and also not interruptions in it ,and if yo find more bugs like this you can make changes to it for cleaner interface"`
+- **Root Causes Diagnosed & Remediated Across 26 Frontend Files (Zero Backend Disrupted):**
+  1. **Design System & Global Chrome (`index.css`, `formatters.ts`, `NavBar.tsx`, `LiveTicker.tsx`, `StockSearchBox.tsx`, `CookieConsentBanner.tsx`, `AIAssistantWidget.tsx`)**:
+     - Added missing `.btn-secondary`, `.button`, `.button-outline`, dark/light theme CSS variable aliases (`--surface-color`, `--bg-color`, `--border-color`, `--text-secondary`, `--color-primary`, `--color-accent`, `--color-bg-tertiary`, `--color-pnl-zero`), `minmax(0, 1fr)` grids, fluid mobile `.btn` wrapping (`height: auto !important`), `.desktop-only-table` / `.mobile-only-cards` responsive helpers, and mobile `.main-content` bottom clearance (`84px`).
+     - Consolidated `NavBar` into 7 primary links + `Tools ▾` dropdown + right-aligned `Settings` & `Admin` (keeping `NotificationBell` & red unseen counter badges intact) and grouped compact mobile navigation drawer.
+     - Added `userTypedRef` in `StockSearchBox` so pre-filled symbols (`NIFTY.NS`, `PERSISTENT.NS`) do not auto-open `"No stocks found"` popovers on mount; hid dismissed floating `Privacy & Cookies` badge (accessible via Settings); toned down AI chat FAB/header styling.
+  2. **Pages & Modals De-Duplication, Copy Cleanup & Mobile Card Layouts**:
+     - `Dashboard.tsx`, `ScannerPage.tsx`, `SMCWatchlist.tsx`, `HeatmapPage.tsx`, `PricingPage.tsx`: Ordered Index Cards first without incorrect `₹` on points/VIX, cleaned timestamps (`formatISTTimestamp`) & brief text (`cleanBriefMarkdown`), removed duplicate Scanner `Universe` dropdown & promo banners, fixed Pricing to `₹0` / `₹2,499` INR only, and improved mobile SMC/Heatmap sizing.
+     - `SwingScreenerPage.tsx`, `AlertsPage.tsx`, `PortfolioPage.tsx`, `PaperTradingPage.tsx`: Removed emoji/bracket noise & engineering jargon, compacted KPI/radar cards, added responsive mobile card views (`mobile-only-cards`) across Radar, Holdings Guard, GTT Triggers, Technical Alerts, Holdings, Pending Orders, Positions, and Sold History, and grouped multi-lot holdings (`TITAN.NS`) cleanly using keyed `<Fragment>`.
+     - `ChartPage.tsx`, `OptionsChainPage.tsx`, `BacktestPage.tsx`, `MarketDepthWidget.tsx`, `HoldingDetailModal.tsx`, `ZerodhaOrderModal.tsx`: Unified 3 duplicate Indicator controls into 1 `Indicators` dropdown, fixed rigid `repeat(3|4, 1fr)` & `minmax(>320px)` grids, fixed Backtest `--bg-secondary` CSS var typo, and added flexible header/control wrapping on Options.
+     - `SettingsPage.tsx`, `AdminPage.tsx`, `SentinelMonitorPage.tsx`, `LoginPage.tsx`: Unified conflicting Auto-Trader switch (`enable_swing_algo_trading`), removed redundant 3rd Swing Audit card in Settings (replaced with `/screener` link + `Cookie Settings` trigger), converted Admin tabs into horizontal `mobile-scroll-tabs`, made wide Admin/Sentinel/Broadcast grids responsive for `390px` viewports, and added responsive Google Sign-In button width + accessible label associations (`htmlFor`/`id`/`name`) in `LoginPage`.
+- **Verification Evidence:**
+  - `npm --prefix frontend run lint` (`eslint . --ext ts,tsx --report-unused-disable-directives`): **exit code 0 (0 errors, 0 warnings)**.
+  - `npm --prefix frontend run build` (`tsc && vite build`): **1,997 modules transformed, 0 TypeScript errors, built in 10.24s**.
+  - `npm --prefix frontend run test -- --run`: **10 passed, 0 failed** (`src/services/api.test.ts`).
+  - `pytest` across 6 backend suites (`test_notifications_and_admin_hub.py`, `test_alerts_radar_and_sold_portfolio.py`, `test_high_precision_ratchet_and_cycle_fix.py`, `test_audit_cycle_rollover_and_dedup.py`, `test_portfolio_holdings_analytics.py`, `test_options_engine.py`): **25 passed, 0 failed in 55.20s**.
+  - Live localhost (`http://127.0.0.1:5173`) browser audit (`390x844` mobile & `1440x900` / `1200x900` desktop): confirmed **0px horizontal overflow**, single-row desktop NavBar & compact mobile drawer, `/pricing` INR cards, `/login` Sign In & Register + dismissed `CookieConsentBanner` hiding floating badge. Authenticated routes (`admin@stockai.com / admin`) returned HTTP 401 on local `/api/auth/login`, leaving authenticated live visual verification to post-deploy user login.
+- **Next Safe Step:**
+  - Commit & push locally (`git add -A && git commit && git push origin main`), then execute on Oracle VM: `cd /home/opc/StockAI && git pull origin main && docker compose build frontend && docker compose up -d --no-build --force-recreate frontend`.

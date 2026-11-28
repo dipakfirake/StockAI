@@ -29,44 +29,41 @@ export default function HeatmapPage() {
     <div>
       <div className="page-header">
         <h1 className="page-title">Market Heatmap</h1>
-        <p className="page-subtitle">Nifty 50 visualizer based on Market Cap and Daily Change</p>
+        <p className="page-subtitle">Nifty 50 constituents sized by market cap and colored by daily change</p>
       </div>
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>
-          <Activity size={32} className="spinner" style={{ marginBottom: 16, opacity: 0.5 }} />
+          <Activity size={28} className="spinner" style={{ marginBottom: 12, opacity: 0.5 }} />
           <p>Loading market data...</p>
         </div>
       ) : (
-        <div className="card" style={{ padding: 16 }}>
+        <div className="card" style={{ padding: 12 }}>
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
             gap: 4,
             width: '100%',
-            height: 'calc(100vh - 200px)',
-            minHeight: 500,
+            minHeight: 360,
             alignContent: 'flex-start'
           }}>
             {sorted.map(stock => {
-              // Basic treemap logic using flex-grow
               const flexGrow = Math.max(1, (stock.market_cap || 1e12) / 1e11)
-              const flexBasis = Math.max(10, Math.min(30, flexGrow * 2)) + '%'
+              const flexBasis = Math.max(14, Math.min(32, flexGrow * 2)) + '%'
               const isPositive = stock.change_pct >= 0
               const absChange = Math.abs(stock.change_pct || 0)
-              
-              // Color intensity based on % change
-              const intensity = Math.min(1, absChange / 3) // Cap at 3%
-              let bg = isPositive 
-                ? `rgba(16, 185, 129, ${0.4 + (intensity * 0.6)})`
-                : `rgba(239, 68, 68, ${0.4 + (intensity * 0.6)})`
-                
+
+              const intensity = Math.min(1, absChange / 3)
+              let bg = isPositive
+                ? `rgba(16, 185, 129, ${0.35 + (intensity * 0.5)})`
+                : `rgba(239, 68, 68, ${0.35 + (intensity * 0.5)})`
+
               if (absChange < 0.2) {
                 bg = 'var(--color-bg-tertiary)'
               }
 
               return (
-                <div 
+                <div
                   key={stock.symbol}
                   onClick={() => navigate('/chart', { state: { symbol: stock.symbol } })}
                   role="button"
@@ -76,26 +73,27 @@ export default function HeatmapPage() {
                     flexBasis,
                     background: bg,
                     borderRadius: 4,
-                    padding: 8,
+                    padding: '8px 6px',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'center',
                     alignItems: 'center',
                     cursor: 'pointer',
-                    color: '#fff',
-                    transition: 'transform 0.2s, opacity 0.2s',
-                    minWidth: 80,
-                    minHeight: 60,
-                    overflow: 'hidden'
+                    color: absChange < 0.2 ? 'var(--color-text-primary)' : '#fff',
+                    transition: 'opacity 0.15s',
+                    minWidth: 74,
+                    minHeight: 58,
+                    overflow: 'hidden',
+                    textAlign: 'center',
                   }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.82'}
                   onMouseLeave={e => e.currentTarget.style.opacity = '1'}
                 >
-                  <div style={{ fontWeight: 700, fontSize: 'clamp(11px, 1.2vw, 16px)' }}>
+                  <div style={{ fontWeight: 700, fontSize: 'clamp(11px, 1.1vw, 15px)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                     {stock.symbol.replace('.NS', '')}
                   </div>
-                  <div style={{ fontSize: 'clamp(10px, 1vw, 13px)', opacity: 0.9 }}>
-                    {stock.change_pct > 0 ? '+' : ''}{stock.change_pct.toFixed(2)}%
+                  <div className="mono" style={{ fontSize: 'clamp(10px, 0.95vw, 12px)', opacity: 0.92 }}>
+                    {stock.change_pct > 0 ? '+' : ''}{Number(stock.change_pct || 0).toFixed(2)}%
                   </div>
                 </div>
               )

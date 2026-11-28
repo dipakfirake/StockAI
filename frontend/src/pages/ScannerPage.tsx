@@ -1,31 +1,31 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { stocksApi } from '../services/api'
 import api from '../services/api'
 import { Search, Filter, Activity, BarChart2, Plus, Trash2 } from 'lucide-react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 
 const SCANNER_RULES = [
-  { id: 'EMA_BULLISH_CROSS', name: 'EMA Bullish Trend (EMA9 > EMA21)', desc: 'Fast EMA9 is trading above slow EMA21 (Bullish short-term momentum)' },
-  { id: 'MACD_BULLISH', name: 'MACD Bullish Histogram (+)', desc: 'MACD Histogram is positive, signaling upward trend acceleration' },
-  { id: 'SUPERTREND_BUY', name: 'SuperTrend Buy (Green / UP)', desc: 'SuperTrend indicator is active in Green / Bullish buy territory' },
-  { id: 'RSI_BULLISH_MOMENTUM', name: 'RSI Momentum Zone (50 - 70)', desc: 'Healthy sustained bullish momentum without being overextended' },
-  { id: 'PRICE_ABOVE_200SMA', name: 'Institutional Uptrend (Price > 200 SMA)', desc: 'Stock is trading above its 200-day Simple Moving Average' },
-  { id: 'RSI_OVERSOLD', name: 'RSI Deep Oversold (< 30)', desc: 'Severely oversold conditions suitable for mean-reversion bounces' },
-  { id: 'RSI_OVERBOUGHT', name: 'RSI Breakout / Overbought (> 70)', desc: 'High-velocity momentum breakouts with strong buyer aggression' },
-  { id: 'BB_SQUEEZE', name: 'Bollinger Band Squeeze (< 8%)', desc: 'Volatility compression preceding explosive directional breakouts' },
+  { id: 'EMA_BULLISH_CROSS', name: 'EMA9 / EMA21 Bullish Cross', desc: 'Fast 9-EMA trading above slow 21-EMA' },
+  { id: 'MACD_BULLISH', name: 'MACD Histogram Positive', desc: 'Upward trend acceleration via positive MACD histogram' },
+  { id: 'SUPERTREND_BUY', name: 'SuperTrend Bullish', desc: 'Price holds above SuperTrend support band' },
+  { id: 'RSI_BULLISH_MOMENTUM', name: 'RSI Momentum Zone 50–70', desc: 'Sustained bullish momentum without extreme overbought extension' },
+  { id: 'PRICE_ABOVE_200SMA', name: 'Above 200-Day SMA', desc: 'Long-term institutional uptrend structure' },
+  { id: 'RSI_OVERSOLD', name: 'RSI Oversold < 30', desc: 'Mean-reversion pullback setup in oversold territory' },
+  { id: 'RSI_OVERBOUGHT', name: 'RSI Breakout > 70', desc: 'High-velocity momentum breakout territory' },
+  { id: 'BB_SQUEEZE', name: 'Bollinger Volatility Squeeze', desc: 'Tight bandwidth below 8% preceding directional expansion' },
 ]
 
 const SECTORS = [
-  { id: 'Nifty 50', name: 'Nifty 50 (Full Benchmark Universe)' },
-  { id: 'Nifty Bank', name: 'Nifty Bank (10 Major Banks)' },
-  { id: 'Nifty IT', name: 'Nifty IT (Tech Leaders)' },
-  { id: 'Nifty Auto', name: 'Nifty Auto (Auto OEM & Ancillaries)' },
-  { id: 'Nifty FMCG', name: 'Nifty FMCG (Consumer Goods)' },
-  { id: 'Nifty Metal', name: 'Nifty Metal (Steel, Aluminium & Mining)' },
-  { id: 'Nifty Pharma', name: 'Nifty Pharma (Healthcare & Formulations)' },
-  { id: 'Nifty Realty', name: 'Nifty Realty (Real Estate Leaders)' },
-  { id: 'Nifty Energy', name: 'Nifty Energy (Oil, Power & Utilities)' },
+  { id: 'Nifty 50', name: 'Nifty 50' },
+  { id: 'Nifty Bank', name: 'Nifty Bank' },
+  { id: 'Nifty IT', name: 'Nifty IT' },
+  { id: 'Nifty Auto', name: 'Nifty Auto' },
+  { id: 'Nifty FMCG', name: 'Nifty FMCG' },
+  { id: 'Nifty Metal', name: 'Nifty Metal' },
+  { id: 'Nifty Pharma', name: 'Nifty Pharma' },
+  { id: 'Nifty Realty', name: 'Nifty Realty' },
+  { id: 'Nifty Energy', name: 'Nifty Energy' },
 ]
 
 export default function ScannerPage() {
@@ -80,58 +80,21 @@ export default function ScannerPage() {
     <div>
       <div className="page-header">
         <h1 className="page-title">Market Scanner</h1>
-        <p className="page-subtitle">Real-time multi-condition technical setup scanner powered by Fyers API v3</p>
+        <p className="page-subtitle">Scan NSE indices using preset signals or custom multi-condition rules</p>
       </div>
 
-      {/* Direct Quick Link to AI Swing Screener Hub */}
-      <div 
-        style={{ 
-          marginBottom: 20, 
-          padding: '14px 18px', 
-          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(16, 185, 129, 0.08))', 
-          border: '1px solid rgba(59, 130, 246, 0.3)', 
-          borderRadius: 12,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 12
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(59, 130, 246, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa' }}>
-            <Activity size={20} />
-          </div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-text-primary)' }}>
-              Looking for High-Precision Swing Trade Categorized Lists?
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-              Get automated Buy (T1/T2/T3 setups), Sell (Short breakdowns), and Hold lists with entry &amp; risk/reward without opening individual charts.
-            </div>
-          </div>
-        </div>
-        <Link 
-          to="/screener" 
-          className="btn btn-primary" 
-          style={{ fontSize: 13, padding: '8px 16px', textDecoration: 'none' }}
-        >
-          Open AI Swing Screener →
-        </Link>
-      </div>
-
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', gap: 16, marginBottom: 16, borderBottom: '1px solid var(--color-border)', paddingBottom: 16 }}>
-          <button onClick={() => setScanMode('basic')} className={`btn ${scanMode === 'basic' ? 'btn-primary' : 'btn-ghost'}`}>Presets</button>
-          <button onClick={() => setScanMode('custom')} className={`btn ${scanMode === 'custom' ? 'btn-primary' : 'btn-ghost'}`}>Custom Rules</button>
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, borderBottom: '1px solid var(--color-border)', paddingBottom: 14, flexWrap: 'wrap' }}>
+          <button type="button" onClick={() => setScanMode('basic')} className={`btn ${scanMode === 'basic' ? 'btn-primary' : 'btn-ghost'}`}>Presets</button>
+          <button type="button" onClick={() => setScanMode('custom')} className={`btn ${scanMode === 'custom' ? 'btn-primary' : 'btn-ghost'}`}>Custom Rules</button>
         </div>
         
-        <form onSubmit={handleScan} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <form onSubmit={handleScan} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {scanMode === 'basic' ? (
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <label style={{ display: 'block', fontSize: 13, marginBottom: 8, color: 'var(--color-text-secondary)' }}>
-                  Universe / Sector
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                <label style={{ display: 'block', fontSize: 12.5, marginBottom: 6, color: 'var(--color-text-secondary)', fontWeight: 600 }}>
+                  Universe
                 </label>
                 <select 
                   className="input" 
@@ -145,9 +108,9 @@ export default function ScannerPage() {
                 </select>
               </div>
 
-              <div style={{ flex: 2, minWidth: 280 }}>
-                <label style={{ display: 'block', fontSize: 13, marginBottom: 8, color: 'var(--color-text-secondary)' }}>
-                  Scan Setup Preset
+              <div style={{ flex: '2 1 240px', minWidth: 0 }}>
+                <label style={{ display: 'block', fontSize: 12.5, marginBottom: 6, color: 'var(--color-text-secondary)', fontWeight: 600 }}>
+                  Signal Preset
                 </label>
                 <select 
                   className="input" 
@@ -165,12 +128,16 @@ export default function ScannerPage() {
               </div>
             </div>
           ) : (
-            <div style={{ background: 'var(--color-bg-secondary)', padding: 16, borderRadius: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h3 style={{ fontSize: 14 }}>Custom Rule Builder</h3>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <label style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Timeframe:</label>
-                  <select className="input" value={timeframe} onChange={e => setTimeframe(e.target.value)} style={{ padding: '4px 8px', fontSize: 12 }}>
+            <div style={{ background: 'var(--color-bg-secondary)', padding: 14, borderRadius: 8, border: '1px solid var(--color-border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <h3 style={{ fontSize: 14, margin: 0 }}>Custom Conditions</h3>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select className="input" value={selectedSector} onChange={e => setSelectedSector(e.target.value)} style={{ width: 'auto', minWidth: 130, padding: '5px 10px', fontSize: 12.5 }}>
+                    {SECTORS.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <select className="input" value={timeframe} onChange={e => setTimeframe(e.target.value)} style={{ width: 'auto', padding: '5px 10px', fontSize: 12.5 }}>
                     <option value="1m">1 Min</option>
                     <option value="5m">5 Min</option>
                     <option value="15m">15 Min</option>
@@ -179,7 +146,7 @@ export default function ScannerPage() {
                 </div>
               </div>
               {customConditions.map((cond, idx) => (
-                <div key={idx} style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center' }}>
+                <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <select 
                     className="input" 
                     value={cond.indicator} 
@@ -188,8 +155,9 @@ export default function ScannerPage() {
                       newConds[idx].indicator = e.target.value;
                       setCustomConditions(newConds);
                     }}
+                    style={{ flex: '2 1 140px', minWidth: 0 }}
                   >
-                    <option value="rsi_14">RSI (14)</option>
+                    <option value="rsi_14">RSI 14</option>
                     <option value="macd_macd">MACD Line</option>
                     <option value="macd_histogram">MACD Histogram</option>
                     <option value="ema_9">EMA 9</option>
@@ -198,8 +166,8 @@ export default function ScannerPage() {
                     <option value="ema_200">EMA 200</option>
                     <option value="sma_50">SMA 50</option>
                     <option value="sma_200">SMA 200</option>
-                    <option value="adx_14">ADX (14)</option>
-                    <option value="atr_14">ATR (14)</option>
+                    <option value="adx_14">ADX 14</option>
+                    <option value="atr_14">ATR 14</option>
                     <option value="bb_upper">BB Upper</option>
                     <option value="bb_lower">BB Lower</option>
                     <option value="vwap">VWAP</option>
@@ -215,7 +183,7 @@ export default function ScannerPage() {
                       newConds[idx].operator = e.target.value;
                       setCustomConditions(newConds);
                     }}
-                    style={{ width: 80 }}
+                    style={{ flex: '0 0 72px' }}
                   >
                     <option value=">">&gt;</option>
                     <option value="<">&lt;</option>
@@ -230,8 +198,8 @@ export default function ScannerPage() {
                       newConds[idx].value = e.target.value;
                       setCustomConditions(newConds);
                     }}
-                    placeholder="Value (e.g. 30)"
-                    style={{ width: 120 }}
+                    placeholder="Value"
+                    style={{ flex: '1 1 90px', minWidth: 0 }}
                   />
                   
                   {customConditions.length > 1 && (
@@ -242,32 +210,16 @@ export default function ScannerPage() {
                 </div>
               ))}
               
-              <button type="button" onClick={() => setCustomConditions([...customConditions, { indicator: 'rsi_14', operator: '<', value: '30' }])} className="btn btn-secondary" style={{ fontSize: 13 }}>
-                <Plus size={14} style={{ marginRight: 4 }}/> Add Condition
+              <button type="button" onClick={() => setCustomConditions([...customConditions, { indicator: 'rsi_14', operator: '<', value: '30' }])} className="btn btn-secondary" style={{ fontSize: 12.5 }}>
+                <Plus size={14} /> Add Condition
               </button>
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', marginTop: 8 }}>
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <label style={{ display: 'block', fontSize: 13, marginBottom: 8, color: 'var(--color-text-secondary)' }}>
-                Universe
-              </label>
-              <select 
-                className="input" 
-                value={selectedSector} 
-                onChange={e => setSelectedSector(e.target.value)}
-                style={{ width: '100%', cursor: 'pointer' }}
-              >
-                {SECTORS.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-            
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? <span className="spinner" /> : <Filter size={16} />}
-              {loading ? 'Scanning Universe...' : 'Run Scanner'}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button type="submit" className="btn btn-primary mobile-w-100" disabled={loading}>
+              <Filter size={15} />
+              {loading ? `Scanning ${selectedSector}…` : 'Run Scan'}
             </button>
           </div>
         </form>
@@ -275,56 +227,77 @@ export default function ScannerPage() {
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>
-          <Activity size={32} className="spinner" style={{ marginBottom: 16, opacity: 0.5 }} />
-          <p>Analyzing technicals for Nifty 50 stocks...</p>
+          <Activity size={28} className="spinner" style={{ marginBottom: 12, opacity: 0.5 }} />
+          <p>Scanning {selectedSector}…</p>
         </div>
       )}
 
       {!loading && scannedCount > 0 && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600 }}>Scan Results</h2>
-            <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
-              Found {results.length} matches out of {scannedCount} stocks scanned
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Scan Results</h2>
+            <div style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>
+              {results.length} matches across {scannedCount} stocks
             </div>
           </div>
 
           {results.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '60px 0', color: 'var(--color-text-muted)' }}>
-              <BarChart2 size={32} style={{ marginBottom: 16, opacity: 0.3 }} />
+            <div className="card" style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--color-text-muted)' }}>
+              <BarChart2 size={28} style={{ marginBottom: 12, opacity: 0.35 }} />
               <p>No stocks matched the selected criteria.</p>
             </div>
           ) : (
-            <div className="card table-container" style={{ padding: 0, overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)' }}>Symbol</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)' }}>Rule Matched</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)' }}>Details</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)', textAlign: 'right' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                      <td style={{ padding: '12px 16px', fontWeight: 600 }}>{r.symbol}</td>
-                      <td style={{ padding: '12px 16px' }}><span className="badge badge-watch">{scanMode === 'basic' ? r.rule : 'CUSTOM'}</span></td>
-                      <td style={{ padding: '12px 16px', fontSize: 13, color: 'var(--color-text-muted)' }}>{r.detail}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <button 
-                          onClick={() => navigate('/chart', { state: { symbol: r.symbol } })} 
-                          className="btn btn-secondary" 
-                          style={{ fontSize: 12, padding: '4px 12px', cursor: 'pointer' }}
-                        >
-                          View Chart
-                        </button>
-                      </td>
+            <>
+              <div className="card table-container desktop-only-table" style={{ padding: 0 }}>
+                <table className="table" style={{ margin: 0 }}>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Rule</th>
+                      <th>Details</th>
+                      <th style={{ textAlign: 'right' }}>Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {results.map((r, i) => (
+                      <tr key={i}>
+                        <td style={{ fontWeight: 600 }}>{r.symbol}</td>
+                        <td><span className="badge badge-watch">{scanMode === 'basic' ? r.rule : 'CUSTOM'}</span></td>
+                        <td style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{r.detail}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            onClick={() => navigate('/chart', { state: { symbol: r.symbol } })}
+                            className="btn btn-secondary"
+                            style={{ fontSize: 12, padding: '5px 12px' }}
+                          >
+                            Chart
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mobile-only-cards">
+                {results.map((r, i) => (
+                  <div key={i} className="card" style={{ padding: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <strong style={{ fontSize: 15 }}>{r.symbol.replace('.NS', '')}</strong>
+                      <span className="badge badge-watch">{scanMode === 'basic' ? r.rule : 'CUSTOM'}</span>
+                    </div>
+                    <div style={{ fontSize: 12.5, color: 'var(--color-text-muted)', marginBottom: 10 }}>{r.detail}</div>
+                    <button
+                      onClick={() => navigate('/chart', { state: { symbol: r.symbol } })}
+                      className="btn btn-secondary w-100"
+                      style={{ fontSize: 13 }}
+                    >
+                      Open Chart
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}

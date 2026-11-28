@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import {
   LayoutDashboard,
@@ -21,6 +21,9 @@ import {
   Target,
   Radar,
   Shield,
+  ChevronDown,
+  Grid,
+  Star,
 } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
@@ -33,15 +36,33 @@ import NotificationBell from './NotificationBell'
 
 export default function NavBar() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, loading: authLoading, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [watchlistOpen, setWatchlistOpen] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
   const [userUnseenCount, setUserUnseenCount] = useState(0)
   const [adminUnseenCount, setAdminUnseenCount] = useState(0)
   const prevAdminUnseenRef = useRef<number | null>(null)
+  const toolsRef = useRef<HTMLDivElement>(null)
 
   const isAdmin = Boolean(user?.is_admin)
+
+  useEffect(() => {
+    setToolsOpen(false)
+    setMobileMenuOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
+        setToolsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
 
   useEffect(() => {
     if (!user) {
@@ -102,24 +123,29 @@ export default function NavBar() {
     }
   }, [user, isAdmin])
 
-  const links = [
+  const primaryLinks = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/screener', label: 'Swing Screener', icon: Radar },
-    { to: '/paper-trading', label: 'Orders & Positions', icon: Briefcase },
+    { to: '/screener', label: 'Screener', icon: Radar },
+    { to: '/paper-trading', label: 'Orders', icon: Briefcase },
     { to: '/portfolio', label: 'Holdings', icon: PieChart },
-    { to: '/options', label: 'F&O Chain', icon: Activity },
     { to: '/chart', label: 'Charts', icon: CandlestickChart },
-    { to: '/smc-watchlist', label: 'Pre-Market SMC', icon: Target },
-    { to: '/backtest', label: 'Backtest', icon: FlaskConical },
-    { to: '/scanner', label: 'Scanner', icon: Search },
+    { to: '/options', label: 'F&O', icon: Activity },
     { to: '/alerts', label: 'Alerts', icon: Bell },
-    { to: '/settings', label: 'Settings', icon: Settings },
   ]
 
-  if (isAdmin) {
-    links.push({ to: '/admin', label: 'Admin Control', icon: Shield })
-  }
+  const toolLinks = [
+    { to: '/scanner', label: 'Technical Scanner', icon: Search },
+    { to: '/smc-watchlist', label: 'SMC Liquidity Zones', icon: Target },
+    { to: '/heatmap', label: 'Market Heatmap', icon: Grid },
+    { to: '/backtest', label: 'Strategy Backtest', icon: FlaskConical },
+  ]
 
+  const systemLinks = [
+    { to: '/settings', label: 'Settings', icon: Settings },
+    ...(isAdmin ? [{ to: '/admin', label: 'Admin', icon: Shield }] : []),
+  ]
+
+  const isToolsActive = toolLinks.some((t) => location.pathname.startsWith(t.to))
   const isPro = user?.subscription_tier === 'PRO'
 
   return (
@@ -127,15 +153,14 @@ export default function NavBar() {
       {/* =========================================================================
           DESKTOP VIEW (Screens > 768px): Dual-Row Header
          ========================================================================= */}
-      <div className="navbar-desktop-row" style={{ display: 'flex', alignItems: 'center', height: '60px', padding: '0 20px', borderBottom: '1px solid var(--color-border)', width: '100%', boxSizing: 'border-box' }}>
-        <NavLink to="/dashboard" className="navbar-brand" style={{ flexShrink: 0, marginRight: 16, textDecoration: 'none', cursor: 'pointer' }}>
-          <TrendingUp size={22} />
-          AI<span>Stock</span>
+      <div className="navbar-desktop-row" style={{ display: 'flex', alignItems: 'center', height: '60px', padding: '0 20px', borderBottom: '1px solid var(--color-border)', width: '100%', boxSizing: 'border-box', gap: '12px' }}>
+        <NavLink to="/dashboard" className="navbar-brand" style={{ flexShrink: 0, marginRight: 8, textDecoration: 'none', cursor: 'pointer' }}>
+          <TrendingUp size={21} />
+          Stock<span>AI</span>
         </NavLink>
 
         {user && <LiveTicker />}
 
-        {/* FIX: Show subtle 'Connecting…' while auth check is in flight (no cache) */}
         {!user && authLoading && (
           <div style={{ marginLeft: 'auto', opacity: 0.45, fontSize: '0.78rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3b82f6', display: 'inline-block', animation: 'pulse 1.4s ease-in-out infinite' }} />
@@ -144,96 +169,97 @@ export default function NavBar() {
         )}
 
         {user ? (
-          <div className="nav-actions" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <StockSearchBox width={220} placeholder="Search symbol or company..." />
-            
+          <div className="nav-actions" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+            <StockSearchBox width={235} placeholder="Search symbol..." />
+
             {!isPro ? (
-              <NavLink to="/pricing" style={{ 
+              <NavLink to="/pricing" style={{
                 flexShrink: 0,
-                background: 'linear-gradient(90deg, #3b82f6, #2563eb)', 
-                color: 'white', 
-                padding: '6px 12px', 
-                borderRadius: '20px', 
+                background: 'var(--color-accent-blue)',
+                color: 'white',
+                padding: '6px 12px',
+                borderRadius: '18px',
                 textDecoration: 'none',
-                fontSize: '0.82rem',
-                fontWeight: 700,
+                fontSize: '0.8rem',
+                fontWeight: 600,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '5px',
                 whiteSpace: 'nowrap'
               }}>
-                <Crown size={14} /> Upgrade PRO
+                <Crown size={13} /> Upgrade PRO
               </NavLink>
             ) : (
-              <span style={{ 
-                flexShrink: 0, 
-                whiteSpace: 'nowrap', 
-                color: '#4ade80', 
-                background: 'rgba(34,197,94,0.15)',
+              <span style={{
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+                color: '#10b981',
+                background: 'rgba(16, 185, 129, 0.14)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
                 padding: '4px 10px',
                 borderRadius: '16px',
-                fontWeight: 700, 
-                fontSize: '0.8rem', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '4px' 
+                fontWeight: 700,
+                fontSize: '0.75rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
               }}>
-                <Crown size={14} /> PRO
+                <Crown size={12} /> PRO
               </span>
             )}
-            
-            <button 
+
+            <button
               onClick={toggleTheme}
               aria-label="Toggle Theme"
               title="Toggle Theme"
               style={{
                 flexShrink: 0,
                 background: 'transparent', border: 'none', color: 'var(--color-text-primary)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '50%'
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '7px', borderRadius: '50%'
               }}
             >
-              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
 
             <NotificationBell />
-            
-            <button 
+
+            <button
               onClick={() => setWatchlistOpen(true)}
               aria-label="Open Watchlist"
-              title="Open Watchlist"
+              title="Watchlist"
               style={{
                 flexShrink: 0,
-                background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--color-text-primary)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 10px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600
+                background: 'transparent', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', padding: '6px 10px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap'
               }}
             >
-              Watchlist
+              <Star size={14} /> Watchlist
             </button>
 
-            <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: '0.85rem', color: 'var(--color-text-secondary)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: '0.82rem', color: 'var(--color-text-secondary)', maxWidth: '130px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {user.name}
             </span>
 
-            <button 
-              onClick={() => { logout(); navigate('/login'); }} 
+            <button
+              onClick={() => { logout(); navigate('/login'); }}
               aria-label="Logout"
-              title="Logout" 
-              style={{ 
+              title="Sign Out"
+              style={{
                 flexShrink: 0,
-                background: 'rgba(239, 68, 68, 0.1)', 
-                border: '1px solid rgba(239, 68, 68, 0.2)', 
-                color: '#ef4444', 
-                cursor: 'pointer', 
-                display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                padding: '6px', borderRadius: '50%'
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                color: '#ef4444',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '7px', borderRadius: '6px'
               }}
             >
-              <LogOut size={16} />
+              <LogOut size={15} />
             </button>
           </div>
         ) : (
           <div className="nav-actions" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button 
+            <button
               onClick={toggleTheme}
               aria-label="Toggle Theme"
               title="Toggle Theme"
@@ -245,11 +271,11 @@ export default function NavBar() {
             >
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <NavLink 
+            <NavLink
               to="/login"
               style={{
                 flexShrink: 0,
-                background: '#3b82f6',
+                background: 'var(--color-accent-blue)',
                 color: 'white',
                 padding: '6px 16px',
                 borderRadius: '8px',
@@ -259,7 +285,6 @@ export default function NavBar() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                boxShadow: '0 2px 8px rgba(59, 130, 246, 0.3)'
               }}
             >
               <LogIn size={15} /> Sign In
@@ -268,18 +293,17 @@ export default function NavBar() {
         )}
       </div>
 
-      {/* Desktop Bottom Row: Nav Links */}
-      <div className="navbar-desktop-row" style={{ display: 'flex', alignItems: 'center', height: '50px', padding: '0 20px', overflowX: 'auto', borderBottom: '1px solid var(--color-border)', width: '100%', boxSizing: 'border-box' }}>
+      {/* Desktop Bottom Row: Consolidated Navigation (Fits cleanly on 1024px–1440px+ without overflow) */}
+      <div className="navbar-desktop-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '48px', padding: '0 20px', borderBottom: '1px solid var(--color-border)', width: '100%', boxSizing: 'border-box' }}>
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'nowrap' }}>
-          {links.map(({ to, label, icon: Icon }) => {
-            const linkBadge =
-              to === '/alerts' ? userUnseenCount : to === '/admin' ? adminUnseenCount : 0
+          {primaryLinks.map(({ to, label, icon: Icon }) => {
+            const linkBadge = to === '/alerts' ? userUnseenCount : 0
             return (
               <NavLink
                 key={to}
                 to={to}
                 className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', position: 'relative' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', position: 'relative' }}
               >
                 <Icon size={14} />
                 <span>{label}</span>
@@ -288,12 +312,111 @@ export default function NavBar() {
                     style={{
                       minWidth: 16,
                       height: 16,
-                      padding: '0 4px',
+                      padding: '0 5px',
                       borderRadius: 999,
                       background: '#ef4444',
                       color: '#ffffff',
                       fontSize: 10,
-                      fontWeight: 800,
+                      fontWeight: 700,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      lineHeight: 1,
+                    }}
+                  >
+                    {linkBadge > 99 ? '99+' : linkBadge}
+                  </span>
+                )}
+              </NavLink>
+            )
+          })}
+
+          {/* Consolidated Tools Dropdown */}
+          <div ref={toolsRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setToolsOpen((o) => !o)}
+              className={`navbar-link${isToolsActive ? ' active' : ''}`}
+              style={{
+                background: isToolsActive ? 'var(--color-bg-card)' : 'transparent',
+                border: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+              }}
+              aria-expanded={toolsOpen}
+            >
+              <Grid size={14} />
+              <span>Tools</span>
+              <ChevronDown size={13} style={{ transform: toolsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+            </button>
+
+            {toolsOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  minWidth: '210px',
+                  background: 'var(--color-bg-secondary)',
+                  border: '1px solid var(--color-border-light)',
+                  borderRadius: '10px',
+                  boxShadow: '0 14px 30px rgba(0, 0, 0, 0.45)',
+                  padding: '6px',
+                  zIndex: 1200,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '2px',
+                }}
+              >
+                {toolLinks.map(({ to, label, icon: Icon }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    onClick={() => setToolsOpen(false)}
+                    className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '9px',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      width: '100%',
+                    }}
+                  >
+                    <Icon size={14} />
+                    <span>{label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right System Controls */}
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+          {systemLinks.map(({ to, label, icon: Icon }) => {
+            const linkBadge = to === '/admin' ? adminUnseenCount : 0
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+                {linkBadge > 0 && (
+                  <span
+                    style={{
+                      minWidth: 16,
+                      height: 16,
+                      padding: '0 5px',
+                      borderRadius: 999,
+                      background: '#ef4444',
+                      color: '#ffffff',
+                      fontSize: 10,
+                      fontWeight: 700,
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -317,49 +440,53 @@ export default function NavBar() {
         alignItems: 'center',
         justifyContent: 'space-between',
         height: '56px',
-        padding: '0 14px',
+        padding: '0 12px',
         width: '100%',
         boxSizing: 'border-box',
         borderBottom: '1px solid var(--color-border)',
         background: 'var(--color-bg-secondary)'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button 
-            className="nav-menu-button" 
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)} 
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            className="nav-menu-button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             aria-label="Toggle navigation menu"
             style={{
               background: 'transparent',
               border: 'none',
               color: 'var(--color-text-primary)',
               cursor: 'pointer',
+              minWidth: 36,
+              minHeight: 36,
               padding: '6px',
               display: 'flex',
-              alignItems: 'center'
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
           >
-            {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+            {mobileMenuOpen ? <X size={21} /> : <Menu size={21} />}
           </button>
 
-          <NavLink to="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none', color: 'inherit' }}>
-            <TrendingUp size={20} color="var(--color-accent-blue)" />
-            <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>AI<span style={{ color: 'var(--color-accent-blue)' }}>Stock</span></span>
+          <NavLink to="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none', color: 'inherit', padding: '4px 0' }}>
+            <TrendingUp size={19} color="var(--color-accent-blue)" />
+            <span style={{ fontWeight: 800, fontSize: '1.05rem' }}>Stock<span style={{ color: 'var(--color-accent-blue)' }}>AI</span></span>
           </NavLink>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {user && !isPro && (
             <NavLink to="/pricing" style={{
               background: 'var(--color-accent-blue)',
               color: 'white',
-              padding: '4px 8px',
-              borderRadius: '12px',
+              padding: '5px 10px',
+              borderRadius: '14px',
               fontSize: '0.72rem',
               fontWeight: 700,
               textDecoration: 'none',
               display: 'flex',
               alignItems: 'center',
-              gap: '4px'
+              gap: '4px',
+              minHeight: 28,
             }}>
               <Crown size={12} /> PRO
             </NavLink>
@@ -367,28 +494,33 @@ export default function NavBar() {
 
           {user && isPro && (
             <span style={{
-              background: 'rgba(34,197,94,0.2)',
-              color: '#4ade80',
+              background: 'rgba(16, 185, 129, 0.16)',
+              color: '#10b981',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
               padding: '3px 8px',
               borderRadius: '12px',
-              fontSize: '0.72rem',
+              fontSize: '0.7rem',
               fontWeight: 700
             }}>
               PRO
             </span>
           )}
 
-          <button 
+          <button
             onClick={toggleTheme}
-            aria-label="Toggle theme (dark/light)"
+            aria-label="Toggle theme"
             title="Toggle theme"
             style={{
               background: 'transparent',
               border: 'none',
               color: 'var(--color-text-primary)',
               cursor: 'pointer',
+              minWidth: 36,
+              minHeight: 36,
               padding: '6px',
-              display: 'flex'
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
           >
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
@@ -397,22 +529,25 @@ export default function NavBar() {
           {user && <NotificationBell compact={true} />}
 
           {user && (
-            <button 
+            <button
               onClick={() => setWatchlistOpen(true)}
               aria-label="Open Watchlist"
-              title="Open Watchlist"
+              title="Watchlist"
               style={{
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid var(--border-color)',
+                background: 'var(--color-bg-card)',
+                border: '1px solid var(--color-border)',
                 color: 'var(--color-text-primary)',
-                borderRadius: '6px',
-                padding: '4px 8px',
-                fontSize: '0.75rem',
-                fontWeight: 600,
+                borderRadius: '8px',
+                minWidth: 36,
+                minHeight: 36,
+                padding: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 cursor: 'pointer'
               }}
             >
-              ⭐
+              <Star size={16} />
             </button>
           )}
         </div>
@@ -426,7 +561,7 @@ export default function NavBar() {
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(0,0,0,0.6)',
+          background: 'rgba(0,0,0,0.65)',
           backdropFilter: 'blur(4px)',
           zIndex: 9999,
           display: 'flex',
@@ -434,90 +569,94 @@ export default function NavBar() {
         }}
         onClick={() => setMobileMenuOpen(false)}
         >
-          <div 
+          <div
             style={{
               background: 'var(--color-bg-secondary)',
               borderBottom: '1px solid var(--color-border)',
-              padding: '16px',
-              maxHeight: '80vh',
+              padding: '14px',
+              maxHeight: '85vh',
               overflowY: 'auto',
               boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
             }}
             onClick={(e) => e.stopPropagation()}
           >
             {user && (
-              <div style={{ marginBottom: '14px' }}>
-                <StockSearchBox width={undefined} placeholder="Search symbol..." />
+              <div style={{ marginBottom: '12px' }}>
+                <StockSearchBox width="100%" placeholder="Search symbol..." />
               </div>
             )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {links.map(({ to, label, icon: Icon }) => {
-                const linkBadge =
-                  to === '/alerts' ? userUnseenCount : to === '/admin' ? adminUnseenCount : 0
-                return (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      fontSize: '0.95rem',
-                      fontWeight: 600,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      color: 'var(--text-color)'
-                    }}
-                  >
-                    <Icon size={18} color="#3b82f6" />
-                    <span style={{ flex: 1 }}>{label}</span>
-                    {linkBadge > 0 && (
-                      <span
+            {[
+              { group: 'Trading', items: primaryLinks },
+              { group: 'Analysis Tools', items: toolLinks },
+              { group: 'Account', items: systemLinks },
+            ].map((section) => (
+              <div key={section.group} style={{ marginBottom: '10px' }}>
+                <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--color-text-muted)', padding: '4px 10px' }}>
+                  {section.group}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  {section.items.map(({ to, label, icon: Icon }) => {
+                    const linkBadge =
+                      to === '/alerts' ? userUnseenCount : to === '/admin' ? adminUnseenCount : 0
+                    return (
+                      <NavLink
+                        key={to}
+                        to={to}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={({ isActive }) => `navbar-link${isActive ? ' active' : ''}`}
                         style={{
-                          minWidth: 20,
-                          height: 20,
-                          padding: '0 6px',
-                          borderRadius: 999,
-                          background: '#ef4444',
-                          color: '#ffffff',
-                          fontSize: 11,
-                          fontWeight: 800,
-                          display: 'inline-flex',
+                          padding: '9px 12px',
+                          borderRadius: '8px',
+                          fontSize: '0.9rem',
+                          fontWeight: 600,
+                          display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center',
+                          gap: '10px',
+                          minHeight: 38,
                         }}
                       >
-                        {linkBadge > 99 ? '99+' : linkBadge}
-                      </span>
-                    )}
-                  </NavLink>
-                )
-              })}
-            </div>
+                        <Icon size={16} color="var(--color-accent-blue)" />
+                        <span style={{ flex: 1 }}>{label}</span>
+                        {linkBadge > 0 && (
+                          <span
+                            style={{
+                              minWidth: 20,
+                              height: 20,
+                              padding: '0 6px',
+                              borderRadius: 999,
+                              background: '#ef4444',
+                              color: '#ffffff',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            {linkBadge > 99 ? '99+' : linkBadge}
+                          </span>
+                        )}
+                      </NavLink>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
 
             {user && (
-              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{user.name}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{user.email}</div>
+              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</div>
+                  <div style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
                 </div>
                 <button
                   onClick={() => { setMobileMenuOpen(false); logout(); navigate('/login'); }}
+                  className="btn btn-danger"
                   style={{
-                    padding: '8px 14px',
-                    background: 'rgba(239, 68, 68, 0.15)',
-                    border: '1px solid #ef4444',
-                    borderRadius: '8px',
-                    color: '#f87171',
-                    fontWeight: 600,
-                    fontSize: '0.85rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    cursor: 'pointer'
+                    padding: '7px 12px',
+                    fontSize: '0.82rem',
+                    flexShrink: 0,
                   }}
                 >
                   <LogOut size={14} /> Logout
@@ -526,23 +665,12 @@ export default function NavBar() {
             )}
 
             {!user && (
-              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border)' }}>
                 <NavLink
                   to="/login"
                   onClick={() => setMobileMenuOpen(false)}
-                  style={{
-                    padding: '10px 14px',
-                    background: '#3b82f6',
-                    color: 'white',
-                    borderRadius: '8px',
-                    fontWeight: 600,
-                    textAlign: 'center',
-                    textDecoration: 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px'
-                  }}
+                  className="btn btn-primary"
+                  style={{ width: '100%' }}
                 >
                   <LogIn size={16} /> Sign In / Create Account
                 </NavLink>

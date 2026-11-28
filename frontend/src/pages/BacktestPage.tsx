@@ -7,12 +7,12 @@ import { useAuth } from '../AuthContext'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 
 const STRATEGIES = [
-  { id: 'rsi_mean_reversion', name: 'RSI Mean Reversion', defaultParams: { rsi_buy: 30, rsi_sell: 70, quantity: 10 }, description: 'Buy when RSI < 30 (oversold), sell when RSI > 70 (overbought)' },
-  { id: 'ema_crossover', name: 'EMA Crossover', defaultParams: { fast_ema: 9, slow_ema: 21, quantity: 10 }, description: 'Buy when EMA9 crosses above EMA21, sell on cross down' },
-  { id: 'macd_signal', name: 'MACD Signal Cross', defaultParams: { quantity: 10 }, description: 'Buy when MACD histogram turns positive, sell when negative' },
-  { id: 'ai_machine_learning', name: 'AI LightGBM Probabilistic', defaultParams: { qty_mode: 'atr', risk_pct: 0.02, confidence_threshold: 58 }, description: 'Simulates AI predictions using LightGBM. Uses ATR-based dynamic position sizing and trailing stop losses.' },
-  { id: 'supertrend_trend_rider', name: 'SuperTrend Trend Rider (ATR + 200 EMA)', defaultParams: { period: 10, multiplier: 3.0, quantity: 10 }, description: 'Institutional trend rider: Buys when price > EMA 200 & SuperTrend turns bullish. Uses ATR dynamic trailing stop to lock in multi-week runners.' },
-  { id: 'smc_liquidity_fvg', name: 'SMC Institutional FVG Hunter', defaultParams: { gap_pct: 0.3, risk_reward: 2.5, quantity: 10 }, description: 'Smart Money Concepts: Enters on unmitigated Fair Value Gap pullbacks with tight stops and asymmetric 2.5R profit targets.' },
+  { id: 'rsi_mean_reversion', name: 'RSI Mean Reversion', defaultParams: { rsi_buy: 30, rsi_sell: 70, quantity: 10 }, description: 'Buy when RSI drops below 30, sell when RSI rises above 70.' },
+  { id: 'ema_crossover', name: 'EMA Crossover', defaultParams: { fast_ema: 9, slow_ema: 21, quantity: 10 }, description: 'Buy when 9 EMA crosses above 21 EMA, sell on cross down.' },
+  { id: 'macd_signal', name: 'MACD Signal Cross', defaultParams: { quantity: 10 }, description: 'Buy when MACD histogram turns positive, sell when negative.' },
+  { id: 'ai_machine_learning', name: 'LightGBM Directional Model', defaultParams: { qty_mode: 'atr', risk_pct: 0.02, confidence_threshold: 58 }, description: 'Simulates model predictions using ATR-based position sizing and trailing stops.' },
+  { id: 'supertrend_trend_rider', name: 'SuperTrend + 200 EMA', defaultParams: { period: 10, multiplier: 3.0, quantity: 10 }, description: 'Buys when price holds above 200 EMA and SuperTrend turns bullish, trailing with ATR stops.' },
+  { id: 'smc_liquidity_fvg', name: 'SMC Liquidity & FVG', defaultParams: { gap_pct: 0.3, risk_reward: 2.5, quantity: 10 }, description: 'Enters on Fair Value Gap pullbacks with tight stop losses and 2.5R targets.' },
 ]
 
 export default function BacktestPage() {
@@ -208,34 +208,34 @@ export default function BacktestPage() {
                   <strong style={{ color: '#eab308' }}>Note:</strong> No trades triggered during this period with the current parameters.
                   {form.strategy === 'ai_machine_learning' ? (
                     <div style={{ fontSize: 12, marginTop: 4 }}>
-                      💡 Try lowering the <strong>AI Directional Edge Threshold</strong> slider (e.g. to 52%–55%) or expanding the historical date range.
+                      Try lowering the <strong>AI Directional Edge Threshold</strong> slider (52%–55%) or expanding the historical date range.
                     </div>
                   ) : (
                     <div style={{ fontSize: 12, marginTop: 4 }}>
-                      💡 Try selecting a wider date range or adjusting indicator thresholds.
+                      Try selecting a wider date range or adjusting indicator thresholds.
                     </div>
                   )}
                 </div>
               )}
               {/* Benchmark Comparison */}
               {results.benchmark && (
-                <div className="card" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-secondary)' }}>
+                <div className="card" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, background: 'var(--color-bg-secondary)' }}>
                   <div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Strategy Return</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: metrics.total_return_pct >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' }}>
+                    <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', color: metrics.total_return_pct >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' }}>
                       {metrics.total_return_pct >= 0 ? '+' : ''}{metrics.total_return_pct}%
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>Max DD: {metrics.max_drawdown_pct}%</div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0.7 }}>
-                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>VS</div>
-                    <div style={{ fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 12, background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0.75 }}>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>VS</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 12, background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)' }}>
                       NIFTY 50
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Benchmark Return</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: results.benchmark.total_return_pct >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' }}>
+                    <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', color: results.benchmark.total_return_pct >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' }}>
                       {results.benchmark.total_return_pct >= 0 ? '+' : ''}{results.benchmark.total_return_pct}%
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>Max DD: {results.benchmark.max_drawdown_pct}%</div>
@@ -246,16 +246,18 @@ export default function BacktestPage() {
               {/* Metrics Grid */}
               <div className="grid-2" style={{ marginBottom: 16 }}>
                 {[
-                  { label: 'Total Return', value: `${metrics.total_return_pct >= 0 ? '+' : ''}${metrics.total_return_pct}%`, color: metrics.total_return_pct >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
+                  ...(!results.benchmark ? [
+                    { label: 'Total Return', value: `${metrics.total_return_pct >= 0 ? '+' : ''}${metrics.total_return_pct}%`, color: metrics.total_return_pct >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
+                    { label: 'Max Drawdown', value: `${metrics.max_drawdown_pct}%`, color: 'var(--color-bearish)' },
+                  ] : []),
                   { label: 'Sharpe Ratio', value: metrics.sharpe_ratio, color: metrics.sharpe_ratio > 1 ? 'var(--color-bullish)' : metrics.sharpe_ratio > 0 ? 'var(--color-neutral)' : 'var(--color-bearish)' },
                   { label: 'Sortino Ratio', value: metrics.sortino_ratio, color: metrics.sortino_ratio > 1.5 ? 'var(--color-bullish)' : metrics.sortino_ratio > 0 ? 'var(--color-neutral)' : 'var(--color-bearish)' },
                   { label: 'Calmar Ratio', value: metrics.calmar_ratio, color: metrics.calmar_ratio > 1 ? 'var(--color-bullish)' : metrics.calmar_ratio > 0 ? 'var(--color-neutral)' : 'var(--color-bearish)' },
-                  { label: 'Max Drawdown', value: `${metrics.max_drawdown_pct}%`, color: 'var(--color-bearish)' },
                   { label: 'Win Rate', value: `${Math.round((metrics.win_rate || 0) * 100)}%`, color: metrics.win_rate >= 0.5 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
                   { label: 'Total Trades', value: metrics.total_trades },
                   { label: 'Profit Factor', value: metrics.profit_factor === Infinity ? '∞' : metrics.profit_factor, color: metrics.profit_factor > 1.5 ? 'var(--color-bullish)' : metrics.profit_factor > 1 ? 'var(--color-neutral)' : 'var(--color-bearish)' },
                   { label: 'Expectancy / Trade', value: metrics.expectancy_per_trade ? `₹${metrics.expectancy_per_trade.toLocaleString('en-IN')}` : '₹0', color: (metrics.expectancy_per_trade || 0) > 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
-                  { label: 'Payoff Ratio (W/L)', value: metrics.win_loss_ratio ? `${metrics.win_loss_ratio}x` : '—', color: (metrics.win_loss_ratio || 0) >= 1.5 ? 'var(--color-bullish)' : 'var(--color-neutral)' },
+                  { label: 'Payoff Ratio', value: metrics.win_loss_ratio ? `${metrics.win_loss_ratio}x` : '—', color: (metrics.win_loss_ratio || 0) >= 1.5 ? 'var(--color-bullish)' : 'var(--color-neutral)' },
                 ].map((m, i) => (
                   <div key={i} className="card" style={{ padding: '12px 16px', opacity: metrics.total_trades === 0 ? 0.5 : 1 }}>
                     <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>{m.label}</div>

@@ -590,8 +590,8 @@ export default function MarketDepthWidget({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '6px 12px',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
+          gap: '8px 12px',
           padding: '10px 12px',
           background: 'rgba(255,255,255,0.02)',
           borderRadius: 6,

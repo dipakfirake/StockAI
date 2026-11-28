@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { marketApi, aiApi } from '../services/api'
 import { isWebSocketSupportedOnHost } from '../services/websocket'
 import { isIndexMatch } from '../components/LiveTicker'
-import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, Sparkles, RefreshCw, Target, ArrowRight } from 'lucide-react'
+import { formatNumber2Dec, formatISTTimestamp, cleanBriefMarkdown } from '../utils/formatters'
+import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, RefreshCw } from 'lucide-react'
 
 interface Index {
   name: string
@@ -308,143 +309,44 @@ export default function Dashboard() {
   const regimeColor = regime?.regime === 'BULLISH' ? 'var(--color-bullish)' : regime?.regime === 'BEARISH' ? 'var(--color-bearish)' : 'var(--color-neutral)'
   const vixColor = vix ? (vix.vix > 25 ? 'var(--color-bearish)' : vix.vix < 15 ? 'var(--color-bullish)' : 'var(--color-neutral)') : 'var(--color-text-primary)'
 
+  const cleanedBrief = cleanBriefMarkdown(morningBrief)
+    .replace(/CMP:\s*N\/A\s*\|?/gi, '')
+    .replace(/Best Buy:\s*N\/A\s*\|?/gi, '')
+    .replace(/SL:\s*N\/A\s*\|?/gi, '')
+    .replace(/Target:\s*N\/A\s*\|?/gi, '')
+    .replace(/R:R:\s*N\/A\s*\|?/gi, '')
+    .replace(/Execution Levels:\s*\|*\s*/gi, '')
+    .replace(/NSE Market Brief\s*💎?\s*Large Cap/gi, 'Market Outlook')
+    .replace(/\s*\|\s*(?=\·|$)/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 className="page-title">Market Dashboard</h1>
-          <p className="page-subtitle">Live India market intelligence — NSE &amp; BSE</p>
+          <h1 className="page-title">Market Overview</h1>
+          <p className="page-subtitle">NSE &amp; BSE indices, sector rotation, and volatility</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {lastUpdated && (
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-              Updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            <span style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>
+              {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           )}
           <button
             onClick={() => loadDashboard(true)}
-            className="btn btn-ghost"
-            style={{ fontSize: 12, padding: '4px 10px', height: 28, display: 'flex', gap: 6, alignItems: 'center' }}
+            className="btn btn-secondary"
+            style={{ fontSize: 12.5, padding: '6px 12px', gap: 6 }}
           >
-            <RefreshCw size={12} className={refreshing ? 'spin' : ''} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} className={refreshing ? 'spin' : ''} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
             Refresh
           </button>
         </div>
       </div>
 
-      {/* AI Morning Brief */}
-      {morningBrief && (
-        <div className="card animate-fade-in-up" style={{ marginBottom: 16, background: 'linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.08))', borderColor: 'rgba(59,130,246,0.3)' }}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <Sparkles size={18} style={{ color: '#8b5cf6', flexShrink: 0, marginTop: 2 }} />
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#8b5cf6', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>AI Morning Brief</div>
-              <div style={{ fontSize: 13, color: 'var(--color-text-primary)', lineHeight: 1.6 }}>{morningBrief}</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Market Status Banner */}
-      {loading ? (
-        <div className="skeleton-card animate-fade-in" style={{ marginBottom: 16, height: 72 }}>
-          <div className="skeleton" style={{ height: '100%', borderRadius: 8 }} />
-        </div>
-      ) : regime && (
-        <div className="card animate-fade-in-up" style={{ marginBottom: 16, borderColor: regimeColor }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <RegimeIcon size={28} color={regimeColor} />
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 18, color: regimeColor }}>
-                Market is {regime.regime}
-              </div>
-              <div style={{ color: 'var(--color-text-secondary)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                Confidence: {Math.round((regime.confidence || 0) * 100)}%
-                &nbsp;·&nbsp;
-                <span className={`live-dot ${regime.is_market_open ? '' : 'closed'}`} />
-                {regime.is_market_open ? 'Market Open' : 'Market Closed'}
-              </div>
-            </div>
-            {regime.signals && regime.signals.slice(0, 2).map((s, i) => (
-              <div key={i} style={{ marginLeft: i === 0 ? 'auto' : 0, fontSize: 12, textAlign: 'right' }}>
-                <span style={{ color: s.direction === 'bullish' ? 'var(--color-bullish)' : s.direction === 'bearish' ? 'var(--color-bearish)' : 'var(--color-neutral)' }}>
-                  {s.source}
-                </span>
-                <div style={{ color: 'var(--color-text-muted)' }}>{s.detail.slice(0, 60)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Market Events */}
-      {events.length > 0 && (
-        <div style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {events.map((e, i) => (
-            <div key={i} className={`card animate-fade-in-up stagger-${Math.min(i + 1, 6)}`} style={{ flex: '1 1 200px', padding: '10px 14px', borderColor: e.impact === 'HIGH' || e.impact === 'VERY_HIGH' ? 'var(--color-neutral)' : 'var(--color-border)', opacity: 0 }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <AlertCircle size={16} color={e.impact === 'VERY_HIGH' ? 'var(--color-bearish)' : 'var(--color-neutral)'} />
-                <span style={{ fontWeight: 600, fontSize: 13 }}>{e.name}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 11, background: 'rgba(245,158,11,0.15)', color: 'var(--color-neutral)', padding: '2px 8px', borderRadius: 12 }}>{e.impact}</span>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4 }}>{e.description.slice(0, 100)}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Swing Trade Screener Spotlight Hub */}
-      <div 
-        className="card animate-fade-in-up" 
-        style={{ 
-          marginBottom: 20, 
-          padding: '16px 20px', 
-          background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.9))',
-          border: '1px solid rgba(59, 130, 246, 0.25)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 16
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(16, 185, 129, 0.2))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa' }}>
-            <Target size={24} />
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--color-text-primary)' }}>
-                Automated Swing Trade Screener Hub
-              </span>
-              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(16, 185, 129, 0.15)', color: 'var(--color-bullish)', fontWeight: 600 }}>
-                High Precision Lists
-              </span>
-            </div>
-            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--color-text-secondary)' }}>
-              Explore real-time categorized BUY (Targets T1/T2/T3), SELL (Bearish shorts), and HOLD lists across 8 sectors without opening individual charts.
-            </p>
-          </div>
-        </div>
-        <Link 
-          to="/screener" 
-          className="btn btn-primary"
-          style={{ 
-            display: 'inline-flex', 
-            alignItems: 'center', 
-            gap: 8, 
-            padding: '10px 20px', 
-            fontSize: 13, 
-            fontWeight: 600, 
-            textDecoration: 'none' 
-          }}
-        >
-          Explore Buy &amp; Sell Lists <ArrowRight size={16} />
-        </Link>
-      </div>
-
-      {/* Index Cards */}
-      <div className="grid-3" style={{ marginBottom: 20 }}>
+      {/* Primary Index Cards First (Above the fold on Desktop & Mobile) */}
+      <div className="grid-3" style={{ marginBottom: 18 }}>
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <SkeletonIndexCard key={i} />)
         ) : (
@@ -452,24 +354,28 @@ export default function Dashboard() {
             const isUp = idx.change_pct >= 0
             const color = isUp ? 'var(--color-bullish)' : 'var(--color-bearish)'
             return (
-              <div key={idx.symbol} className={`card animate-fade-in-up stagger-${Math.min(i + 1, 6)}`} style={{ opacity: 0, cursor: 'pointer', transition: 'border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = ''; (e.currentTarget as HTMLDivElement).style.boxShadow = '' }}
+              <div
+                key={idx.symbol}
+                onClick={() => idx.symbol && navigate('/chart', { state: { symbol: idx.symbol } })}
+                className={`card animate-fade-in-up stagger-${Math.min(i + 1, 6)}`}
+                style={{ opacity: 0, cursor: 'pointer', padding: '16px 18px' }}
               >
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {idx.name}
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+                  <span>{idx.name}</span>
                   <span className={`live-dot ${regime?.is_market_open ? '' : 'closed'}`} style={{ marginLeft: 'auto' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                  ₹{(idx.price ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                  {formatNumber2Dec(idx.price ?? 0)}
                 </div>
-                <div style={{ fontSize: 14, marginTop: 4, color, fontWeight: 600 }}>
-                  {isUp ? '▲' : '▼'} {Math.abs(idx.change_pct ?? 0).toFixed(2)}%
-                  &nbsp;({(idx.change ?? 0) >= 0 ? '+' : ''}{(idx.change ?? 0).toFixed(2)})
+                <div className="mono" style={{ fontSize: 13, marginTop: 4, color, fontWeight: 600 }}>
+                  {isUp ? '▲' : '▼'} {(idx.change_pct ?? 0) >= 0 ? '+' : ''}{(idx.change_pct ?? 0).toFixed(2)}%
+                  <span style={{ opacity: 0.85, fontWeight: 500, marginLeft: 6 }}>
+                    {(idx.change ?? 0) >= 0 ? '+' : ''}{(idx.change ?? 0).toFixed(2)}
+                  </span>
                 </div>
-                <div style={{ marginTop: 7, fontSize: 10, color: 'var(--color-text-muted)' }} title={idx.source}>
-                  {idx.data_status === 'exchange_feed' || idx.data_status === 'realtime' ? 'Exchange feed' : 'Provider fallback'}
-                  {idx.timestamp ? ` · ${idx.timestamp}` : ''}
+                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  {idx.data_status === 'exchange_feed' || idx.data_status === 'realtime' ? 'Exchange feed' : 'Backup feed'}
+                  {idx.timestamp ? ` · ${formatISTTimestamp(idx.timestamp)}` : ''}
                 </div>
               </div>
             )
@@ -477,11 +383,62 @@ export default function Dashboard() {
         )}
       </div>
 
-      <div className="grid-2" style={{ gap: 20 }}>
-        {/* Sector Heatmap */}
+      {/* Concise Regime & Brief Strip */}
+      {loading ? (
+        <div className="skeleton-card animate-fade-in" style={{ marginBottom: 18, height: 68 }}>
+          <div className="skeleton" style={{ height: '100%', borderRadius: 8 }} />
+        </div>
+      ) : (regime || cleanedBrief) && (
+        <div className="card animate-fade-in-up" style={{ marginBottom: 18, borderLeft: `3px solid ${regimeColor}`, padding: '14px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+            {regime && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <RegimeIcon size={22} color={regimeColor} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: regimeColor }}>
+                    Market Regime: {regime.regime}
+                  </div>
+                  <div style={{ color: 'var(--color-text-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                    Confidence {Math.round((regime.confidence || 0) * 100)}%
+                    <span>·</span>
+                    <span className={`live-dot ${regime.is_market_open ? '' : 'closed'}`} />
+                    <span>{regime.is_market_open ? 'NSE Open' : 'Market Closed'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          {cleanedBrief && (
+            <div style={{ marginTop: regime ? 10 : 0, paddingTop: regime ? 10 : 0, borderTop: regime ? '1px solid var(--color-border)' : 'none', fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.55 }}>
+              {cleanedBrief}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Upcoming Market Events */}
+      {events.length > 0 && (
+        <div style={{ marginBottom: 18, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {events.map((e, i) => (
+            <div key={i} className={`card animate-fade-in-up stagger-${Math.min(i + 1, 6)}`} style={{ flex: '1 1 220px', padding: '10px 14px', borderColor: e.impact === 'HIGH' || e.impact === 'VERY_HIGH' ? 'var(--color-neutral)' : 'var(--color-border)', opacity: 0 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <AlertCircle size={15} color={e.impact === 'VERY_HIGH' ? 'var(--color-bearish)' : 'var(--color-neutral)'} />
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{e.name}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, background: 'rgba(245,158,11,0.15)', color: 'var(--color-neutral)', padding: '2px 8px', borderRadius: 10 }}>{e.impact}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>{e.description.slice(0, 100)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="grid-2" style={{ gap: 18 }}>
+        {/* Sector Rotation */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title"><Activity size={16} style={{ marginRight: 6 }} />Sector Rotation</span>
+            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Activity size={16} /> Sector Rotation
+            </span>
           </div>
           {sectors.length === 0 && <div className="empty-state">Loading sector data…</div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -491,34 +448,33 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* India Intelligence */}
+        {/* Volatility & Regime Drivers (Single non-duplicated location) */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title"><Globe size={16} style={{ marginRight: 6 }} />India Intelligence</span>
+            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Globe size={16} /> Market Drivers
+            </span>
             {vix && <AIScoreRing score={Math.max(0, Math.min(100, Math.round((1 - (vix.vix - 10) / 30) * 100)))} label="Calm" />}
           </div>
           {vix && (
-            <div style={{ marginBottom: 16, padding: '12px', background: 'var(--color-bg-secondary)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>India VIX (Fear Gauge)</div>
-                <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-mono)', color: vixColor }}>
-                  {(vix.vix ?? 0).toFixed(2)}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>{vix.interpretation}</div>
+            <div style={{ marginBottom: 14, padding: '12px', background: 'var(--color-bg-secondary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>India VIX</div>
+              <div className="mono" style={{ fontSize: 26, fontWeight: 700, color: vixColor }}>
+                {(vix.vix ?? 0).toFixed(2)}
               </div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>{vix.interpretation}</div>
             </div>
           )}
           {regime?.signals && regime.signals.map((s, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', borderBottom: i < regime.signals!.length - 1 ? '1px solid var(--color-border)' : 'none' }}>
+            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', borderBottom: i < regime.signals!.length - 1 ? '1px solid var(--color-border)' : 'none', flexWrap: 'wrap' }}>
               <span style={{
-                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 12,
+                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
                 background: s.direction === 'bullish' ? 'var(--color-bullish-dim)' : s.direction === 'bearish' ? 'var(--color-bearish-dim)' : 'rgba(100,116,139,0.2)',
                 color: s.direction === 'bullish' ? 'var(--color-bullish)' : s.direction === 'bearish' ? 'var(--color-bearish)' : 'var(--color-text-secondary)',
-                whiteSpace: 'nowrap',
               }}>
                 {s.source}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>{s.detail.slice(0, 100)}</span>
+              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.4, flex: '1 1 180px' }}>{s.detail.slice(0, 110)}</span>
             </div>
           ))}
         </div>

@@ -1747,31 +1747,6 @@ export default function ChartPage() {
         </div>
 
         <div className="mobile-w-100" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Native Indicators Quick-Toggle Dropdown (Never empty) */}
-          <select 
-             value=""
-             onChange={(e) => {
-               const val = e.target.value;
-               if (val) {
-                 setShowIndicators(true);
-                 setIndicatorToggles(prev => ({ ...prev, [val]: !prev[val] }));
-               }
-             }}
-             className="input"
-             style={{ padding: '6px 10px', fontSize: 12, height: '34px', cursor: 'pointer', borderRadius: '6px', maxWidth: 185, flex: '1 1 auto' }}
-             title="Quick toggle indicator ON/OFF"
-          >
-             <option value="" disabled>📊 Indicators ({activeIndicators.length} ON)...</option>
-             {ALL_INDICATORS.map(ind => {
-               const isOn = showIndicators && (indicatorToggles[ind.key] ?? false);
-               return (
-                 <option key={ind.key} value={ind.key}>
-                   {isOn ? '🟢 [ON]' : '⚪ [OFF]'} {ind.label} {ind.val ? `(${ind.val})` : ''}
-                 </option>
-               );
-             })}
-          </select>
-
           <select 
              value={selectedPattern || ""}
              onChange={(e) => {
@@ -1780,10 +1755,10 @@ export default function ChartPage() {
                else setSelectedPattern(val);
              }}
              className="input"
-             style={{ padding: '6px 12px', fontSize: 13, height: '34px', cursor: 'pointer', borderRadius: '6px', maxWidth: 160, flex: '1 1 auto' }}
+             style={{ padding: '6px 12px', fontSize: 13, height: '34px', cursor: 'pointer', borderRadius: '6px', maxWidth: 165, flex: '1 1 auto' }}
           >
-             <option value="" disabled>👁️ Patterns ({visiblePatterns.length})</option>
-             <option value="clear">None (Hide Patterns)</option>
+             <option value="" disabled>Patterns ({visiblePatterns.length})</option>
+             <option value="clear">Hide Patterns</option>
              <option disabled>──────────</option>
              {visiblePatterns.length === 0 && (
                <option value="" disabled>No active patterns detected</option>
@@ -1825,12 +1800,12 @@ export default function ChartPage() {
                   color: showIndicators && activeIndicators.length > 0 ? '#38bdf8' : '#94a3b8',
                   fontWeight: 700
                 }}>
-                  {showIndicators ? `${activeIndicators.length} active` : 'OFF'}
+                  {showIndicators ? `${activeIndicators.length} ON` : 'OFF'}
                 </span>
                 <ChevronDown size={13} style={{ transform: showIndicatorMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
               </button>
 
-              {/* TradingView-Style Indicator Selection Dropdown */}
+              {/* Indicator Selection Dropdown */}
               {showIndicatorMenu && (
                 <div 
                   onClick={(e) => e.stopPropagation()}
@@ -1839,16 +1814,17 @@ export default function ChartPage() {
                     top: '100%',
                     left: 0,
                     marginTop: 6,
-                    background: 'rgba(15, 23, 42, 0.98)',
+                    background: 'var(--color-bg-elevated, #0f172a)',
                     backdropFilter: 'blur(12px)',
-                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                    border: '1px solid var(--color-border)',
                     borderRadius: 10,
                     padding: '14px',
                     zIndex: 9999,
-                    width: 320,
-                    maxHeight: '480px',
+                    width: 310,
+                    maxWidth: 'calc(100vw - 32px)',
+                    maxHeight: '460px',
                     overflowY: 'auto',
-                    boxShadow: '0 16px 36px -5px rgba(0, 0, 0, 0.75)'
+                    boxShadow: '0 16px 36px -5px rgba(0, 0, 0, 0.65)'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 8 }}>
@@ -1890,31 +1866,31 @@ export default function ChartPage() {
                         onClick={() => applyPreset('clean')}
                         style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#cbd5e1', cursor: 'pointer' }}
                       >
-                        ✨ Clean
+                        Clean
                       </button>
                       <button
                         onClick={() => applyPreset('ema21')}
                         style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 4, color: '#f59e0b', cursor: 'pointer' }}
                       >
-                        🎯 EMA 21 Only
+                        EMA 21
                       </button>
                       <button
                         onClick={() => applyPreset('trend')}
                         style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(139, 92, 246, 0.15)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: 4, color: '#8b5cf6', cursor: 'pointer' }}
                       >
-                        📈 EMA 21 + 50
+                        EMA 21 + 50
                       </button>
                       <button
                         onClick={() => applyPreset('bb')}
                         style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(6, 182, 212, 0.15)', border: '1px solid rgba(6, 182, 212, 0.3)', borderRadius: 4, color: '#06b6d4', cursor: 'pointer' }}
                       >
-                        ⚡ Bollinger
+                        Bollinger
                       </button>
                       <button
                         onClick={() => applyPreset('momentum')}
                         style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(168, 85, 247, 0.15)', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: 4, color: '#a855f7', cursor: 'pointer' }}
                       >
-                        📊 RSI 14
+                        RSI 14
                       </button>
                     </div>
                   </div>
@@ -2139,73 +2115,6 @@ export default function ChartPage() {
           />
         )}
 
-        {/* Permanent Indicators Quick-Toggle Bar with Interactive ON/OFF Pills */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: '6px 10px', background: 'var(--color-bg-secondary)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Activity size={12} /> Indicators ({activeIndicators.length} ON):
-          </span>
-          {ALL_INDICATORS.map(ind => {
-            const isChecked = showIndicators && (indicatorToggles[ind.key] ?? false);
-            return (
-              <button
-                key={ind.key}
-                type="button"
-                onClick={() => {
-                  setShowIndicators(true);
-                  setIndicatorToggles(prev => ({ ...prev, [ind.key]: !prev[ind.key] }));
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 11,
-                  padding: '2px 8px',
-                  borderRadius: 14,
-                  background: isChecked ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.04)',
-                  border: isChecked ? '1px solid #10b981' : '1px solid var(--color-border)',
-                  color: isChecked ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-                title={`Click to toggle ${ind.label} ${isChecked ? 'OFF' : 'ON'}`}
-              >
-                <span style={{ color: ind.color, fontSize: 10 }}>●</span>
-                <span style={{ fontWeight: 600 }}>{ind.label}</span>
-                {ind.val && <span style={{ fontSize: 10, opacity: 0.8, fontFamily: 'monospace' }}>({ind.val})</span>}
-                <span style={{
-                  padding: '1px 5px',
-                  borderRadius: 8,
-                  fontSize: 9,
-                  fontWeight: 700,
-                  background: isChecked ? '#10b981' : '#475569',
-                  color: '#ffffff',
-                  marginLeft: 3
-                }}>
-                  {isChecked ? 'ON' : 'OFF'}
-                </span>
-              </button>
-            );
-          })}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-            <button
-              onClick={() => applyPreset('clean')}
-              className="btn btn-ghost"
-              style={{ fontSize: 11, padding: '3px 8px', height: '24px', color: 'var(--color-bearish, #ef4444)' }}
-              title="Turn all indicators OFF"
-            >
-              Turn All OFF
-            </button>
-            <button
-              onClick={() => applyPreset('all')}
-              className="btn btn-ghost"
-              style={{ fontSize: 11, padding: '3px 8px', height: '24px', color: 'var(--color-bullish, #10b981)' }}
-              title="Turn all indicators ON"
-            >
-              Turn All ON
-            </button>
-          </div>
-        </div>
-
         <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
           <div style={{ display: 'flex' }}>
             <div ref={chartContainerRef} style={{ flex: 1, position: 'relative', minHeight: 450 }}>
@@ -2346,11 +2255,10 @@ export default function ChartPage() {
           )}
         </div>
 
-        {/* Premium Live Setup */}
-        <div className="card" style={{ border: '1px solid var(--color-accent-blue)', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #3b82f6, #8b5cf6, #06b6d4)', backgroundSize: '200% 100%', animation: 'gradientShift 3s ease infinite' }} />
+        {/* Actionable Live Setup */}
+        <div className="card" style={{ border: '1px solid var(--color-border)', borderTop: '3px solid var(--color-accent-blue)', position: 'relative', overflow: 'hidden' }}>
           <div className="card-header">
-            <span className="card-title" style={{ color: 'var(--color-accent-blue)' }}>★ Premium Live Setup</span>
+            <span className="card-title">Actionable Setup</span>
             {liveSetup && <span className={`badge ${liveSetup.action === 'BUY' ? 'badge-buy' : liveSetup.action === 'SELL' ? 'badge-sell' : 'badge-watch'}`}>{liveSetup.action}</span>}
           </div>
           
@@ -2363,7 +2271,7 @@ export default function ChartPage() {
               <div style={{ marginBottom: 12, fontSize: 13, color: 'var(--color-text-secondary)' }}>
                 Triggered by <strong>{liveSetup.pattern}</strong> pattern combined with indicator confluence.
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginBottom: 16 }}>
                 <div style={{ background: 'var(--color-bg-secondary)', padding: '10px', borderRadius: 8 }}>
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Entry</div>
                   <div className="mono" style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{formatINR(liveSetup.entry)}</div>
@@ -2485,7 +2393,7 @@ export default function ChartPage() {
         {indicators && (
           <div className="card" style={{ gridColumn: '1 / -1' }}>
             <div className="card-header">
-              <span className="card-title"><BarChart2 size={15} style={{ marginRight: 6 }} />Technical Indicators (Latest)</span>
+              <span className="card-title"><BarChart2 size={15} style={{ marginRight: 6 }} />Technical Indicators</span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
               {[
@@ -2517,7 +2425,7 @@ export default function ChartPage() {
         {info && (
           <div className="card" style={{ gridColumn: '1 / -1' }}>
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-              <span className="card-title"><BarChart2 size={15} style={{ marginRight: 6 }} />Fundamental Analysis (Balance Sheet & Valuations)</span>
+              <span className="card-title"><BarChart2 size={15} style={{ marginRight: 6 }} />Fundamentals &amp; Valuation</span>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {info.sector && info.sector !== 'N/A' && <span className="badge badge-hold" style={{ fontSize: 11 }}>{info.sector}</span>}
                 {info.industry && info.industry !== 'N/A' && <span className="badge badge-hold" style={{ fontSize: 11 }}>{info.industry}</span>}
@@ -2531,12 +2439,12 @@ export default function ChartPage() {
                 { label: 'Forward PE', value: info.forward_pe?.toFixed(2) },
                 { label: 'PB Ratio', value: info.price_to_book?.toFixed(2) },
                 { label: 'Book Value', value: info.book_value ? `₹${info.book_value.toFixed(2)}` : null },
-                { label: 'ROE (%)', value: info.roe ? (info.roe * 100).toFixed(2) + '%' : null, color: info.roe > 0.15 ? 'var(--color-bullish)' : '' },
-                { label: 'ROCE / ROA (%)', value: info.roa ? (info.roa * 100).toFixed(2) + '%' : null },
-                { label: 'Debt to Equity', value: (info.debt_to_equity !== null && info.debt_to_equity !== undefined) ? info.debt_to_equity.toFixed(2) : null, color: info.debt_to_equity > 1 ? 'var(--color-bearish)' : 'var(--color-bullish)' },
+                { label: 'ROE', value: info.roe ? (info.roe * 100).toFixed(2) + '%' : null, color: info.roe > 0.15 ? 'var(--color-bullish)' : '' },
+                { label: 'ROA', value: info.roa ? (info.roa * 100).toFixed(2) + '%' : null },
+                { label: 'Debt / Equity', value: (info.debt_to_equity !== null && info.debt_to_equity !== undefined) ? info.debt_to_equity.toFixed(2) : null, color: info.debt_to_equity > 1 ? 'var(--color-bearish)' : 'var(--color-bullish)' },
                 { label: 'Div Yield', value: info.dividend_yield ? (info.dividend_yield * 100).toFixed(2) + '%' : null },
                 { label: 'Current Ratio', value: info.current_ratio?.toFixed(2) },
-                { label: 'Revenue (TTM)', value: info.total_revenue ? (info.total_revenue >= 1e7 ? `₹${(info.total_revenue / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : `₹${(info.total_revenue / 1e9).toFixed(1)}B`) : null },
+                { label: 'Revenue · TTM', value: info.total_revenue ? (info.total_revenue >= 1e7 ? `₹${(info.total_revenue / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : `₹${(info.total_revenue / 1e9).toFixed(1)}B`) : null },
                 { label: 'Rev Growth', value: info.revenue_growth ? (info.revenue_growth > 0 ? '+' : '') + (info.revenue_growth * 100).toFixed(2) + '%' : null, color: info.revenue_growth > 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' },
                 { label: 'EBITDA', value: info.ebitda ? (info.ebitda >= 1e7 ? `₹${(info.ebitda / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : `₹${(info.ebitda / 1e9).toFixed(1)}B`) : null },
               ].filter(i => i.value !== null && i.value !== undefined);
@@ -2544,10 +2452,10 @@ export default function ChartPage() {
               if (fundamentalItems.length === 0) {
                 const isIndex = info.is_index || symbol.startsWith('^') || symbol.includes('INDEX');
                 return (
-                  <div style={{ padding: '16px 14px', background: 'var(--color-bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--color-text-muted)' }}>
+                  <div style={{ padding: '14px', background: 'var(--color-bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--color-text-muted)' }}>
                     {isIndex 
-                      ? '🏛️ Aggregated Benchmark Index: Balance sheet and corporate valuation ratios apply to individual corporate companies. Sector and component weightings apply to this market basket.'
-                      : '📊 Corporate fundamental balance sheet and valuation ratios are currently being refreshed from exchange filings.'
+                      ? 'Benchmark index basket: balance sheet ratios apply only to individual listed companies.'
+                      : 'Company fundamentals and valuation ratios are currently refreshing from exchange filings.'
                     }
                   </div>
                 );
@@ -2580,7 +2488,7 @@ export default function ChartPage() {
         {/* SHAP Explanations Grid */}
         <div id="ai-shap-card" className="card" style={{ gridColumn: '1 / -1', position: 'relative', overflow: 'hidden' }}>
           <div className="card-header">
-            <span className="card-title"><Activity size={15} style={{ marginRight: 6 }} />ML Feature Contributions (SHAP)</span>
+            <span className="card-title"><Activity size={15} style={{ marginRight: 6 }} />Model Feature Impact</span>
             {aiScore?.model && <span className="badge badge-hold" style={{ fontSize: 11 }}>Model: {aiScore.model}</span>}
           </div>
           
@@ -2612,11 +2520,11 @@ export default function ChartPage() {
 
         {/* NLP News Sentiment Grid */}
         <div className="card" style={{ gridColumn: '1 / -1', position: 'relative', overflow: 'hidden' }}>
-          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span className="card-title"><Activity size={15} style={{ marginRight: 6 }} />Real-time News Sentiment (NLP)</span>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+            <span className="card-title"><Activity size={15} style={{ marginRight: 6 }} />News Sentiment</span>
             {sentiment && sentiment.sentiment && (
               <span className={`badge ${sentiment.sentiment.overall_sentiment === 'BULLISH' ? 'badge-buy' : sentiment.sentiment.overall_sentiment === 'BEARISH' ? 'badge-sell' : 'badge-hold'}`}>
-                {sentiment.sentiment.overall_sentiment} (Score: {sentiment.sentiment.compound_score})
+                {sentiment.sentiment.overall_sentiment} · {sentiment.sentiment.compound_score}
               </span>
             )}
           </div>
@@ -2936,16 +2844,16 @@ export default function ChartPage() {
                 color: 'var(--color-text-secondary)'
               }}>
                 <div style={{ fontWeight: 600, color: '#60a5fa', marginBottom: 2 }}>
-                  💡 Execution Strategy & Dynamic Target Mechanics:
+                  Execution Strategy &amp; Target Mechanics
                 </div>
                 <div>{swingTrade.trade_plan.entry_advice}</div>
                 <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
-                  Target percentages are calculated relative to CMP (Current Market Price). When the stock price drops, the percentage distance to structural resistance expands (e.g. 16% &rarr; 21%), while conservative milestones (T1) remain near 11%.
+                  Target percentages are measured from current price; conservative milestone T1 sits near 11%.
                 </div>
               </div>
             )}
             
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
                <div style={{ textAlign: 'center' }}>
                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Technical Score</div>
                  <div style={{ fontSize: 14, fontWeight: 500 }}>{swingTrade.scores?.technical != null ? Number(swingTrade.scores.technical).toFixed(1) : '50.0'} / 100</div>

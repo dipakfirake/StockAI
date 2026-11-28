@@ -93,7 +93,7 @@ export default function LoginPage() {
           window.google.accounts.id.renderButton(googleBtnRef.current, {
             theme: 'filled_black',
             size: 'large',
-            width: 336,
+            width: typeof window !== 'undefined' ? Math.min(336, Math.max(240, window.innerWidth - 72)) : 320,
             text: isLogin ? 'signin_with' : 'signup_with',
             shape: 'rectangular',
           })
@@ -287,14 +287,18 @@ export default function LoginPage() {
 
             {otpExpiresIn <= 0 && (
               <div className="auth-alert error" style={{ fontSize: '0.8rem', marginTop: 10 }}>
-                ⚠️ Verification code has expired. Please click "Resend verification code" below to request a new code.
+                Verification code has expired. Request a new code below.
               </div>
             )}
 
             <div className="form-group">
-              <label>Verification Code</label>
+              <label htmlFor="otp-code-input">Verification Code</label>
               <input
+                id="otp-code-input"
+                name="otp"
                 type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
                 maxLength={6}
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
@@ -378,9 +382,12 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="auth-form">
               {!isLogin && (
                 <div className="form-group">
-                  <label>Full Name</label>
+                  <label htmlFor="auth-name-input">Full Name</label>
                   <input
+                    id="auth-name-input"
+                    name="name"
                     type="text"
+                    autoComplete="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Enter your name"
@@ -393,9 +400,12 @@ export default function LoginPage() {
               )}
 
               <div className="form-group">
-                <label>Email Address</label>
+                <label htmlFor="auth-email-input">Email Address</label>
                 <input
+                  id="auth-email-input"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@example.com"
@@ -407,9 +417,12 @@ export default function LoginPage() {
               </div>
 
               <div className="form-group">
-                <label>Password</label>
+                <label htmlFor="auth-password-input">Password</label>
                 <input
+                  id="auth-password-input"
+                  name="password"
                   type="password"
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Minimum 8 characters"

@@ -349,99 +349,85 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
   const scoreColor = score >= 90 ? '#22c55e' : score >= 70 ? '#f59e0b' : '#ef4444';
 
   return (
-    <div style={{ maxWidth: '1240px', margin: '0 auto', padding: '30px 20px' }}>
+    <div style={{ maxWidth: '1240px', margin: '0 auto', padding: '20px 14px' }}>
       
       {/* Top Banner & Control Bar */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '26px',
+        marginBottom: '22px',
         flexWrap: 'wrap',
-        gap: '16px'
+        gap: '14px'
       }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h1 style={{ fontSize: '2rem', fontWeight: 800, margin: 0 }}>
-              🛡️ Sentinel 24/7 Autonomous Watchdog
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <h1 style={{ fontSize: 'clamp(1.35rem, 4vw, 1.85rem)', fontWeight: 700, margin: 0 }}>
+              Sentinel Watchdog
             </h1>
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '4px 10px',
+              padding: '3px 10px',
               borderRadius: '20px',
               background: 'rgba(34, 197, 94, 0.15)',
               border: '1px solid #22c55e',
               color: '#4ade80',
-              fontSize: '0.8rem',
+              fontSize: '0.75rem',
               fontWeight: 700
             }}>
               <span style={{
-                width: '8px',
-                height: '8px',
+                width: '7px',
+                height: '7px',
                 borderRadius: '50%',
                 background: '#22c55e',
                 boxShadow: '0 0 8px #22c55e',
                 animation: 'pulse 1.5s infinite'
               }} />
-              ACTIVE 24/7 (1-2s Loop)
+              ACTIVE 24/7
             </span>
           </div>
-          <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.95rem' }}>
-            Autonomous sub-second surveillance continuously probing databases, Redis, broker tokens, Celery queues, API endpoints, and security threat vectors.
+          <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.9rem' }}>
+            Continuous health probes for database, Redis, broker feeds, Celery queues, and security rules.
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
+            className="btn btn-secondary"
             style={{
-              padding: '9px 14px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: autoRefresh ? 'rgba(59, 130, 246, 0.15)' : 'var(--surface-color)',
+              padding: '8px 12px',
               color: autoRefresh ? '#60a5fa' : 'var(--text-secondary)',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '0.85rem'
+              fontSize: '0.84rem'
             }}
           >
-            {autoRefresh ? '🟢 Auto-Refresh (3s)' : '⏸️ Paused'}
+            {autoRefresh ? 'Auto-Refresh: ON' : 'Paused'}
           </button>
 
           <button
             onClick={handleAuditNow}
             disabled={auditing}
+            className="btn btn-primary"
             style={{
-              padding: '9px 16px',
-              borderRadius: '8px',
-              border: 'none',
-              background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
-              color: 'white',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '0.88rem',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
+              padding: '8px 14px',
+              fontSize: '0.84rem',
             }}
           >
-            {auditing ? '⚡ Auditing...' : '⚡ Audit Now'}
+            {auditing ? 'Auditing...' : 'Audit Now'}
           </button>
 
           <Link
             to="/admin"
+            className="btn btn-secondary"
             style={{
-              padding: '9px 14px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--surface-color)',
-              color: 'var(--text-color)',
+              padding: '8px 12px',
               textDecoration: 'none',
-              fontWeight: 600,
-              fontSize: '0.85rem'
+              fontSize: '0.84rem'
             }}
           >
-            👥 User Admin
+            Admin Control
           </Link>
         </div>
       </div>
@@ -449,9 +435,9 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
       {/* Primary KPI Row */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
-        gap: '16px',
-        marginBottom: '26px'
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 165px), 1fr))',
+        gap: '12px',
+        marginBottom: '22px'
       }}>
         {/* Health Score */}
         <div style={{
@@ -521,15 +507,15 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
       </div>
 
       {/* Subsystem Radar Matrix */}
-      <div style={{ marginBottom: '30px' }}>
-        <h2 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: '14px' }}>
-          📡 360° Subsystem Health Radar
+      <div style={{ marginBottom: '26px' }}>
+        <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '12px' }}>
+          Subsystem Health Radar
         </h2>
         
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: '14px'
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 245px), 1fr))',
+          gap: '12px'
         }}>
           {Object.entries(data?.subsystems || {}).map(([key, sub]) => {
             const isHealthy = sub.status === 'HEALTHY';
@@ -579,9 +565,9 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
 
       {/* 24/7 Incident Ledger & Bug List */}
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-          <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0 }}>
-            📋 Live Incident Ledger & Bug Catalog
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: '14px' }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0 }}>
+            Incident Ledger
           </h2>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
             Showing {data?.recent_incidents?.length ?? 0} most recent events
@@ -597,7 +583,7 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
         }}>
           {(!data?.recent_incidents || data.recent_incidents.length === 0) ? (
             <div style={{ padding: '40px', textAlign: 'center', color: '#4ade80' }}>
-              🎉 Zero active bugs or subsystem failures detected! The system is operating at 100% capacity.
+              No active bugs or subsystem failures detected. Systems operating normally.
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', minWidth: '800px' }}>
@@ -686,7 +672,7 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
                               cursor: 'pointer'
                             }}
                           >
-                            ✓ Resolve
+                            Resolve
                           </button>
                         )}
                       </td>
@@ -705,9 +691,9 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
       <div style={{ marginTop: '40px', borderTop: '1px solid var(--border-color)', paddingTop: '30px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '18px' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>
-                🔬 System Validator & Threat Testing Lab
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                System Validator &amp; Security Lab
               </h2>
               <span style={{
                 background: 'rgba(59, 130, 246, 0.15)',
@@ -718,51 +704,36 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
                 fontWeight: 700,
                 border: '1px solid rgba(59, 130, 246, 0.3)'
               }}>
-                Dual-Pathway: Automated Hourly + Manual QA
+                Hourly + On-Demand
               </span>
             </div>
-            <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.88rem' }}>
-              Autonomous hourly & daily scans probe vulnerabilities, credential leaks, and data integrity. Use this manual lab to execute real-time tests on demand.
+            <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.86rem' }}>
+              Automated hourly scans verify endpoint contracts, credential isolation, and data integrity.
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <button
               onClick={handleExportAuditReport}
               disabled={!valReport || valReport.results.length === 0}
-              style={{
-                padding: '9px 14px',
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                background: 'var(--surface-color)',
-                color: 'var(--text-color)',
-                cursor: valReport && valReport.results.length > 0 ? 'pointer' : 'not-allowed',
-                fontWeight: 600,
-                fontSize: '0.85rem'
-              }}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.84rem' }}
             >
-              📥 Export Audit Report (.md)
+              Export Report (.md)
             </button>
 
             <button
               onClick={handleRunValidationSuite}
               disabled={valLoading}
+              className="btn btn-primary"
               style={{
-                padding: '9px 16px',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'linear-gradient(90deg, #10b981, #059669)',
-                color: 'white',
-                cursor: valLoading ? 'not-allowed' : 'pointer',
-                fontWeight: 700,
-                fontSize: '0.88rem',
-                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-                display: 'flex',
+                fontSize: '0.84rem',
+                display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px'
               }}
             >
-              {valLoading ? '⏳ Running 10-Point Suite...' : '🚀 Run Full 10-Point Suite'}
+              {valLoading ? 'Running 10-Point Suite...' : 'Run Full 10-Point Suite'}
             </button>
           </div>
         </div>
@@ -770,7 +741,7 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
         {/* Validation Suite KPI Summary */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 165px), 1fr))',
           gap: '12px',
           marginBottom: '20px'
         }}>
@@ -820,9 +791,9 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
           {(['ALL', 'CYBERSECURITY', 'SYSTEM', 'QUANT'] as const).map((cat) => {
             const labels = {
               ALL: 'All Tests (10)',
-              CYBERSECURITY: '🛡️ Cybersecurity (5)',
-              SYSTEM: '⚙️ Subsystems & DB (2)',
-              QUANT: '📊 Data & Quant (3)',
+              CYBERSECURITY: 'Cybersecurity (5)',
+              SYSTEM: 'Subsystems & DB (2)',
+              QUANT: 'Data & Quant (3)',
             };
             const active = activeValCategory === cat;
             return (
@@ -848,10 +819,10 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
         </div>
 
         {/* Test Matrix */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '14px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '14px' }}>
           {(!valReport?.results || valReport.results.length === 0) ? (
             <div style={{ gridColumn: '1 / -1', padding: '30px', textAlign: 'center', background: 'var(--surface-color)', borderRadius: '12px', border: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}>
-              Click <strong>"🚀 Run Full 10-Point Suite"</strong> above to execute interactive cybersecurity and subsystem validation.
+              Click <strong>Run Full 10-Point Suite</strong> above to run security and subsystem validation.
             </div>
           ) : (
             valReport.results.filter((r) => activeValCategory === 'ALL' || r.category === activeValCategory).map((t) => {
@@ -929,7 +900,7 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
                         color: '#fbbf24',
                         marginBottom: '10px'
                       }}>
-                        💡 {t.recommendation}
+                        Note: {t.recommendation}
                       </div>
                     )}
                   </div>
@@ -969,9 +940,9 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
       <div style={{ marginTop: '40px', borderTop: '1px solid var(--border-color)', paddingTop: '30px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '18px' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>
-                🛡️ Three-Tier Testing Matrix: White Box, Black Box & Grey Box
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                Testing Matrix: White, Black &amp; Grey Box
               </h2>
               <span style={{
                 background: 'rgba(168, 85, 247, 0.15)',
@@ -982,29 +953,21 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
                 fontWeight: 700,
                 border: '1px solid rgba(168, 85, 247, 0.3)'
               }}>
-                14-Point Architectural Matrix
+                14 Probes
               </span>
             </div>
-            <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.88rem' }}>
-              Comprehensive verification spanning internal mathematical algorithms (White Box), external HTTP request contracts & schemas (Black Box), and hybrid security boundaries & fuzzing (Grey Box).
+            <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.86rem' }}>
+              Verification spanning internal math logic (White Box), HTTP schema contracts (Black Box), and boundary fuzzing (Grey Box).
             </p>
           </div>
 
           <button
             onClick={fetchParadigms}
             disabled={paradigmsLoading}
-            style={{
-              padding: '9px 16px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--surface-color)',
-              color: 'var(--text-color)',
-              cursor: paradigmsLoading ? 'not-allowed' : 'pointer',
-              fontWeight: 700,
-              fontSize: '0.85rem'
-            }}
+            className="btn btn-secondary"
+            style={{ fontSize: '0.84rem' }}
           >
-            {paradigmsLoading ? '⏳ Refreshing Matrix...' : '🔄 Re-Run All Paradigms'}
+            {paradigmsLoading ? 'Refreshing Matrix...' : 'Re-Run Matrix'}
           </button>
         </div>
 
@@ -1012,10 +975,10 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
           {(['ALL', 'WHITE_BOX', 'BLACK_BOX', 'GREY_BOX'] as const).map((tab) => {
             const labels = {
-              ALL: `All Paradigms (${paradigmsData?.total_probes || 14})`,
-              WHITE_BOX: '⬜ White Box (Logic & Math)',
-              BLACK_BOX: '⬛ Black Box (API Contracts & Schemas)',
-              GREY_BOX: '🔳 Grey Box (Security Boundaries & Fuzzing)',
+              ALL: `All (${paradigmsData?.total_probes || 14})`,
+              WHITE_BOX: 'White Box · Math & Logic',
+              BLACK_BOX: 'Black Box · Contracts',
+              GREY_BOX: 'Grey Box · Security Fuzz',
             };
             const active = activeParadigmTab === tab;
             return (
@@ -1040,7 +1003,7 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
         </div>
 
         {/* Paradigm Probes Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '12px' }}>
           {(paradigmsData?.probes || [])
             .filter((p: any) => activeParadigmTab === 'ALL' || p.paradigm === activeParadigmTab)
             .map((p: any) => (
@@ -1112,9 +1075,9 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
          ========================================================================= */}
       <div style={{ marginTop: '40px', borderTop: '1px solid var(--border-color)', paddingTop: '30px', paddingBottom: '30px' }}>
         <div style={{ marginBottom: '18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>
-              🚀 All-Request & Fuzz Validation Console
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+              HTTP Request &amp; Fuzz Console
             </h2>
             <span style={{
               background: 'rgba(16, 185, 129, 0.15)',
@@ -1125,44 +1088,45 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
               fontWeight: 700,
               border: '1px solid rgba(16, 185, 129, 0.3)'
             }}>
-              Live Request Tester
+              Live Tester
             </span>
           </div>
-          <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.88rem' }}>
-            Interactive request harness. Test any HTTP verb (GET, POST, PUT, DELETE, OPTIONS), validate Pydantic schemas, and stress-test sanitizers against malformed payloads in real time.
+          <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0', fontSize: '0.86rem' }}>
+            Test GET, POST, PUT, DELETE, and OPTIONS endpoints against schema validation and payload sanitizers.
           </p>
         </div>
 
         {/* Quick Preset Buttons */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', alignSelf: 'center', fontWeight: 600 }}>Quick Presets:</span>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', alignSelf: 'center', fontWeight: 600 }}>Presets:</span>
           <button onClick={() => setPreset('POSITIVE_HEALTH')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#4ade80', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
-            🟢 200 OK Health
+            200 OK Health
           </button>
           <button onClick={() => setPreset('SCHEMA_422')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#fbbf24', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
-            🟡 422 Schema Violation
+            422 Schema
           </button>
           <button onClick={() => setPreset('SQL_FUZZ')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#f87171', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
-            🔴 SQL Injection Fuzz
+            SQL Fuzz
           </button>
           <button onClick={() => setPreset('XSS_FUZZ')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#f87171', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
-            🟠 XSS Script Fuzz
+            XSS Fuzz
           </button>
           <button onClick={() => setPreset('BOUNDARY_NEGATIVE')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#c084fc', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
-            🟣 Boundary Negative Order
+            Negative Order
           </button>
           <button onClick={() => setPreset('CORS_OPTIONS')} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--surface-color)', color: '#38bdf8', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
-            🔵 OPTIONS CORS Preflight
+            CORS Preflight
           </button>
         </div>
 
         {/* Live Request Form */}
-        <div style={{ background: 'var(--surface-color)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr auto', gap: '10px', marginBottom: '14px' }}>
+        <div style={{ background: 'var(--surface-color)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
             <select
               value={customMethod}
               onChange={(e) => setCustomMethod(e.target.value as any)}
               style={{
+                flex: '0 0 110px',
                 padding: '10px',
                 borderRadius: '8px',
                 border: '1px solid var(--border-color)',
@@ -1186,6 +1150,8 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
               onChange={(e) => setCustomEndpoint(e.target.value)}
               placeholder="/api/..."
               style={{
+                flex: '1 1 200px',
+                minWidth: 0,
                 padding: '10px 14px',
                 borderRadius: '8px',
                 border: '1px solid var(--border-color)',
@@ -1199,20 +1165,15 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
             <button
               onClick={handleRunCustomProbe}
               disabled={customProbeLoading}
+              className="btn btn-primary"
               style={{
-                padding: '10px 20px',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
-                color: 'white',
-                fontWeight: 700,
+                padding: '10px 18px',
                 fontSize: '0.88rem',
                 cursor: customProbeLoading ? 'not-allowed' : 'pointer',
-                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
                 whiteSpace: 'nowrap'
               }}
             >
-              {customProbeLoading ? '⏳ Probing...' : '⚡ Send Request'}
+              {customProbeLoading ? 'Probing...' : 'Send Request'}
             </button>
           </div>
 
@@ -1267,7 +1228,7 @@ ${r.recommendation ? `- Recommendation: ${r.recommendation}` : ''}
                 </div>
 
                 <span style={{ fontSize: '0.75rem', color: '#60a5fa', fontWeight: 600 }}>
-                  ✓ Security & Sanitization Inspection Passed
+                  Sanitization Passed
                 </span>
               </div>
 

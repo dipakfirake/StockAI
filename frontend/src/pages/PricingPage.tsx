@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Check, X, Clock, CreditCard, Shield } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { subscriptionApi } from '../services/api';
 import './Auth.css';
@@ -96,205 +97,172 @@ export default function PricingPage() {
   const isPendingApproval = proStatus === 'REQUESTED' && !isPro;
 
   return (
-    <div className="pricing-container" style={{ padding: '40px 20px', maxWidth: '1080px', margin: '0 auto' }}>
-      <div style={{ textAlign: 'center', marginBottom: '35px' }}>
-        <h1 style={{ fontSize: '2.4rem', fontWeight: 800, marginBottom: '10px' }}>
-          StockAI Membership Plans
+    <div className="pricing-container" style={{ padding: '24px 12px', maxWidth: '980px', margin: '0 auto' }}>
+      <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+        <h1 style={{ fontSize: 'clamp(1.6rem, 3.5vw, 2.2rem)', fontWeight: 700, marginBottom: '8px' }}>
+          Membership Plans
         </h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '1.15rem', maxWidth: '640px', margin: '0 auto' }}>
-          Select the best pathway for your research: Instant Verified Subscription or Manual Administrator Review.
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.98rem', maxWidth: '580px', margin: '0 auto' }}>
+          Choose between Standard research tools or PRO quantitative signals and options analytics.
         </p>
       </div>
 
       {error && (
-        <div className="auth-alert error" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#f87171' }}>
-          ⚠️ {error}
+        <div className="auth-alert error" style={{ marginBottom: '18px', padding: '12px 16px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#f87171' }}>
+          {error}
         </div>
       )}
 
       {success && (
-        <div className="auth-alert success" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px', background: 'rgba(34, 197, 94, 0.1)', border: '1px solid #22c55e', color: '#4ade80' }}>
-          ✅ {success}
+        <div className="auth-alert success" style={{ marginBottom: '18px', padding: '12px 16px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', color: '#34d399' }}>
+          {success}
         </div>
       )}
 
       {isPendingApproval && (
         <div style={{
-          marginBottom: '25px',
-          padding: '16px 20px',
+          marginBottom: '22px',
+          padding: '14px 18px',
           borderRadius: '10px',
           background: 'rgba(245, 158, 11, 0.1)',
-          border: '1px solid #f59e0b',
+          border: '1px solid rgba(245, 158, 11, 0.5)',
           color: '#fbbf24',
           display: 'flex',
           alignItems: 'center',
           gap: '12px'
         }}>
-          <span style={{ fontSize: '1.5rem' }}>🕒</span>
+          <Clock size={20} style={{ flexShrink: 0 }} />
           <div>
-            <strong>PRO Membership Request Under Admin Review</strong>
-            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              Your application has been received by our administrators. Your account will automatically activate once approved.
+            <strong>PRO Membership Under Admin Review</strong>
+            <div style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              Your application has been received. Your account activates automatically once approved.
             </div>
           </div>
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '24px' }}>
-        
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '20px' }}>
+
         {/* FREE TIER CARD */}
-        <div style={{ 
-          background: 'var(--surface-color)', 
-          borderRadius: '14px', 
-          padding: 'clamp(18px, 4vw, 32px)',
-          border: '1px solid var(--border-color)',
+        <div className="card" style={{
+          borderRadius: '12px',
+          padding: 'clamp(18px, 4vw, 28px)',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ fontSize: '1.6rem', fontWeight: 700 }}>Free Tier</h2>
-            <span style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(255,255,255,0.06)', borderRadius: '20px' }}>Standard</span>
+            <h2 style={{ fontSize: '1.35rem', fontWeight: 700, margin: 0 }}>Standard</h2>
+            <span style={{ fontSize: '0.75rem', padding: '3px 10px', background: 'var(--color-bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '14px' }}>Free</span>
           </div>
-          <div style={{ fontSize: '2.4rem', fontWeight: 800, margin: '20px 0 10px' }}>
-            $0<span style={{ fontSize: '1rem', color: 'var(--text-secondary)', fontWeight: 400 }}> / month</span>
+          <div className="mono" style={{ fontSize: '2.1rem', fontWeight: 700, margin: '18px 0 8px' }}>
+            ₹0<span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', fontWeight: 400 }}> / month</span>
           </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: '24px' }}>
-            Basic technical screener and charting for casual retail traders.
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '20px' }}>
+            Core technical screener, charting, and paper portfolio tracking.
           </p>
 
-          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 30px 0', flex: 1, fontSize: '0.95rem' }}>
-            <li style={{ marginBottom: '14px' }}>✅ Live Nifty/Sensex Market Quotes</li>
-            <li style={{ marginBottom: '14px' }}>✅ Technical Indicators (RSI, MACD, EMA)</li>
-            <li style={{ marginBottom: '14px' }}>✅ Virtual Paper Trading Engine</li>
-            <li style={{ marginBottom: '14px' }}>✅ Custom Watchlist & Holdings</li>
-            <li style={{ marginBottom: '14px', color: 'var(--text-secondary)' }}>❌ LightGBM 3-Class AI Forecasts</li>
-            <li style={{ marginBottom: '14px', color: 'var(--text-secondary)' }}>❌ Institutional Smart Money Hunter</li>
-            <li style={{ marginBottom: '14px', color: 'var(--text-secondary)' }}>❌ Black-Scholes Greeks Engine</li>
+          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 24px 0', flex: 1, fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Check size={16} color="#10b981" /> Live NSE &amp; BSE Market Quotes</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Check size={16} color="#10b981" /> RSI, MACD &amp; EMA Chart Overlays</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Check size={16} color="#10b981" /> Paper Trading &amp; Portfolio Ledger</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Check size={16} color="#10b981" /> Custom Watchlist &amp; Price Alerts</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--color-text-muted)' }}><X size={16} /> ML Ensemble Signal Forecasts</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--color-text-muted)' }}><X size={16} /> Smart Money Concepts Radar</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--color-text-muted)' }}><X size={16} /> Options Chain &amp; Greeks Engine</li>
           </ul>
 
-          <button 
+          <button
             disabled={true}
-            style={{ 
-              width: '100%', 
-              padding: '12px', 
-              background: 'var(--bg-color)', 
-              border: '1px solid var(--border-color)', 
-              color: 'var(--text-secondary)',
-              borderRadius: '8px',
-              cursor: 'not-allowed',
-              fontWeight: 600
-            }}
+            className="btn btn-secondary"
+            style={{ width: '100%', cursor: 'not-allowed', opacity: 0.7 }}
           >
             {isPro ? 'Included' : 'Current Plan'}
           </button>
         </div>
 
         {/* PRO TIER CARD */}
-        <div style={{ 
-          background: 'linear-gradient(145deg, var(--surface-color) 0%, rgba(59, 130, 246, 0.12) 100%)', 
-          borderRadius: '14px', 
-          padding: 'clamp(18px, 4vw, 32px)',
-          border: '2px solid #3b82f6',
+        <div className="card" style={{
+          borderRadius: '12px',
+          padding: 'clamp(18px, 4vw, 28px)',
+          border: '1.5px solid var(--color-accent-blue)',
           display: 'flex',
           flexDirection: 'column',
           position: 'relative',
-          boxShadow: '0 8px 30px rgba(59, 130, 246, 0.15)'
         }}>
           <div style={{
             position: 'absolute',
-            top: '-13px',
-            right: '24px',
-            background: 'linear-gradient(90deg, #3b82f6, #60a5fa)',
+            top: '-12px',
+            right: '20px',
+            background: 'var(--color-accent-blue)',
             color: 'white',
-            padding: '4px 14px',
-            borderRadius: '20px',
-            fontSize: '0.8rem',
-            fontWeight: 800,
+            padding: '3px 12px',
+            borderRadius: '14px',
+            fontSize: '0.72rem',
+            fontWeight: 700,
             letterSpacing: '0.05em'
           }}>RECOMMENDED</div>
-          
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#60a5fa' }}>StockAI PRO</h2>
+            <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--color-accent-blue)', margin: 0 }}>StockAI PRO</h2>
             {isPro && (
-              <span style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(34,197,94,0.2)', color: '#4ade80', borderRadius: '20px', fontWeight: 700 }}>
-                ACTIVE PRO
+              <span style={{ fontSize: '0.75rem', padding: '3px 10px', background: 'rgba(16,185,129,0.18)', color: '#10b981', borderRadius: '14px', fontWeight: 700 }}>
+                ACTIVE
               </span>
             )}
           </div>
 
-          <div style={{ fontSize: '2.4rem', fontWeight: 800, margin: '20px 0 10px' }}>
-            $29<span style={{ fontSize: '1rem', color: 'var(--text-secondary)', fontWeight: 400 }}> / month (₹2,499)</span>
+          <div className="mono" style={{ fontSize: '2.1rem', fontWeight: 700, margin: '18px 0 8px' }}>
+            ₹2,499<span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', fontWeight: 400 }}> / month</span>
           </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: '24px' }}>
-            Full quantitative intelligence, machine learning signals, and options analytics.
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '20px' }}>
+            Full quantitative screener, ML signals, strategy backtesting, and options Greeks.
           </p>
 
-          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 30px 0', flex: 1, fontSize: '0.95rem' }}>
-            <li style={{ marginBottom: '14px' }}>✅ Everything in Free Tier</li>
-            <li style={{ marginBottom: '14px', fontWeight: 600 }}>🚀 LightGBM + Attention ML Predictions</li>
-            <li style={{ marginBottom: '14px', fontWeight: 600 }}>🏛️ Smart Money Concepts (SMC) Radar</li>
-            <li style={{ marginBottom: '14px', fontWeight: 600 }}>📊 Institutional Options Greeks (Gamma/Delta)</li>
-            <li style={{ marginBottom: '14px', fontWeight: 600 }}>⚡ Real-time Fyers WebSocket Feed</li>
-            <li style={{ marginBottom: '14px', fontWeight: 600 }}>🛡️ Automated 24/7 Sentinel Watchdog</li>
+          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 24px 0', flex: 1, fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Check size={16} color="#10b981" /> Everything in Standard Plan</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}><Check size={16} color="#10b981" /> Multi-Factor AI &amp; ML Forecasts</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}><Check size={16} color="#10b981" /> Smart Money Liquidity Scanner</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}><Check size={16} color="#10b981" /> Options Chain &amp; Greeks Analytics</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}><Check size={16} color="#10b981" /> Real-Time Streaming Market Feed</li>
+            <li style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}><Check size={16} color="#10b981" /> Automated Risk &amp; Target Alerts</li>
           </ul>
-          
+
           {isPro ? (
-            <button 
+            <button
               disabled={true}
-              style={{ 
-                width: '100%', 
-                padding: '14px', 
-                background: 'rgba(34,197,94,0.2)', 
-                border: '1px solid #22c55e', 
-                color: '#4ade80',
-                borderRadius: '8px',
-                fontWeight: 700,
+              className="btn"
+              style={{
+                width: '100%',
+                background: 'rgba(16,185,129,0.16)',
+                border: '1px solid #10b981',
+                color: '#10b981',
                 cursor: 'default'
               }}
             >
-              🌟 PRO Membership Active
+              PRO Membership Active
             </button>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {/* Pathway 1: Paid Subscription */}
-              <button 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button
                 onClick={() => setShowPayModal(true)}
                 disabled={loading}
-                style={{ 
-                  width: '100%', 
-                  padding: '13px', 
-                  background: 'linear-gradient(90deg, #3b82f6, #2563eb)', 
-                  border: 'none', 
-                  color: 'white',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                  fontSize: '0.95rem',
-                  boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
-                  transition: 'transform 0.15s ease'
-                }}
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '12px', fontWeight: 700 }}
               >
-                💳 Pay & Activate PRO ($29 / ₹2,499)
+                <CreditCard size={16} /> Subscribe — ₹2,499 / month
               </button>
 
-              {/* Pathway 2: Admin Approval */}
-              <button 
+              <button
                 onClick={() => setShowRequestModal(true)}
                 disabled={loading || isPendingApproval}
-                style={{ 
-                  width: '100%', 
-                  padding: '12px', 
-                  background: isPendingApproval ? 'rgba(245, 158, 11, 0.1)' : 'transparent', 
-                  border: isPendingApproval ? '1px solid #f59e0b' : '1px solid var(--border-color)', 
-                  color: isPendingApproval ? '#fbbf24' : 'var(--text-color)',
-                  borderRadius: '8px',
-                  cursor: isPendingApproval ? 'default' : 'pointer',
-                  fontWeight: 600,
-                  fontSize: '0.9rem',
+                className="btn btn-secondary"
+                style={{
+                  width: '100%',
+                  borderColor: isPendingApproval ? '#f59e0b' : undefined,
+                  color: isPendingApproval ? '#fbbf24' : undefined,
                 }}
               >
-                {isPendingApproval ? '🕒 Approval Request Pending' : '✍️ Request Admin Approval (Free Trial/Student)'}
+                <Shield size={15} /> {isPendingApproval ? 'Approval Request Pending' : 'Request Admin Access'}
               </button>
             </div>
           )}
@@ -318,22 +286,22 @@ export default function PricingPage() {
           <div style={{
             background: 'var(--surface-color)',
             border: '1px solid var(--border-color)',
-            borderRadius: '16px',
+            borderRadius: '14px',
             width: '100%',
-            maxWidth: '480px',
-            padding: '28px',
+            maxWidth: '460px',
+            padding: '24px',
             boxShadow: '0 20px 40px rgba(0,0,0,0.4)'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-              <h3 style={{ fontSize: '1.3rem', fontWeight: 700 }}>Secure PRO Checkout</h3>
-              <button 
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0 }}>PRO Checkout</h3>
+              <button
                 onClick={() => setShowPayModal(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '1.4rem', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '1.2rem', cursor: 'pointer' }}
               >✕</button>
             </div>
 
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '18px' }}>
-              Subscription: <strong>StockAI PRO (1 Month)</strong> — Amount: <strong>$29.00 / ₹2,499</strong>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '16px' }}>
+              Plan: <strong>StockAI PRO Monthly</strong> · Amount: <strong className="mono">₹2,499</strong>
             </p>
 
             <form onSubmit={handlePaymentSubmit}>

@@ -347,44 +347,44 @@ export default function HoldingDetailModal({
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               Price & Investment Breakdown
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px 20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: '12px 20px' }}>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Purchase / Buy Price</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Purchase Price</div>
                 <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }} className="mono">
                   {formatINR(holding.entry_price)}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Current Market Price (LTP)</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Current Price</div>
                 <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }} className="mono">
                   {formatINR(holding.current_price)}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Total Invested (Cost)</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Total Invested</div>
                 <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }} className="mono">
                   {formatINR(investedAmt)}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Current Market Value</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Current Value</div>
                 <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }} className="mono">
                   {formatINR(currentVal)}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Gross Market Movement</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Gross Movement</div>
                 <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2, color: getPnlColor(holding.price_change_pct ?? (holding.current_price - holding.entry_price)) }} className="mono">
                   {getPnlSign(holding.price_change_pct ?? (holding.current_price - holding.entry_price))}
                   {holding.price_change_pct !== undefined 
                     ? `${holding.price_change_pct.toFixed(2)}%` 
                     : `${(((holding.current_price - holding.entry_price) / holding.entry_price) * 100 * (isBuy ? 1 : -1)).toFixed(2)}%`}
-                  {holding.gross_pnl !== undefined && ` (${getPnlSign(holding.gross_pnl)}${formatINR(holding.gross_pnl)})`}
+                  {holding.gross_pnl !== undefined && ` · ${getPnlSign(holding.gross_pnl)}${formatINR(holding.gross_pnl)}`}
                 </div>
               </div>
               {holding.total_charges !== undefined && (
                 <div>
-                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Charges (Brokerage + STT)</div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Charges &amp; Taxes</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2, color: 'var(--color-text-secondary)' }} className="mono">
                     {formatINR(holding.total_charges)}
                   </div>

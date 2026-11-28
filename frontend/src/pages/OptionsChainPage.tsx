@@ -70,13 +70,13 @@ export default function OptionsChainPage() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
           <h1 className="page-title">Options Chain</h1>
-          <p className="page-subtitle">Real-time simulation via Black-Scholes Engine</p>
+          <p className="page-subtitle">Live option chain & Black-Scholes Greeks</p>
         </div>
         
-        <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8 }}>
+        <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', maxWidth: '100%' }}>
           <StockSearchBox 
             placeholder="NIFTY.NS, RELIANCE.NS..." 
             width={220} 
@@ -85,7 +85,7 @@ export default function OptionsChainPage() {
             value={inputSymbol} 
             onChange={(val) => setInputSymbol(val)} 
           />
-          <button className="button" type="submit" style={{ padding: '0 16px', borderRadius: '6px' }}>Load</button>
+          <button className="btn btn-primary" type="submit" style={{ padding: '0 16px', minHeight: 38 }}>Load</button>
         </form>
       </div>
 
@@ -100,59 +100,59 @@ export default function OptionsChainPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           
           {/* Summary Dashboard */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ background: 'var(--color-bg-secondary)', padding: 12, borderRadius: 8 }}><Target color="var(--primary-color)" /></div>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Underlying Spot ({data.symbol})</div>
-                <div style={{ fontSize: 20, fontWeight: 'bold' }}>{(data.spot_price || 0).toFixed(2)}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 155px), 1fr))', gap: 12 }}>
+            <div className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ background: 'var(--color-bg-secondary)', padding: 10, borderRadius: 8, flexShrink: 0 }}><Target color="var(--primary-color)" size={18} /></div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>Spot · {data.symbol}</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }} className="mono">{(data.spot_price || 0).toFixed(2)}</div>
               </div>
             </div>
-            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ background: 'var(--color-bg-secondary)', padding: 12, borderRadius: 8 }}><Zap color="var(--color-bullish)" /></div>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Put-Call Ratio (PCR)</div>
-                <div style={{ fontSize: 20, fontWeight: 'bold', color: data.pcr > 1 ? 'var(--color-bullish)' : 'var(--color-bearish)' }}>{(data.pcr || 0).toFixed(2)}</div>
+            <div className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ background: 'var(--color-bg-secondary)', padding: 10, borderRadius: 8, flexShrink: 0 }}><Zap color="var(--color-bullish)" size={18} /></div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>Put-Call Ratio</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: data.pcr > 1 ? 'var(--color-bullish)' : 'var(--color-bearish)' }} className="mono">{(data.pcr || 0).toFixed(2)}</div>
               </div>
             </div>
-            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ background: 'var(--color-bg-secondary)', padding: 12, borderRadius: 8 }}><ShieldAlert color="var(--color-accent)" /></div>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Max Pain Strike</div>
-                <div style={{ fontSize: 20, fontWeight: 'bold' }}>{data.max_pain}</div>
+            <div className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ background: 'var(--color-bg-secondary)', padding: 10, borderRadius: 8, flexShrink: 0 }}><ShieldAlert color="var(--color-accent)" size={18} /></div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>Max Pain Strike</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }} className="mono">{data.max_pain}</div>
               </div>
             </div>
-            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ background: 'var(--color-bg-secondary)', padding: 12, borderRadius: 8 }}>
-                <span style={{ fontSize: 16, fontWeight: 'bold' }}>EXP</span>
+            <div className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ background: 'var(--color-bg-secondary)', padding: 10, borderRadius: 8, flexShrink: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>EXP</span>
               </div>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Expiry Date</div>
-                <div style={{ fontSize: 16, fontWeight: 'bold' }}>{data.expiry_date} ({data.days_to_expiry} days)</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>Expiry Date</div>
+                <div style={{ fontSize: 14.5, fontWeight: 700 }} className="mono">{data.expiry_date} · {data.days_to_expiry}d left</div>
               </div>
             </div>
           </div>
 
           {data.ai_strategy && (
             <div className="card" style={{ padding: 16, borderLeft: '4px solid var(--color-primary)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
                 <div>
-                  <h3 style={{ margin: 0, color: 'var(--color-primary)' }}>AI Recommended Strategy: {data.ai_strategy.name}</h3>
+                  <h3 style={{ margin: 0, fontSize: 16, color: 'var(--color-primary)' }}>Suggested Strategy: {data.ai_strategy.name}</h3>
                   <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--color-text-muted)' }}>{data.ai_strategy.reasoning}</p>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 14 }}>
                 <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Max Profit (1 Lot)</div>
-                  <div style={{ fontSize: 16, fontWeight: 'bold', color: 'var(--color-bullish)' }}>+₹{data.ai_strategy.max_profit_per_lot}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>Max Profit · 1 Lot</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-bullish)' }} className="mono">+₹{data.ai_strategy.max_profit_per_lot}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Max Risk (1 Lot)</div>
-                  <div style={{ fontSize: 16, fontWeight: 'bold', color: 'var(--color-bearish)' }}>-₹{data.ai_strategy.max_loss_per_lot}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>Max Risk · 1 Lot</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-bearish)' }} className="mono">-₹{data.ai_strategy.max_loss_per_lot}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Breakeven Point</div>
-                  <div style={{ fontSize: 16, fontWeight: 'bold' }}>{data.ai_strategy.breakeven}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>Breakeven Point</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }} className="mono">{data.ai_strategy.breakeven}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -161,7 +161,7 @@ export default function OptionsChainPage() {
                     <span>
                       <strong style={{ color: leg.action === 'BUY' ? 'var(--color-bullish)' : 'var(--color-bearish)' }}>{leg.action}</strong> {leg.strike} {leg.type}
                     </span>
-                    <span>₹{leg.price.toFixed(2)}</span>
+                    <span className="mono">₹{leg.price.toFixed(2)}</span>
                   </div>
                 ))}
               </div>
@@ -169,14 +169,14 @@ export default function OptionsChainPage() {
           )}
 
           <div className="card" style={{ overflow: 'hidden' }}>
-            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="card-title">Option Chain Data</span>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <span className="card-title">Option Chain</span>
               <button 
-                className="button button-outline" 
+                className="btn btn-secondary" 
                 onClick={() => setViewGreeks(!viewGreeks)}
                 style={{ padding: '4px 12px', fontSize: 12 }}
               >
-                {viewGreeks ? 'View Standard Data' : 'View Options Greeks'}
+                {viewGreeks ? 'Standard View' : 'Options Greeks'}
               </button>
             </div>
             

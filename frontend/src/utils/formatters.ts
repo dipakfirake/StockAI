@@ -41,15 +41,12 @@ export function formatNumber2Dec(val: number | string | null | undefined, fallba
 }
 
 /**
- * Strict 3-tier color resolver for P&L and prices:
- * - Profit (> 0): Vibrant Green (#10b981)
- * - Loss (< 0): Crimson Red (#ef4444)
- * - Zero / No profit no loss (== 0): Pure White (#ffffff)
+ * Returns 'var(--color-pnl-zero)' for zero so Light & Dark themes both render legibly.
  */
 export function getPnlColor(val: number | string | null | undefined): string {
-  if (val === null || val === undefined || val === '') return '#ffffff'
+  if (val === null || val === undefined || val === '') return 'var(--color-pnl-zero, #f1f5f9)'
   const num = typeof val === 'number' ? val : Number(val)
-  if (isNaN(num) || Math.abs(num) <= 0.0001) return '#ffffff'
+  if (isNaN(num) || Math.abs(num) <= 0.0001) return 'var(--color-pnl-zero, #f1f5f9)'
   return num > 0 ? '#10b981' : '#ef4444'
 }
 
@@ -74,4 +71,38 @@ export function getPnlSign(val: number | string | null | undefined): string {
   const num = typeof val === 'number' ? val : Number(val)
   if (isNaN(num) || Math.abs(num) <= 0.0001) return ''
   return num > 0 ? '+' : ''
+}
+
+/**
+ * Formats ISO/Date timestamps concisely in IST (e.g., "27 Nov, 12:36 AM IST").
+ */
+export function formatISTTimestamp(raw?: string | Date | null, fallback = ''): string {
+  if (!raw) return fallback
+  const dt = raw instanceof Date ? raw : new Date(raw)
+  if (Number.isNaN(dt.getTime())) return String(raw)
+  return (
+    dt.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }) + ' IST'
+  )
+}
+
+/**
+ * Strips raw Markdown tokens (### headers, **bold**, redundant bracket noise) into clean sentences.
+ */
+export function cleanBriefMarkdown(raw?: string | null): string {
+  if (!raw) return ''
+  return raw
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/\[([^\]]+)\]/g, '$1')
+    .replace(/\s*-\s+/g, ' · ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }

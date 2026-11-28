@@ -339,20 +339,24 @@ export default function LiveTicker() {
         display: 'flex', 
         flexDirection: 'column',
         alignItems: 'flex-start',
-        gap: '0px',
-        lineHeight: 1.2
+        gap: '1px',
+        lineHeight: 1.2,
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
       }}>
-        <span style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', fontWeight: 700, letterSpacing: '0.5px' }}>{data.name.toUpperCase()}</span>
-        <span className="mono" style={{ color: color, fontSize: '0.85rem', fontWeight: 600 }}>{formatNumber2Dec(data.price)}</span>
-        <span className="mono" style={{ color: color, fontSize: '0.7rem' }}>
-          {arrow} {change > 0 ? '+' : ''}{change.toFixed(2)} ({changePercent.toFixed(2)}%)
+        <span style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', fontWeight: 700, letterSpacing: '0.4px' }}>{data.name.toUpperCase()}</span>
+        <span className="mono" style={{ fontSize: '0.82rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ color: 'var(--color-text-primary)' }}>{formatNumber2Dec(data.price)}</span>
+          <span style={{ color: color, fontSize: '0.72rem' }}>
+            {arrow} {change > 0 ? '+' : ''}{changePercent.toFixed(2)}%
+          </span>
         </span>
       </NavLink>
     )
   }
 
   return (
-    <div style={{ display: 'flex', gap: 24, marginRight: 'auto', alignItems: 'center' }} className="hide-on-mobile">
+    <div style={{ display: 'flex', gap: 18, marginRight: 16, alignItems: 'center', flexShrink: 0 }} className="hide-on-mobile">
       {renderTicker(nifty, 'NIFTY 50', '^NSEI')}
       {renderTicker(bankNifty, 'NIFTY BANK', '^NSEBANK')}
     </div>

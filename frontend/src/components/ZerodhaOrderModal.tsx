@@ -442,7 +442,7 @@ export default function ZerodhaOrderModal({
                 }}
               >
                 <span>MIS</span>
-                <span style={{ fontSize: 11, opacity: 0.7 }}>(Intraday 5x)</span>
+                <span style={{ fontSize: 11, opacity: 0.7 }}>Intraday 5x</span>
               </button>
             </div>
           </div>
@@ -452,7 +452,7 @@ export default function ZerodhaOrderModal({
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted, #8a92a6)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               Order Type
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(64px, 1fr))', gap: 6 }}>
               {[
                 { id: 'MARKET', label: 'Market' },
                 { id: 'LIMIT', label: 'Limit' },

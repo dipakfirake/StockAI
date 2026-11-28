@@ -103,6 +103,7 @@ export default function SwingScreenerPage() {
   const navigate = useNavigate()
   const [sector, setSector] = useState('NIFTY_50')
   const [activeTab, setActiveTab] = useState<'BUY' | 'SELL' | 'HOLD' | 'ALL'>('BUY')
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({})
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards')
   const [searchQuery, setSearchQuery] = useState('')
   const [minScore, setMinScore] = useState<number>(0)
@@ -390,389 +391,317 @@ export default function SwingScreenerPage() {
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto', paddingBottom: 60 }}>
       {/* Page Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-        <div style={{ flex: '1 1 300px', minWidth: 0 }}>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <Sparkles size={24} style={{ color: 'var(--color-accent-blue)', flexShrink: 0 }} />
-            AI Swing Trade Screener
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <TrendingUp size={22} style={{ color: 'var(--color-accent-blue)', flexShrink: 0 }} />
+            Swing Screener
           </h1>
           <p className="page-subtitle">
-            Systematic multi-factor market scanner categorizing liquid stocks into high-conviction <strong>BUY</strong>, <strong>SELL</strong>, and <strong>HOLD</strong> setups with exact profit targets and risk bounds.
+            Multi-factor BUY, SELL, and HOLD setups with entry, target tiers, and risk levels.
           </p>
         </div>
 
-        <div className="mobile-w-100" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <select 
-            className="input" 
-            value={sector} 
+        <div className="mobile-w-100" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <select
+            className="input"
+            value={sector}
             onChange={(e) => setSector(e.target.value)}
-            style={{ flex: '1 1 180px', minWidth: 160, height: 38, fontWeight: 500 }}
+            style={{ flex: '1 1 170px', minWidth: 0, fontWeight: 500, padding: '7px 10px' }}
           >
             {SECTOR_OPTIONS.map(opt => (
               <option key={opt.id} value={opt.id}>{opt.label}</option>
             ))}
           </select>
 
-          <button 
-            onClick={() => fetchScreener(true)} 
+          <button
+            onClick={() => fetchScreener(true)}
             disabled={refreshing || loading || scanProgress !== null}
-            className="btn btn-secondary no-shrink"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 38, whiteSpace: 'nowrap', flex: '0 0 auto' }}
-            title="Scan entire market now"
+            className="btn btn-secondary"
+            style={{ gap: 6 }}
+            title="Scan selected sector"
           >
-            <RefreshCw size={15} className={(refreshing || scanProgress !== null) ? 'spin' : ''} />
+            <RefreshCw size={14} className={(refreshing || scanProgress !== null) ? 'spin' : ''} />
             <span>
               {(refreshing || scanProgress !== null)
-                ? (scanProgress !== null ? `Scanning... ${scanProgress}%` : 'Scanning...')
-                : 'Run Fresh Scan'}
+                ? (scanProgress !== null ? `Scanning ${scanProgress}%` : 'Scanning…')
+                : 'Run Scan'}
             </span>
           </button>
 
-          <button 
-            onClick={handleSyncAudit} 
+          <button
+            onClick={handleSyncAudit}
             disabled={syncingAudit}
-            className="btn btn-secondary no-shrink"
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              gap: 8, 
-              height: 38, 
-              whiteSpace: 'nowrap', 
-              flex: '0 0 auto',
-              color: '#34d399',
-              borderColor: 'rgba(52, 211, 153, 0.3)',
-              background: 'rgba(52, 211, 153, 0.08)'
-            }}
-            title="Fetch today's closing prices for all tracked stocks, check SL/Targets, and update Excel spreadsheet"
+            className="btn btn-secondary"
+            style={{ gap: 6, color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.35)' }}
+            title="Update cycle close prices & P&L"
           >
-            <RefreshCw size={15} className={syncingAudit ? 'spin' : ''} />
-            <span>{syncingAudit ? 'Syncing...' : 'Sync 11-Day Prices'}</span>
+            <RefreshCw size={14} className={syncingAudit ? 'spin' : ''} />
+            <span>{syncingAudit ? 'Syncing…' : 'Sync Prices'}</span>
           </button>
 
-          <button 
+          <button
             onClick={handleDownloadLatestExcel}
             disabled={downloadingExcel}
-            className="btn btn-secondary no-shrink"
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              gap: 8, 
-              height: 38, 
-              whiteSpace: 'nowrap', 
-              flex: '0 0 auto',
-              textDecoration: 'none',
-              color: '#38bdf8',
-              borderColor: 'rgba(56, 189, 248, 0.3)',
-              background: 'rgba(56, 189, 248, 0.08)',
-              cursor: downloadingExcel ? 'not-allowed' : 'pointer'
-            }}
-            title="Download the institutional 11-Day Swing Audit Excel spreadsheet (.xlsx) with PnL and Price Tracking"
+            className="btn btn-secondary"
+            style={{ gap: 6, color: 'var(--color-accent-blue)' }}
+            title="Download current 11-day audit Excel workbook"
           >
-            <Download size={15} className={downloadingExcel ? 'spin' : ''} />
-            <span>{downloadingExcel ? 'Downloading...' : 'Audit Excel (.xlsx)'}</span>
+            <Download size={14} className={downloadingExcel ? 'spin' : ''} />
+            <span>{downloadingExcel ? 'Exporting…' : 'Export Excel'}</span>
           </button>
 
           <button
             onClick={handleOpenArchives}
-            className="btn btn-secondary no-shrink"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              height: 38,
-              whiteSpace: 'nowrap',
-              flex: '0 0 auto',
-              color: '#a78bfa',
-              borderColor: 'rgba(167, 139, 250, 0.3)',
-              background: 'rgba(167, 139, 250, 0.08)'
-            }}
-            title="View all current & historical 11-day audit cycle Excel files and download past files"
+            className="btn btn-ghost"
+            style={{ gap: 6 }}
+            title="View past 11-day audit cycle reports"
           >
-            <History size={15} />
-            <span>Past Audits ({archiveFiles.length > 0 ? archiveFiles.length : 'Archive'})</span>
+            <History size={14} />
+            <span>Archives{archiveFiles.length > 0 ? ` (${archiveFiles.length})` : ''}</span>
           </button>
         </div>
       </div>
 
-      {/* Active Audit Cycle Transparency Banner */}
+      {/* Active Audit Cycle Summary Bar */}
       {cycleData && (
-        <div style={{
-          marginBottom: 16,
-          padding: '12px 18px',
-          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%)',
-          border: '1px solid rgba(56, 189, 248, 0.25)',
-          borderRadius: 10,
+        <div className="card" style={{
+          marginBottom: 14,
+          padding: '12px 16px',
+          borderLeft: '3px solid var(--color-accent-blue)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: 12
+          gap: 10
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12.5 }}>
             <span style={{
-              background: 'rgba(56, 189, 248, 0.15)',
-              color: '#38bdf8',
-              padding: '4px 10px',
+              background: 'rgba(59, 130, 246, 0.14)',
+              color: 'var(--color-accent-blue)',
+              padding: '3px 8px',
               borderRadius: 6,
               fontWeight: 700,
-              fontSize: 12,
-              letterSpacing: '0.05em',
+              fontSize: 11,
               textTransform: 'uppercase'
             }}>
-              Cycle #{cycleData.cycle_number} ({cycleData.status})
+              Cycle #{cycleData.cycle_number} · {cycleData.status}
             </span>
-            <span style={{ fontSize: 13, color: '#f8fafc', fontWeight: 600 }}>
-              {cycleData.from_date} to {cycleData.to_date}
+            <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+              {cycleData.from_date} – {cycleData.to_date}
             </span>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>
-              Tracked: <strong style={{ color: '#38bdf8' }}>{cycleData.total_trades || 0}</strong>
-              {cycleData.closed_trades !== undefined && (
-                <> ({cycleData.closed_trades} closed / {cycleData.in_progress_trades ?? 0} open)</>
-              )}
+            <span style={{ color: 'var(--color-text-muted)' }}>
+              Tracked <strong className="mono" style={{ color: 'var(--color-text-primary)' }}>{cycleData.total_trades || 0}</strong>
+              {cycleData.closed_trades !== undefined && ` · ${cycleData.closed_trades} closed / ${cycleData.in_progress_trades ?? 0} open`}
             </span>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>
-              Win Rate: <strong style={{ color: (cycleData.win_rate || 0) >= 50 ? '#34d399' : '#fbbf24' }}>{cycleData.win_rate || 0}%</strong>
+            <span style={{ color: 'var(--color-text-muted)' }}>
+              Win <strong className="mono" style={{ color: (cycleData.win_rate || 0) >= 50 ? 'var(--color-bullish)' : 'var(--color-neutral)' }}>{cycleData.win_rate || 0}%</strong>
               {cycleData.profit_factor !== undefined && (
-                <> · PF: <strong style={{ color: (cycleData.profit_factor || 0) >= 1.2 ? '#34d399' : '#94a3b8' }}>{cycleData.profit_factor}x</strong></>
+                <> · PF <strong className="mono">{cycleData.profit_factor}x</strong></>
               )}
             </span>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>
-              Gross P&L: <strong style={{ color: (cycleData.total_pnl_rupees || 0) >= 0 ? '#34d399' : '#f87171' }}>₹{(cycleData.total_pnl_rupees || 0).toLocaleString('en-IN')}</strong>
+            <span style={{ color: 'var(--color-text-muted)' }}>
+              Gross P&amp;L <strong className="mono" style={{ color: (cycleData.total_pnl_rupees || 0) >= 0 ? 'var(--color-bullish)' : 'var(--color-bearish)' }}>₹{(cycleData.total_pnl_rupees || 0).toLocaleString('en-IN')}</strong>
               {cycleData.user_executed_trades > 0 && (
-                <> · My Buys: <strong style={{ color: '#a78bfa' }}>{cycleData.user_executed_trades} ({cycleData.user_executed_win_rate ?? 0}% WR)</strong></>
+                <> · My Buys <strong className="mono">{cycleData.user_executed_trades}</strong></>
               )}
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button
-              onClick={handleRolloverCycle}
-              disabled={rollingOver}
-              className="btn btn-secondary"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                height: 32,
-                fontSize: 12,
-                padding: '0 12px',
-                borderColor: 'rgba(52, 211, 153, 0.4)',
-                background: 'rgba(52, 211, 153, 0.12)',
-                color: '#34d399',
-                cursor: 'pointer'
-              }}
-              title="Finalize current cycle (freeze scorecard into permanent archive) and start the next cycle"
-            >
-              <RefreshCw size={14} className={rollingOver ? 'spin' : ''} />
-              <span>{rollingOver ? 'Rolling Over...' : `Complete & Start Cycle #${(cycleData?.cycle_number || 1) + 1}`}</span>
-            </button>
-            <button
-              onClick={handleDownloadLatestExcel}
-              disabled={downloadingExcel}
-              className="btn btn-primary"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, fontSize: 12, padding: '0 12px' }}
-              title="Download freshly generated Excel spreadsheet directly"
-            >
-              <Download size={14} className={downloadingExcel ? 'spin' : ''} />
-              <span>{downloadingExcel ? 'Downloading...' : 'Download Current Excel (.xlsx)'}</span>
-            </button>
-            <a
-              href={`/api/swing-audit/download-latest-file?t=${Date.now()}`}
-              download
-              style={{
-                fontSize: 12,
-                color: '#94a3b8',
-                textDecoration: 'underline',
-                padding: '4px 8px',
-                cursor: 'pointer'
-              }}
-              title="Native direct download link fallback"
-            >
-              Direct Link
-            </a>
-          </div>
+          <button
+            onClick={handleRolloverCycle}
+            disabled={rollingOver}
+            className="btn btn-secondary"
+            style={{
+              gap: 6,
+              fontSize: 12,
+              padding: '6px 12px',
+              borderColor: 'rgba(16, 185, 129, 0.35)',
+              color: '#10b981',
+            }}
+            title="Finalize current cycle and start the next 11-day cycle"
+          >
+            <RefreshCw size={13} className={rollingOver ? 'spin' : ''} />
+            <span>{rollingOver ? 'Rolling Over…' : `Start Cycle #${(cycleData?.cycle_number || 1) + 1}`}</span>
+          </button>
         </div>
       )}
 
-      {/* Institutional Summary Cards */}
+      {/* Institutional Summary Strip */}
       {data && data.summary && (
-        <div className="responsive-grid-summary" style={{ marginBottom: 20 }}>
-          {/* BUY Card */}
-          <div 
-            className="card" 
-            style={{ 
-              borderLeft: '4px solid var(--color-bullish)', 
+        <div className="responsive-grid-summary" style={{ marginBottom: 16 }}>
+          <div
+            className="card"
+            style={{
+              padding: '12px 14px',
+              borderLeft: '3px solid var(--color-bullish)',
               cursor: 'pointer',
-              background: activeTab === 'BUY' ? 'rgba(16, 185, 129, 0.08)' : undefined
+              background: activeTab === 'BUY' ? 'var(--color-bullish-dim)' : undefined
             }}
             onClick={() => setActiveTab('BUY')}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 13, color: 'var(--color-bullish)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <TrendingUp size={16} /> BUY SETUPS
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--color-bullish)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <TrendingUp size={14} /> BUY
               </span>
-              <span className="badge badge-buy" style={{ fontSize: 13 }}>{data.summary.buy_count} Stocks</span>
+              <span className="badge badge-buy">{data.summary.buy_count} {data.summary.buy_count === 1 ? 'Stock' : 'Stocks'}</span>
             </div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--color-bullish)', marginBottom: 4 }}>
-              +{data.summary.avg_buy_gain_pct}% <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--color-text-muted)' }}>Avg Target Gain</span>
+            <div className="mono" style={{ fontSize: 21, fontWeight: 700, color: 'var(--color-bullish)' }}>
+              +{data.summary.avg_buy_gain_pct}% <span style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--color-text-muted)' }}>Avg Target</span>
             </div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-              Avg Reward-to-Risk: <strong>{data.summary.avg_buy_rr}:1</strong> · Top Pick: <strong>{data.summary.top_buy_pick || 'None'}</strong>
+            <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)', marginTop: 2 }}>
+              Avg R:R <strong>{data.summary.avg_buy_rr}:1</strong> · Top <strong>{data.summary.top_buy_pick || '—'}</strong>
             </div>
           </div>
 
-          {/* SELL Card */}
-          <div 
-            className="card" 
-            style={{ 
-              borderLeft: '4px solid var(--color-bearish)', 
+          <div
+            className="card"
+            style={{
+              padding: '12px 14px',
+              borderLeft: '3px solid var(--color-bearish)',
               cursor: 'pointer',
-              background: activeTab === 'SELL' ? 'rgba(239, 68, 68, 0.08)' : undefined
+              background: activeTab === 'SELL' ? 'var(--color-bearish-dim)' : undefined
             }}
             onClick={() => setActiveTab('SELL')}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 13, color: 'var(--color-bearish)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <TrendingDown size={16} /> SELL / SHORT SETUPS
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--color-bearish)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <TrendingDown size={14} /> SELL / SHORT
               </span>
-              <span className="badge badge-sell" style={{ fontSize: 13 }}>{data.summary.sell_count} Stocks</span>
+              <span className="badge badge-sell">{data.summary.sell_count} {data.summary.sell_count === 1 ? 'Stock' : 'Stocks'}</span>
             </div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--color-bearish)', marginBottom: 4 }}>
-              -{data.summary.avg_sell_drop_pct}% <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--color-text-muted)' }}>Avg Expected Drop</span>
+            <div className="mono" style={{ fontSize: 21, fontWeight: 700, color: 'var(--color-bearish)' }}>
+              -{data.summary.avg_sell_drop_pct}% <span style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--color-text-muted)' }}>Avg Drop</span>
             </div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-              Bearish Breakdown / Exit Setups · Top Pick: <strong>{data.summary.top_sell_pick || 'None'}</strong>
+            <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)', marginTop: 2 }}>
+              Top <strong>{data.summary.top_sell_pick || '—'}</strong>
             </div>
           </div>
 
-          {/* HOLD Card */}
-          <div 
-            className="card" 
-            style={{ 
-              borderLeft: '4px solid #f59e0b', 
+          <div
+            className="card"
+            style={{
+              padding: '12px 14px',
+              borderLeft: '3px solid var(--color-neutral)',
               cursor: 'pointer',
-              background: activeTab === 'HOLD' ? 'rgba(245, 158, 11, 0.08)' : undefined
+              background: activeTab === 'HOLD' ? 'var(--color-neutral-dim)' : undefined
             }}
             onClick={() => setActiveTab('HOLD')}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 13, color: '#f59e0b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Minus size={16} /> RANGE-BOUND / HOLD
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--color-neutral)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Minus size={14} /> HOLD
               </span>
-              <span className="badge badge-hold" style={{ fontSize: 13 }}>{data.summary.hold_count} Stocks</span>
+              <span className="badge badge-hold">{data.summary.hold_count} {data.summary.hold_count === 1 ? 'Stock' : 'Stocks'}</span>
             </div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: '#f59e0b', marginBottom: 4 }}>
-              Consolidation <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--color-text-muted)' }}>Neutral Channel</span>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-neutral)', marginTop: 2 }}>
+              Consolidation
             </div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-              Equilibrium trading channel (±ATR). Watch for channel breakouts.
+            <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)', marginTop: 2 }}>
+              Neutral trading range
             </div>
           </div>
 
-          {/* Breadth Card */}
-          <div className="card">
-            <div style={{ fontSize: 13, color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-              <span>MARKET BREADTH</span>
-              <span>{data.summary.valid_results} / {data.summary.total_scanned} Active</span>
+          <div className="card" style={{ padding: '12px 14px' }}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 700, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+              <span>BREADTH</span>
+              <span className="mono">{data.summary.valid_results} / {data.summary.total_scanned}</span>
             </div>
-            <div style={{ height: 10, background: 'rgba(255,255,255,0.06)', borderRadius: 5, overflow: 'hidden', display: 'flex', marginBottom: 12 }}>
-              <div style={{ width: `${(data.summary.buy_count / (data.summary.valid_results || 1)) * 100}%`, background: 'var(--color-bullish)' }} title={`Buy: ${data.summary.buy_count}`} />
-              <div style={{ width: `${(data.summary.hold_count / (data.summary.valid_results || 1)) * 100}%`, background: '#f59e0b' }} title={`Hold: ${data.summary.hold_count}`} />
-              <div style={{ width: `${(data.summary.sell_count / (data.summary.valid_results || 1)) * 100}%`, background: 'var(--color-bearish)' }} title={`Sell: ${data.summary.sell_count}`} />
+            <div style={{ height: 8, background: 'var(--color-bg-secondary)', borderRadius: 4, overflow: 'hidden', display: 'flex', marginBottom: 10 }}>
+              <div style={{ width: `${(data.summary.buy_count / (data.summary.valid_results || 1)) * 100}%`, background: 'var(--color-bullish)' }} />
+              <div style={{ width: `${(data.summary.hold_count / (data.summary.valid_results || 1)) * 100}%`, background: 'var(--color-neutral)' }} />
+              <div style={{ width: `${(data.summary.sell_count / (data.summary.valid_results || 1)) * 100}%`, background: 'var(--color-bearish)' }} />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--color-text-secondary)' }}>
-              <span>🟢 {data.summary.buy_count} Buy</span>
-              <span>🟡 {data.summary.hold_count} Hold</span>
-              <span>🔴 {data.summary.sell_count} Sell</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--color-text-secondary)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--color-bullish)' }} /> {data.summary.buy_count} Buy
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--color-neutral)' }} /> {data.summary.hold_count} Hold
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--color-bearish)' }} /> {data.summary.sell_count} Sell
+              </span>
             </div>
           </div>
         </div>
       )}
 
       {/* Tabs & View Controls */}
-      <div className="card" style={{ marginBottom: 20, padding: '12px 14px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          {/* Main Action Tabs */}
-          <div className="mobile-scroll-tabs" style={{ display: 'flex', gap: 8, maxWidth: '100%' }}>
-            <button 
+      <div className="card" style={{ marginBottom: 16, padding: '10px 14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div className="mobile-scroll-tabs" style={{ display: 'flex', gap: 6, maxWidth: '100%' }}>
+            <button
               onClick={() => setActiveTab('BUY')}
               className={`btn ${activeTab === 'BUY' ? 'btn-primary' : 'btn-ghost'} no-shrink`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}
+              style={{ fontSize: 12.5, padding: '6px 12px', whiteSpace: 'nowrap' }}
             >
-              <TrendingUp size={15} />
-              BUY ({data?.summary?.buy_count ?? 0})
+              <TrendingUp size={14} /> BUY ({data?.summary?.buy_count ?? 0})
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('SELL')}
               className={`btn ${activeTab === 'SELL' ? 'btn-primary' : 'btn-ghost'} no-shrink`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}
+              style={{ fontSize: 12.5, padding: '6px 12px', whiteSpace: 'nowrap' }}
             >
-              <TrendingDown size={15} />
-              SELL ({data?.summary?.sell_count ?? 0})
+              <TrendingDown size={14} /> SELL ({data?.summary?.sell_count ?? 0})
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('HOLD')}
               className={`btn ${activeTab === 'HOLD' ? 'btn-primary' : 'btn-ghost'} no-shrink`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}
+              style={{ fontSize: 12.5, padding: '6px 12px', whiteSpace: 'nowrap' }}
             >
-              <Minus size={15} />
-              HOLD ({data?.summary?.hold_count ?? 0})
+              <Minus size={14} /> HOLD ({data?.summary?.hold_count ?? 0})
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('ALL')}
               className={`btn ${activeTab === 'ALL' ? 'btn-primary' : 'btn-ghost'} no-shrink`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}
+              style={{ fontSize: 12.5, padding: '6px 12px', whiteSpace: 'nowrap' }}
             >
-              <Layers size={15} />
-              All ({data?.summary?.valid_results ?? 0})
+              <Layers size={14} /> All ({data?.summary?.valid_results ?? 0})
             </button>
           </div>
 
-          {/* Search, Filter & View Mode */}
-          <div className="mobile-w-100" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative', flex: '1 1 150px', minWidth: 130 }}>
+          <div className="mobile-w-100" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: '1 1 140px', minWidth: 0 }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--color-text-muted)' }} />
-              <input 
-                type="text" 
-                placeholder="Search symbol..." 
-                className="input" 
+              <input
+                type="text"
+                placeholder="Search symbol..."
+                className="input"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ paddingLeft: 30, height: 34, fontSize: 12, width: '100%' }}
+                style={{ paddingLeft: 30, height: 34, fontSize: 12.5, width: '100%' }}
               />
             </div>
 
-            <select 
-              className="input" 
-              value={minScore} 
+            <select
+              className="input"
+              value={minScore}
               onChange={(e) => setMinScore(Number(e.target.value))}
-              style={{ flex: '1 1 120px', minWidth: 110, height: 34, fontSize: 12 }}
+              style={{ flex: '1 1 115px', minWidth: 0, height: 34, fontSize: 12.5, padding: '6px 10px' }}
             >
-              <option value={0}>Min Score: All</option>
+              <option value={0}>Score: All</option>
               <option value={50}>Score &gt; 50</option>
-              <option value={60}>Score &gt; 60 (High)</option>
-              <option value={70}>Score &gt; 70 (Elite)</option>
+              <option value={60}>Score &gt; 60</option>
+              <option value={70}>Score &gt; 70</option>
             </select>
 
-            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 2, flexShrink: 0 }}>
-              <button 
-                onClick={() => setViewMode('cards')} 
-                className="btn btn-ghost" 
-                style={{ padding: '4px 8px', height: 30, background: viewMode === 'cards' ? 'rgba(255,255,255,0.1)' : 'transparent' }}
+            <div style={{ display: 'flex', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: 6, padding: 2, flexShrink: 0 }}>
+              <button
+                onClick={() => setViewMode('cards')}
+                className="btn btn-ghost"
+                style={{ border: 'none', padding: '4px 8px', minHeight: 28, background: viewMode === 'cards' ? 'var(--color-bg-card-hover)' : 'transparent' }}
                 title="Card View"
               >
-                <LayoutGrid size={15} />
+                <LayoutGrid size={14} />
               </button>
-              <button 
-                onClick={() => setViewMode('table')} 
-                className="btn btn-ghost" 
-                style={{ padding: '4px 8px', height: 30, background: viewMode === 'table' ? 'rgba(255,255,255,0.1)' : 'transparent' }}
-                title="Table Matrix View"
+              <button
+                onClick={() => setViewMode('table')}
+                className="btn btn-ghost"
+                style={{ border: 'none', padding: '4px 8px', minHeight: 28, background: viewMode === 'table' ? 'var(--color-bg-card-hover)' : 'transparent' }}
+                title="Table View"
               >
-                <List size={15} />
+                <List size={14} />
               </button>
             </div>
           </div>
@@ -806,220 +735,171 @@ export default function SwingScreenerPage() {
 
       {/* CARDS VIEW */}
       {!loading && viewMode === 'cards' && displayedStocks.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 310px), 1fr))', gap: 14 }}>
           {displayedStocks.map((stock) => {
             const isBuy = stock.action === 'BUY'
             const isSell = stock.action === 'SELL'
             const isHold = stock.action === 'HOLD'
             const plan = stock.trade_plan
+            const isExpanded = Boolean(expandedCards[stock.symbol])
+            const ltpVal = plan ? (plan.current_price || plan.cmp || plan.entry_price) : 0
+            const bestBuyVal = plan ? (plan.best_buy_price || plan.optimal_entry_price || plan.entry_price) : 0
 
             return (
-              <div 
+              <div
                 key={stock.symbol}
                 className="card"
-                style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  position: 'relative',
-                  borderTop: `4px solid ${isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : '#f59e0b'}`,
-                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-                  padding: '16px 14px',
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderTop: `3px solid ${isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : 'var(--color-neutral)'}`,
+                  padding: '14px',
                   width: '100%',
                   boxSizing: 'border-box'
                 }}
               >
                 {/* Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span 
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span
                         onClick={() => navigate('/chart', { state: { symbol: stock.symbol } })}
-                        style={{ fontSize: 17, fontWeight: 700, color: 'var(--color-text-primary)', cursor: 'pointer' }}
-                        title="Open interactive chart"
+                        style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text-primary)', cursor: 'pointer' }}
                       >
                         {stock.symbol.replace('.NS', '')}
                       </span>
-                      <span className={`badge ${isBuy ? 'badge-buy' : isSell ? 'badge-sell' : 'badge-hold'}`}>
+                      <span className={`badge ${isBuy ? 'badge-buy' : isSell ? 'badge-sell' : 'badge-hold'}`} style={{ fontSize: 11, padding: '2px 8px' }}>
                         {stock.action}
                       </span>
-                      {stock.is_fast_growth && (
-                        <span style={{ fontSize: 10, background: 'rgba(234, 179, 8, 0.15)', color: '#eab308', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                          🚀 FAST GROWTH
-                        </span>
-                      )}
                       {stock.cap_segment && (
-                        <span style={{ fontSize: 10, background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>
+                        <span style={{ fontSize: 10, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
                           {stock.cap_segment.replace('_', ' ')}
                         </span>
                       )}
                       {stock.market_defense_active && (
-                        <span style={{ fontSize: 10, background: 'rgba(244, 63, 94, 0.15)', color: '#f43f5e', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                          🛡️ DEFENSIVE
+                        <span style={{ fontSize: 10, background: 'var(--color-bearish-dim)', color: 'var(--color-bearish)', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          DEFENSIVE
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {stock.name}
                     </div>
                   </div>
 
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : '#f59e0b', whiteSpace: 'nowrap' }}>
-                      {stock.total_score.toFixed(1)} <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>/ 100</span>
+                    <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : 'var(--color-neutral)' }}>
+                      {stock.total_score.toFixed(1)}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>Conviction Score</div>
+                    <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Score</div>
                   </div>
                 </div>
 
-                {/* Score Breakdown Pills */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 14 }}>
-                  <div style={{ padding: '6px 4px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Tech</div>
-                    <div style={{ fontSize: 12, fontWeight: 600 }}>{stock.scores.technical.toFixed(1)}</div>
-                  </div>
-                  <div style={{ padding: '6px 4px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Fund</div>
-                    <div style={{ fontSize: 12, fontWeight: 600 }}>{stock.scores.fundamental.toFixed(1)}</div>
-                  </div>
-                  <div style={{ padding: '6px 4px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Sentiment</div>
-                    <div style={{ fontSize: 12, fontWeight: 600 }}>{stock.scores.sentiment.toFixed(1)}</div>
-                  </div>
+                {/* Compact Factor Breakdown */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'var(--color-bg-secondary)', borderRadius: 6, marginBottom: 10, fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  <span>Tech <strong className="mono" style={{ color: 'var(--color-text-primary)' }}>{stock.scores.technical.toFixed(0)}</strong></span>
+                  <span>Fund <strong className="mono" style={{ color: 'var(--color-text-primary)' }}>{stock.scores.fundamental.toFixed(0)}</strong></span>
+                  <span>Sent <strong className="mono" style={{ color: 'var(--color-text-primary)' }}>{stock.scores.sentiment.toFixed(0)}</strong></span>
+                  {stock.is_fast_growth && <span style={{ color: '#eab308', fontWeight: 700 }}>Momentum</span>}
                 </div>
 
                 {/* Trade Setup Metrics */}
                 {plan ? (
-                  <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                          Best Buy Price
+                  <div style={{ background: 'var(--color-bg-secondary)', borderRadius: 8, padding: '10px', marginBottom: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, marginBottom: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Best Entry</div>
+                        <div className="mono" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--color-accent-blue)' }}>
+                          ₹{bestBuyVal.toFixed(2)}
                         </div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: '#38bdf8' }}>
-                          ₹{(plan.best_buy_price || plan.optimal_entry_price || plan.entry_price).toFixed(2)}
+                        <div className="mono" style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                          LTP ₹{ltpVal.toFixed(2)}
                         </div>
+                      </div>
+                      <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
-                          CMP: ₹{(plan.current_price || plan.cmp || plan.entry_price).toFixed(2)}
+                          {isHold ? 'Resistance' : 'Target'}
                         </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                          {isSell ? 'Target Price' : isHold ? 'Resistance' : 'Target Price'}
-                        </div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: isSell ? 'var(--color-bearish)' : (isHold ? 'var(--color-text-primary)' : 'var(--color-bullish)') }}>
+                        <div className="mono" style={{ fontSize: 13.5, fontWeight: 700, color: isSell ? 'var(--color-bearish)' : isHold ? 'var(--color-text-primary)' : 'var(--color-bullish)' }}>
                           ₹{plan.target_price.toFixed(2)}
-                          <div style={{ fontSize: 10, fontWeight: 600 }}>
-                            {isSell ? '-' : '+'}{plan.expected_gain_pct.toFixed(1)}% <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--color-text-muted)' }}>from Best Buy</span>
-                          </div>
-                          {plan.cmp_gain_pct !== undefined && Math.abs((plan.best_buy_price || plan.entry_price) - (plan.current_price || plan.cmp || 0)) > 0.05 && (
-                            <div style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>
-                              ({plan.cmp_gain_pct >= 0 ? '+' : ''}{plan.cmp_gain_pct.toFixed(1)}% from CMP)
-                            </div>
-                          )}
+                        </div>
+                        <div className="mono" style={{ fontSize: 10, fontWeight: 600, color: isSell ? 'var(--color-bearish)' : 'var(--color-bullish)' }}>
+                          {isSell ? '-' : '+'}{plan.expected_gain_pct.toFixed(1)}%
                         </div>
                       </div>
-                      <div>
-                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                          {isHold ? 'Support Base' : 'Stop Loss'}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                          {isHold ? 'Support' : 'Stop Loss'}
                         </div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: isHold ? 'var(--color-text-primary)' : 'var(--color-bearish)' }}>
+                        <div className="mono" style={{ fontSize: 13.5, fontWeight: 700, color: isHold ? 'var(--color-text-primary)' : 'var(--color-bearish)' }}>
                           ₹{plan.stop_loss.toFixed(2)}
-                          <div style={{ fontSize: 10, fontWeight: 600 }}>
-                            -{plan.risk_pct.toFixed(1)}% <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--color-text-muted)' }}>from Best Buy</span>
-                          </div>
+                        </div>
+                        <div className="mono" style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-bearish)' }}>
+                          -{plan.risk_pct.toFixed(1)}%
                         </div>
                       </div>
                     </div>
 
-                    {/* AI Optimal Entry Strategy Box */}
-                    {plan.optimal_entry_price && (
-                      <div style={{ 
-                        margin: '8px 0 10px 0', 
-                        padding: '8px 10px', 
-                        borderRadius: 6, 
-                        background: isBuy 
-                          ? 'rgba(16, 185, 129, 0.08)' 
-                          : isSell 
-                          ? 'rgba(239, 68, 68, 0.08)' 
-                          : 'rgba(255, 255, 255, 0.03)',
-                        border: `1px solid ${isBuy ? 'rgba(16, 185, 129, 0.25)' : isSell ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255, 255, 255, 0.06)'}`
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: isBuy ? 'var(--color-bullish)' : isSell ? 'var(--color-bearish)' : 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Target size={13} />
-                            {plan.entry_type === 'PULLBACK_DIP' ? 'Best Dip Entry: ' : 
-                             plan.entry_type === 'BREAKOUT' ? 'Breakout Entry: ' : 
-                             plan.entry_type === 'RALLY_SELL' ? 'Best Short Rally: ' : 
-                             plan.entry_type === 'BREAKDOWN' ? 'Breakdown Short: ' : 'Optimal Entry: '}
-                            ₹{plan.optimal_entry_price.toFixed(2)}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, fontSize: 11, color: 'var(--color-text-secondary)', borderTop: '1px solid var(--color-border)', paddingTop: 7 }}>
+                      <span>R:R <strong className="mono" style={{ color: plan.reward_to_risk >= 2 ? 'var(--color-bullish)' : 'inherit' }}>{plan.reward_to_risk}:1</strong></span>
+                      <span>Hold <strong>{plan.estimated_hold_time}</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedCards(prev => ({ ...prev, [stock.symbol]: !prev[stock.symbol] }))}
+                        style={{ background: 'none', border: 'none', color: 'var(--color-accent-blue)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                      >
+                        {isExpanded ? 'Hide Notes ▴' : 'Setup Notes ▾'}
+                      </button>
+                    </div>
+
+                    {/* Staged Targets */}
+                    {plan.targets && plan.targets.length > 0 && !isHold && (
+                      <div style={{ marginTop: 7, paddingTop: 7, borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, fontSize: 10.5, color: 'var(--color-text-muted)' }}>
+                        {plan.targets.map((tgt, i) => (
+                          <span key={i} className="mono">
+                            T{i+1}: <strong style={{ color: 'var(--color-text-primary)' }}>₹{tgt.price}</strong> (+{tgt.gain_pct}%)
                           </span>
-                          {plan.optimal_expected_gain_pct !== undefined && !isHold && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-bullish)', background: 'rgba(16, 185, 129, 0.15)', padding: '1px 6px', borderRadius: 4 }}>
-                              +{plan.optimal_expected_gain_pct.toFixed(1)}% Max Gain ({plan.optimal_reward_to_risk || plan.reward_to_risk}:1 R:R)
-                            </span>
-                          )}
-                        </div>
-                        {plan.entry_zone && (
-                          <div style={{ fontSize: 10, color: 'var(--color-text-secondary)', marginBottom: 2 }}>
-                            <strong style={{ color: 'var(--color-text-primary)' }}>Strategy Zone:</strong> {plan.entry_zone}
-                          </div>
-                        )}
-                        {plan.entry_advice && (
-                          <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.35 }}>
-                            💡 {plan.entry_advice}
-                          </div>
-                        )}
+                        ))}
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, fontSize: 11, color: 'var(--color-text-secondary)', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: 8 }}>
-                      <span>R:R: <strong style={{ color: plan.reward_to_risk >= 2 ? 'var(--color-bullish)' : 'inherit' }}>{plan.reward_to_risk}:1</strong></span>
-                      <span>Hold: <strong>{plan.estimated_hold_time}</strong></span>
-                      <span>News: <strong>{stock.news_sentiment || 'NEUTRAL'}</strong></span>
-                    </div>
-
-                    {/* Staged Targets (if BUY or SELL) */}
-                    {plan.targets && plan.targets.length > 0 && !isHold && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, fontSize: 10, color: 'var(--color-text-muted)' }}>
-                        {plan.targets.map((tgt, i) => (
-                          <div key={i} style={{ whiteSpace: 'nowrap' }}>
-                            <span>T{i+1}: <strong style={{ color: 'var(--color-text-primary)' }}>₹{tgt.price}</strong> (+{tgt.gain_pct}% from Best Buy)</span>
-                          </div>
-                        ))}
+                    {/* Expandable Strategy Advice */}
+                    {isExpanded && (plan.entry_zone || plan.entry_advice) && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--color-border)', fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                        {plan.entry_zone && <div><strong style={{ color: 'var(--color-text-secondary)' }}>Zone:</strong> {plan.entry_zone}</div>}
+                        {plan.entry_advice && <div style={{ marginTop: 2 }}>{plan.entry_advice}</div>}
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 8, marginBottom: 14, fontSize: 12, color: 'var(--color-text-muted)' }}>
-                    Trade setup calculation pending or insufficient candle depth.
+                  <div style={{ padding: 10, background: 'var(--color-bg-secondary)', borderRadius: 8, marginBottom: 12, fontSize: 12, color: 'var(--color-text-muted)' }}>
+                    Insufficient price history for setup calculation.
                   </div>
                 )}
 
                 {/* Bottom Actions */}
                 <div style={{ marginTop: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button 
+                  <button
                     onClick={() => navigate('/chart', { state: { symbol: stock.symbol } })}
-                    className="btn btn-ghost" 
-                    style={{ flex: '1 1 70px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px' }}
+                    className="btn btn-ghost"
+                    style={{ flex: '1 1 68px', fontSize: 12, padding: '6px 8px', minHeight: 34 }}
                   >
                     <ExternalLink size={13} /> Chart
                   </button>
 
                   {plan && !isHold && (
                     <>
-                      <button 
+                      <button
                         onClick={() => handleOpenGttModal(stock)}
                         className="btn btn-secondary"
-                        style={{ flex: '1 1 70px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px', whiteSpace: 'nowrap', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
-                        title="Set automated Zerodha GTT (Good-Till-Triggered) Trigger Order"
+                        style={{ flex: '1 1 64px', fontSize: 12, padding: '6px 8px', minHeight: 34, borderColor: 'rgba(59, 130, 246, 0.35)', color: 'var(--color-accent-blue)' }}
                       >
                         <Target size={13} /> GTT
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleOpenOrderModal(stock)}
-                        className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{ flex: '1.4 1 90px', fontSize: 12, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px', whiteSpace: 'nowrap' }}
-                        title="Open Zerodha Kite-style order execution window"
+                        className={`btn ${isBuy ? 'btn-primary' : 'btn-danger'}`}
+                        style={{ flex: '1.3 1 80px', fontSize: 12, padding: '6px 10px', minHeight: 34 }}
                       >
                         <Briefcase size={13} /> {stock.action}
                       </button>
@@ -1027,11 +907,11 @@ export default function SwingScreenerPage() {
                   )}
 
                   {plan && (
-                    <button 
+                    <button
                       onClick={() => handleQuickAlert(stock)}
-                      className="btn btn-ghost" 
-                      style={{ padding: '0 10px', height: 32, flex: '0 0 auto' }}
-                      title="Set alert at target level"
+                      className="btn btn-ghost"
+                      style={{ padding: '6px 9px', minHeight: 34, flex: '0 0 auto' }}
+                      title="Create target alert"
                     >
                       <Bell size={13} />
                     </button>
@@ -1045,21 +925,21 @@ export default function SwingScreenerPage() {
 
       {/* TABLE MATRIX VIEW */}
       {!loading && viewMode === 'table' && displayedStocks.length > 0 && (
-        <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-          <table className="table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <div className="card table-container" style={{ padding: 0 }}>
+          <table className="table" style={{ width: '100%', minWidth: 880, fontSize: 13 }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--color-border)', textAlign: 'left', background: 'rgba(255,255,255,0.02)' }}>
-                <th style={{ padding: '12px 16px' }}>Stock</th>
-                <th style={{ padding: '12px 16px' }}>Signal</th>
-                <th style={{ padding: '12px 16px' }}>Score</th>
-                <th style={{ padding: '12px 16px' }}>Current (CMP)</th>
-                <th style={{ padding: '12px 16px' }}>Best Entry & Strategy</th>
-                <th style={{ padding: '12px 16px' }}>Target (Gain)</th>
-                <th style={{ padding: '12px 16px' }}>Stop Loss (Risk)</th>
-                <th style={{ padding: '12px 16px' }}>R:R</th>
-                <th style={{ padding: '12px 16px' }}>Duration</th>
-                <th style={{ padding: '12px 16px' }}>Sub-Scores (T/F/S)</th>
-                <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
+              <tr>
+                <th>Stock</th>
+                <th>Signal</th>
+                <th>Score</th>
+                <th>LTP</th>
+                <th>Best Entry</th>
+                <th>Target</th>
+                <th>Stop Loss</th>
+                <th>R:R</th>
+                <th>Hold</th>
+                <th>T / F / S</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>

@@ -367,17 +367,17 @@ export default function AdminPage() {
       if (isManualTrigger) {
         if (res.data?.token_status === 'RATE_LIMITED') {
           setTriggerToast({
-            text: `🟡 Fyers Rate Limited: 50 req/min limit reached. Token is intact & valid. Active feed temporarily routed to Yahoo backup (cooldown ${res.data?.dual_engine?.fyers_cooldown_remaining || 30}s).`,
+            text: `Fyers Rate Limited: 50 req/min limit reached. Token is valid; backup feed active (cooldown ${res.data?.dual_engine?.fyers_cooldown_remaining || 30}s).`,
             type: 'warning',
           });
         } else if (res.data?.connected) {
           setTriggerToast({
-            text: `⚡ Live Ping SUCCESS (${res.data.ping_ms || 80}ms): Fyers API V3 is live, verified & streaming! Checked at ${res.data.checked_at_ist || 'now'}.`,
+            text: `Live Ping OK (${res.data.ping_ms || 80}ms): Fyers API V3 is verified and streaming (${res.data.checked_at_ist || 'now'}).`,
             type: 'success',
           });
         } else {
           setTriggerToast({
-            text: `⚠️ Live Check Notice: Fyers token is expired (${res.data.message || 'code -300'}). Autonomous Yahoo Finance Backup Engine is actively feeding stock prices with zero disruption.`,
+            text: `Fyers token expired (${res.data.message || 'code -300'}). Yahoo Finance backup feed is active without interruption.`,
             type: 'warning',
           });
         }
@@ -386,7 +386,7 @@ export default function AdminPage() {
       console.error('Failed to fetch Fyers status:', err);
       if (isManualTrigger) {
         setTriggerToast({
-          text: `❌ Live health check failed: ${err.response?.data?.detail || err.message}`,
+          text: `Live health check failed: ${err.response?.data?.detail || err.message}`,
           type: 'error',
         });
       }
@@ -640,68 +640,61 @@ export default function AdminPage() {
   const proCount = users.filter((u) => u.subscription_tier === 'PRO').length;
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '30px 20px', paddingBottom: '80px' }}>
+    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '16px 14px 80px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-            🛡️ Administrative Control Center
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ fontSize: 'clamp(1.35rem, 4vw, 1.85rem)', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            Admin Control
           </h1>
-          <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0 0' }}>
-            Manage Fyers live market feed tokens, user subscriptions, and system watchdog monitoring.
+          <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0 0', fontSize: '0.88rem' }}>
+            Broker connections, user accounts, diagnostics, and threat monitoring.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <Link
             to="/admin/sentinel"
+            className="btn btn-primary"
             style={{
-              padding: '10px 18px',
-              background: 'linear-gradient(90deg, #10b981, #059669)',
-              color: 'white',
-              borderRadius: '8px',
+              padding: '8px 14px',
               textDecoration: 'none',
-              fontWeight: 700,
-              fontSize: '0.9rem',
-              display: 'flex',
+              fontSize: '0.85rem',
+              display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
             }}
           >
-            🛡️ 24/7 Sentinel Watchdog
+            Sentinel Watchdog
           </Link>
           <button
             onClick={() => {
               fetchUsers();
               fetchFyersStatus();
             }}
+            className="btn btn-secondary"
             style={{
-              padding: '10px 16px',
-              background: 'var(--surface-color)',
-              border: '1px solid var(--border-color)',
-              color: 'var(--text-color)',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              display: 'flex',
+              padding: '8px 14px',
+              fontSize: '0.85rem',
+              display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
             }}
           >
-            <RefreshCw size={15} /> Refresh
+            <RefreshCw size={14} /> Refresh
           </button>
         </div>
       </div>
 
       {/* Main Admin Navigation Tabs */}
       <div
+        className="mobile-scroll-tabs"
         style={{
           display: 'flex',
-          gap: 12,
-          marginBottom: 24,
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-          paddingBottom: 12,
-          flexWrap: 'wrap',
+          gap: 8,
+          marginBottom: 20,
+          borderBottom: '1px solid var(--color-border)',
+          paddingBottom: 10,
         }}
       >
         <button
@@ -709,33 +702,35 @@ export default function AdminPage() {
             setActiveTab('live');
             fetchLiveUsers();
           }}
+          className="no-shrink"
           style={{
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '10px 18px',
+            gap: 6,
+            padding: '8px 14px',
             borderRadius: '8px',
             border: activeTab === 'live' ? '1px solid #22c55e' : '1px solid transparent',
-            background: activeTab === 'live' ? 'rgba(34, 197, 94, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+            background: activeTab === 'live' ? 'rgba(34, 197, 94, 0.16)' : 'rgba(255, 255, 255, 0.03)',
             color: activeTab === 'live' ? '#4ade80' : 'var(--text-secondary)',
-            fontWeight: 700,
-            fontSize: '0.95rem',
+            fontWeight: 600,
+            fontSize: '0.875rem',
             cursor: 'pointer',
+            whiteSpace: 'nowrap',
             transition: 'all 0.15s ease',
           }}
         >
-          <Radio size={18} />
-          Real-Time Live Users
+          <Radio size={15} />
+          Live Users
           {activeTab === 'live' && (
             <span
               style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 12,
+                fontSize: 10,
+                padding: '1px 7px',
+                borderRadius: 10,
                 fontWeight: 700,
                 backgroundColor: 'rgba(34, 197, 94, 0.2)',
                 color: '#4ade80',
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
                 gap: 4,
               }}
@@ -747,10 +742,9 @@ export default function AdminPage() {
                   borderRadius: '50%',
                   backgroundColor: '#22c55e',
                   display: 'inline-block',
-                  boxShadow: '0 0 6px #22c55e',
                 }}
               />
-              {liveCount} Online
+              {liveCount}
             </span>
           )}
         </button>
@@ -760,68 +754,72 @@ export default function AdminPage() {
             setActiveTab('fyers');
             fetchFyersStatus(true);
           }}
+          className="no-shrink"
           style={{
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '10px 18px',
+            gap: 6,
+            padding: '8px 14px',
             borderRadius: '8px',
             border: activeTab === 'fyers' ? '1px solid #3b82f6' : '1px solid transparent',
-            background: activeTab === 'fyers' ? 'rgba(59, 130, 246, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+            background: activeTab === 'fyers' ? 'rgba(59, 130, 246, 0.16)' : 'rgba(255, 255, 255, 0.03)',
             color: activeTab === 'fyers' ? '#60a5fa' : 'var(--text-secondary)',
-            fontWeight: 700,
-            fontSize: '0.95rem',
+            fontWeight: 600,
+            fontSize: '0.875rem',
             cursor: 'pointer',
+            whiteSpace: 'nowrap',
             transition: 'all 0.15s ease',
           }}
         >
-          <Smartphone size={18} />
-          Fyers Mobile Token Manager
+          <Smartphone size={15} />
+          Fyers Token
           <span
             style={{
-              fontSize: 11,
-              padding: '2px 8px',
-              borderRadius: 12,
+              fontSize: 10,
+              padding: '1px 7px',
+              borderRadius: 10,
               fontWeight: 700,
               backgroundColor: fyersStatus?.token_status === 'RATE_LIMITED'
                 ? 'rgba(234, 179, 8, 0.2)'
                 : (fyersStatus?.connected ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.2)'),
               color: fyersStatus?.token_status === 'RATE_LIMITED'
-                ? '#fde047'
-                : (fyersStatus?.connected ? '#4ade80' : '#fde047'),
+                ? '#fbbf24'
+                : (fyersStatus?.connected ? '#4ade80' : '#fbbf24'),
             }}
           >
             {fyersStatus?.token_status === 'RATE_LIMITED'
-              ? '🟡 THROTTLED (STANDBY)'
-              : (fyersStatus?.connected ? '🟢 ACTIVE' : '🟡 RENEW')}
+              ? 'THROTTLED'
+              : (fyersStatus?.connected ? 'ACTIVE' : 'RENEW')}
           </span>
         </button>
 
         <button
           onClick={() => setActiveTab('users')}
+          className="no-shrink"
           style={{
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '10px 18px',
+            gap: 6,
+            padding: '8px 14px',
             borderRadius: '8px',
             border: activeTab === 'users' ? '1px solid #3b82f6' : '1px solid transparent',
-            background: activeTab === 'users' ? 'rgba(59, 130, 246, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+            background: activeTab === 'users' ? 'rgba(59, 130, 246, 0.16)' : 'rgba(255, 255, 255, 0.03)',
             color: activeTab === 'users' ? '#60a5fa' : 'var(--text-secondary)',
-            fontWeight: 700,
-            fontSize: '0.95rem',
+            fontWeight: 600,
+            fontSize: '0.875rem',
             cursor: 'pointer',
+            whiteSpace: 'nowrap',
             transition: 'all 0.15s ease',
           }}
         >
-          <Users size={18} />
-          User Accounts & Subscriptions
+          <Users size={15} />
+          Users
           {pendingCount > 0 && (
             <span
               style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 12,
+                fontSize: 10,
+                padding: '1px 7px',
+                borderRadius: 10,
                 fontWeight: 700,
                 backgroundColor: 'rgba(245, 158, 11, 0.2)',
                 color: '#fbbf24',
@@ -837,28 +835,30 @@ export default function AdminPage() {
             setActiveTab('ops');
             fetchHealth();
           }}
+          className="no-shrink"
           style={{
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '10px 18px',
+            gap: 6,
+            padding: '8px 14px',
             borderRadius: '8px',
             border: activeTab === 'ops' ? '1px solid #a855f7' : '1px solid transparent',
-            background: activeTab === 'ops' ? 'rgba(168, 85, 247, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+            background: activeTab === 'ops' ? 'rgba(168, 85, 247, 0.16)' : 'rgba(255, 255, 255, 0.03)',
             color: activeTab === 'ops' ? '#c084fc' : 'var(--text-secondary)',
-            fontWeight: 700,
-            fontSize: '0.95rem',
+            fontWeight: 600,
+            fontSize: '0.875rem',
             cursor: 'pointer',
+            whiteSpace: 'nowrap',
             transition: 'all 0.15s ease',
           }}
         >
-          <Server size={18} />
-          ⚡ Ops, Flower & Swagger
+          <Server size={15} />
+          Ops &amp; Docs
           <span
             style={{
-              fontSize: 11,
-              padding: '2px 8px',
-              borderRadius: 12,
+              fontSize: 10,
+              padding: '1px 7px',
+              borderRadius: 10,
               fontWeight: 700,
               backgroundColor: 'rgba(168, 85, 247, 0.2)',
               color: '#c084fc',
@@ -876,34 +876,36 @@ export default function AdminPage() {
             setActiveTab('audit');
             fetchAuditData();
           }}
+          className="no-shrink"
           style={{
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '10px 18px',
+            gap: 6,
+            padding: '8px 14px',
             borderRadius: '8px',
             border: activeTab === 'audit' ? '1px solid #38bdf8' : '1px solid transparent',
-            background: activeTab === 'audit' ? 'rgba(56, 189, 248, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+            background: activeTab === 'audit' ? 'rgba(56, 189, 248, 0.16)' : 'rgba(255, 255, 255, 0.03)',
             color: activeTab === 'audit' ? '#38bdf8' : 'var(--text-secondary)',
-            fontWeight: 700,
-            fontSize: '0.95rem',
+            fontWeight: 600,
+            fontSize: '0.875rem',
             cursor: 'pointer',
+            whiteSpace: 'nowrap',
             transition: 'all 0.15s ease',
           }}
         >
-          <FileSpreadsheet size={18} />
-          📊 11-Day Swing Audits & Excel Archive
+          <FileSpreadsheet size={15} />
+          11-Day Audits
           <span
             style={{
-              fontSize: 11,
-              padding: '2px 8px',
-              borderRadius: 12,
+              fontSize: 10,
+              padding: '1px 7px',
+              borderRadius: 10,
               fontWeight: 700,
               backgroundColor: 'rgba(56, 189, 248, 0.2)',
               color: '#38bdf8',
             }}
           >
-            {auditFiles.length} Reports
+            {auditFiles.length}
           </span>
         </button>
 
@@ -913,30 +915,32 @@ export default function AdminPage() {
             setSearchParams({ tab: 'threats' });
             fetchAdminAlertsHub(true);
           }}
+          className="no-shrink"
           style={{
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '10px 18px',
+            gap: 6,
+            padding: '8px 14px',
             borderRadius: '8px',
             border: activeTab === 'threats' ? '1px solid #ef4444' : '1px solid rgba(239, 68, 68, 0.25)',
-            background: activeTab === 'threats' ? 'rgba(239, 68, 68, 0.18)' : 'rgba(239, 68, 68, 0.05)',
+            background: activeTab === 'threats' ? 'rgba(239, 68, 68, 0.16)' : 'rgba(239, 68, 68, 0.05)',
             color: activeTab === 'threats' ? '#f87171' : 'var(--text-secondary)',
-            fontWeight: 700,
-            fontSize: '0.95rem',
+            fontWeight: 600,
+            fontSize: '0.875rem',
             cursor: 'pointer',
+            whiteSpace: 'nowrap',
             transition: 'all 0.15s ease',
           }}
         >
-          <Bell size={18} style={{ color: (alertsHubData.unseen_count || 0) > 0 ? '#ef4444' : 'currentColor' }} />
-          🚨 Threats, Failures &amp; Logs
+          <Bell size={15} style={{ color: (alertsHubData.unseen_count || 0) > 0 ? '#ef4444' : 'currentColor' }} />
+          Threats &amp; Logs
           {(alertsHubData.unseen_count || 0) > 0 ? (
             <span
               style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 12,
-                fontWeight: 800,
+                fontSize: 10,
+                padding: '1px 7px',
+                borderRadius: 10,
+                fontWeight: 700,
                 backgroundColor: '#ef4444',
                 color: '#ffffff',
               }}
@@ -946,9 +950,9 @@ export default function AdminPage() {
           ) : (
             <span
               style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 12,
+                fontSize: 10,
+                padding: '1px 7px',
+                borderRadius: 10,
                 fontWeight: 700,
                 backgroundColor: 'rgba(16, 185, 129, 0.16)',
                 color: '#34d399',
@@ -1033,7 +1037,7 @@ export default function AdminPage() {
                       border: '1px solid rgba(59, 130, 246, 0.3)',
                     }}
                   >
-                    🇮🇳 CERT-In 2022 & DPDPA 2023 COMPLIANT
+                    CERT-In 2022 &amp; DPDPA 2023 COMPLIANT
                   </span>
                 </div>
                 <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
@@ -1156,9 +1160,9 @@ export default function AdminPage() {
               }}
             >
               <div style={{ fontSize: '0.8rem', color: '#fde047', fontWeight: 600 }}>Device Distribution</div>
-              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fde047', marginTop: 10, display: 'flex', gap: 16 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>💻 {desktopCount}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>📱 {mobileCount}</span>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#fde047', marginTop: 10, display: 'flex', gap: 16 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Monitor size={15} /> {desktopCount}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Smartphone size={15} /> {mobileCount}</span>
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 6 }}>
                 Desktop vs Mobile Browser
@@ -1172,9 +1176,10 @@ export default function AdminPage() {
               background: 'rgba(0, 0, 0, 0.2)',
               borderRadius: 10,
               border: '1px solid rgba(255, 255, 255, 0.08)',
-              overflow: 'hidden',
+              overflowX: 'auto',
             }}
           >
+            <div style={{ minWidth: 820 }}>
             <div
               style={{
                 padding: '12px 18px',
@@ -1352,6 +1357,7 @@ export default function AdminPage() {
                 })}
               </div>
             )}
+            </div>
           </div>
         </div>
       )}
@@ -1399,23 +1405,11 @@ export default function AdminPage() {
                 <Smartphone size={24} />
               </div>
               <div>
-                <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  Fyers Mobile Token Manager
-                  <span
-                    style={{
-                      fontSize: 11,
-                      background: 'rgba(59, 130, 246, 0.2)',
-                      color: '#93c5fd',
-                      padding: '3px 10px',
-                      borderRadius: 12,
-                      fontWeight: 700,
-                    }}
-                  >
-                    100% Mobile Ready
-                  </span>
+                <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  Fyers Broker Token Manager
                 </h2>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
-                  Update daily broker token directly from your phone in 15 seconds (no laptop, .bat files, scp, or ssh needed)
+                <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--color-text-muted)' }}>
+                  Daily Fyers API V3 token renewal and stream status
                 </p>
               </div>
             </div>
@@ -1424,26 +1418,18 @@ export default function AdminPage() {
               type="button"
               onClick={() => fetchFyersStatus(true)}
               disabled={fyersLoading}
+              className="btn btn-primary"
               style={{
                 fontSize: 13,
-                padding: '9px 18px',
-                display: 'flex',
+                padding: '9px 16px',
+                display: 'inline-flex',
                 alignItems: 'center',
                 gap: 8,
-                fontWeight: 700,
-                borderRadius: 8,
-                border: 'none',
-                background: fyersStatus?.connected
-                  ? 'linear-gradient(135deg, #10b981, #059669)'
-                  : 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
-                color: 'white',
                 cursor: fyersLoading ? 'not-allowed' : 'pointer',
-                boxShadow: '0 4px 14px rgba(0, 0, 0, 0.25)',
-                transition: 'all 0.2s ease',
               }}
             >
-              <Zap size={15} className={fyersLoading ? 'spin' : ''} />
-              {fyersLoading ? 'Pinging Fyers V3 Servers...' : '⚡ Trigger Live Fyers API Check'}
+              <Zap size={14} className={fyersLoading ? 'spin' : ''} />
+              {fyersLoading ? 'Checking Fyers...' : 'Check Connection'}
             </button>
           </div>
 
@@ -1571,83 +1557,44 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* Connection Status Badge Banner */}
+                {/* Connection Notice */}
                 <div
                   style={{
-                    padding: '14px 18px',
+                    padding: '12px 16px',
                     borderRadius: 8,
                     marginBottom: 20,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     flexWrap: 'wrap',
-                    gap: 12,
-                    backgroundColor: isRateLimited
-                      ? 'rgba(234, 179, 8, 0.12)'
-                      : (isConnected ? 'rgba(34, 197, 94, 0.12)' : 'rgba(234, 179, 8, 0.12)'),
-                    border: `1px solid ${isRateLimited ? 'rgba(234, 179, 8, 0.3)' : (isConnected ? 'rgba(34, 197, 94, 0.3)' : 'rgba(234, 179, 8, 0.3)')}`,
+                    gap: 10,
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                    fontSize: 12.5,
+                    color: 'var(--color-text-secondary)',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     {isConnected && !isRateLimited ? (
-                      <CheckCircle2 size={26} style={{ color: '#22c55e', flexShrink: 0 }} />
+                      <CheckCircle2 size={18} style={{ color: '#22c55e', flexShrink: 0 }} />
                     ) : (
-                      <XCircle size={26} style={{ color: '#eab308', flexShrink: 0 }} />
+                      <XCircle size={18} style={{ color: '#eab308', flexShrink: 0 }} />
                     )}
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 15, color: isRateLimited ? '#fbbf24' : (isConnected ? '#4ade80' : '#fde047') }}>
-                        {isRateLimited
-                          ? `🟡 Dual Engine Active: Fyers Rate-Limited (Yahoo Backup Feeding Smoothly)`
-                          : (isConnected
-                            ? `🟢 Dual Engine Active: Primary Fyers WebSocket Stream (<100ms Push)`
-                            : `🟡 Dual Engine Active: Yahoo Finance Backup Engine (Live 3s Poller)`)}
-                      </div>
-                      <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 3 }}>
-                        {isRateLimited
-                          ? `Fyers Standard Plan limit (50 req/min) reached. Your Fyers token is 100% VALID & INTACT. Yahoo Finance backup is streaming uninterrupted and will automatically resume Fyers in ${cooldownSec}s.`
-                          : (isConnected
-                            ? `Trader: ${fyersStatus?.name || 'Dipak Firake'} (${fyersStatus?.masked_fy_id || fyersStatus?.fy_id || ''}) • Real-time tick stream active (expires daily at 06:00 AM IST)`
-                            : `Fyers token expired at 06:00 AM IST. Stock prices are live and actively updating via Yahoo Finance backup without interruption. Renew token whenever convenient.`)}
-                      </div>
-                    </div>
+                    <span>
+                      {isRateLimited
+                        ? `Fyers rate cap reached; Yahoo Finance backup is streaming while Fyers resumes in ${cooldownSec}s.`
+                        : (isConnected
+                          ? `Fyers WebSocket primary stream active${fyersStatus?.name ? ` (${fyersStatus.name})` : ''}; tokens expire daily at 06:00 AM IST.`
+                          : `Fyers token expires at 06:00 AM IST daily; Yahoo Finance backup engine is keeping live prices active.`)}
+                    </span>
                   </div>
-
-                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <ShieldCheck size={16} style={{ color: '#60a5fa' }} />
-                    Autonomous Dual Failover
-                  </div>
+                  <span style={{ fontWeight: 700, color: fyersStatus?.connected ? '#4ade80' : '#fbbf24', flexShrink: 0 }}>
+                    {fyersStatus?.connected ? 'PRIMARY · FYERS' : 'BACKUP · YAHOO'}
+                  </span>
                 </div>
               </>
             );
           })()}
-
-          {/* Dual-Engine Architecture Notice */}
-          <div
-            style={{
-              padding: '12px 16px',
-              borderRadius: 8,
-              marginBottom: 20,
-              background: 'rgba(59, 130, 246, 0.08)',
-              border: '1px solid rgba(59, 130, 246, 0.2)',
-              fontSize: 12,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: 10,
-              color: '#93c5fd',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Zap size={15} style={{ color: '#3b82f6' }} />
-              <span>
-                <strong>Dual-Connection Cycle:</strong> Tokens expire at <strong>06:00 AM IST</strong> daily. If unrenewed, the system automatically runs on Yahoo Finance backup so prices never freeze. Activating a new token hot-swaps to Fyers immediately.
-              </span>
-            </div>
-            <span style={{ fontWeight: 700, color: fyersStatus?.connected ? '#4ade80' : '#fbbf24' }}>
-              Engine: {fyersStatus?.connected ? 'PRIMARY (FYERS)' : 'BACKUP (YAHOO)'}
-            </span>
-          </div>
 
           {/* Step-by-Step Mobile Renewal Process */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1709,15 +1656,15 @@ export default function AdminPage() {
                   title="Reads the copied URL directly from your phone clipboard with 1 tap"
                 >
                   <ClipboardPaste size={15} />
-                  📋 Paste from Clipboard (1-Tap)
+                  Paste from Clipboard
                 </button>
               </div>
 
               <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 8 }}>
-                After logging in, copy the full redirected URL (or auth_code) from your mobile browser address bar and paste it below.
+                After logging in, copy the full redirected URL or auth_code from your browser and paste it below.
               </div>
-              <div style={{ fontSize: 12, color: '#fde047', marginBottom: 14, background: 'rgba(234, 179, 8, 0.1)', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(234, 179, 8, 0.2)' }}>
-                ⚡ <strong>Important:</strong> Fyers auth codes expire in <strong>2-3 minutes</strong> and can only be redeemed <strong>ONCE</strong>. If you used the code in another app or more than 2 minutes have passed, please click <strong>Step 1</strong> to generate a fresh link.
+              <div style={{ fontSize: 12, color: '#fbbf24', marginBottom: 14, background: 'rgba(234, 179, 8, 0.08)', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(234, 179, 8, 0.2)' }}>
+                <strong>Note:</strong> Auth codes expire within 2–3 minutes and can be redeemed once. Generate a fresh link in Step 1 if expired.
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1790,8 +1737,8 @@ export default function AdminPage() {
                       border: 'none',
                     }}
                   >
-                    <Zap size={16} />
-                    {updatingToken ? 'Validating with Fyers...' : '🚀 Activate Token Now'}
+                    <Zap size={15} />
+                    {updatingToken ? 'Validating...' : 'Activate Token'}
                   </button>
                 </div>
               </div>
@@ -2013,7 +1960,7 @@ export default function AdminPage() {
                                     cursor: 'pointer',
                                   }}
                                 >
-                                  ✓ Approve
+                                  Approve
                                 </button>
                                 <button
                                   onClick={() => handleReject(u.id, u.email)}
@@ -2029,7 +1976,7 @@ export default function AdminPage() {
                                     cursor: 'pointer',
                                   }}
                                 >
-                                  ✕ Reject
+                                  Reject
                                 </button>
                               </>
                             )}
@@ -2155,7 +2102,7 @@ export default function AdminPage() {
           </div>
 
           {/* Grid of 2 Primary Services: Flower & Swagger */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: 16 }}>
             {/* CARD 1: CELERY FLOWER */}
             <div
               className="card"
@@ -2207,8 +2154,8 @@ export default function AdminPage() {
                   <span style={{ color: '#94a3b8' }}>Password:</span>
                   <strong style={{ color: '#f472b6' }}>HeadAdmin@2003StockAI</strong>
                 </div>
-                <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginTop: 8, fontStyle: 'italic' }}>
-                  💡 Browsers suppress login dialogs inside embedded iframes for security, so always authenticate in a separate tab first!
+                <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginTop: 8 }}>
+                  Browsers block auth prompts inside embedded frames; sign in via a separate tab first.
                 </div>
               </div>
 
@@ -2628,7 +2575,7 @@ export default function AdminPage() {
 
             {/* Cycle KPI Cards */}
             {auditCycle && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 165px), 1fr))', gap: 12 }}>
                 <div style={{ padding: 14, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Period</div>
                   <div style={{ fontSize: '1rem', fontWeight: 800, color: '#f8fafc', marginTop: 4 }}>
@@ -2820,7 +2767,7 @@ export default function AdminPage() {
       {activeTab === 'threats' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginBottom: 32 }}>
           {/* Summary KPI Row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 165px), 1fr))', gap: 12 }}>
             <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #ef4444' }}>
               <div style={{ fontSize: 11, color: '#f87171', fontWeight: 700, textTransform: 'uppercase' }}>Critical Incidents Open</div>
               <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, fontFamily: 'monospace' }}>{alertsHubData.critical_count || 0}</div>
@@ -2851,19 +2798,19 @@ export default function AdminPage() {
           <div className="card" style={{ padding: 18, border: '1px solid rgba(56, 189, 248, 0.3)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 15, marginBottom: 10, color: '#38bdf8' }}>
               <Megaphone size={17} />
-              <span>Broadcast Important System Notice to All Users&apos; 🔔 Notifications Tab</span>
+              <span>Broadcast System Notice</span>
             </div>
-            <form onSubmit={handleBroadcastSystemNotice} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(260px, 2fr) 130px auto', gap: 10, alignItems: 'center' }}>
+            <form onSubmit={handleBroadcastSystemNotice} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 10, alignItems: 'center' }}>
               <input
                 className="input"
-                placeholder="Notice title (e.g. NSE Holiday / Server Upgrade)"
+                placeholder="Notice title (e.g. NSE Holiday)"
                 value={noticeForm.title}
                 onChange={(e) => setNoticeForm({ ...noticeForm, title: e.target.value })}
                 required
               />
               <input
                 className="input"
-                placeholder="Important message shown inside every user's 🔔 Notifications inbox..."
+                placeholder="Message shown in user notifications..."
                 value={noticeForm.message}
                 onChange={(e) => setNoticeForm({ ...noticeForm, message: e.target.value })}
                 required
@@ -2930,11 +2877,11 @@ export default function AdminPage() {
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
                   <select className="input" style={{ maxWidth: 200 }} value={threatsCategory} onChange={(e) => setThreatsCategory(e.target.value)}>
                     <option value="ALL">All Categories</option>
-                    <option value="SECURITY_THREAT">🛡️ Security Threats</option>
-                    <option value="SYSTEM_FAILURE">💥 System Failures</option>
-                    <option value="ERROR_LOG">🐞 Wrong Logs / Errors</option>
-                    <option value="CELERY_FAILURE">⚙️ Celery Task Crashes</option>
-                    <option value="BROKER_FEED">📡 Fyers &amp; Data Feed</option>
+                    <option value="SECURITY_THREAT">Security Threats</option>
+                    <option value="SYSTEM_FAILURE">System Failures</option>
+                    <option value="ERROR_LOG">Error Logs</option>
+                    <option value="CELERY_FAILURE">Celery Task Crashes</option>
+                    <option value="BROKER_FEED">Fyers &amp; Data Feed</option>
                   </select>
                   <select className="input" style={{ maxWidth: 160 }} value={threatsSeverity} onChange={(e) => setThreatsSeverity(e.target.value)}>
                     <option value="ALL">All Severities</option>
@@ -2962,7 +2909,7 @@ export default function AdminPage() {
 
                 {(alertsHubData.alerts || []).length === 0 ? (
                   <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-secondary)' }}>
-                    ✅ No matching threats, failures, or error logs recorded.
+                    No matching threats, failures, or error logs recorded.
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -3045,7 +2992,7 @@ export default function AdminPage() {
                           </pre>
 
                           <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginTop: 8, fontSize: 11, color: 'var(--text-secondary)' }}>
-                            <span>💡 {a.suggested_action || 'Inspect details and telemetry.'}</span>
+                            <span>Action: {a.suggested_action || 'Inspect details and telemetry.'}</span>
                             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                               {a.ip_address && <span>IP: <code className="mono">{a.ip_address}</code></span>}
                               {a.trace_id && (
