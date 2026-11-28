@@ -5999,3 +5999,23 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - `Select-String` across `frontend/src`: confirmed zero remaining visible `Zerodha`/`Kite` UI copy.
 - **Next Safe Step:**
   - Commit & push locally (`git add -A && git commit && git push origin main`), then deploy frontend on live server: `cd /home/opc/StockAI && git pull origin main && docker compose build frontend && docker compose up -d --no-build --force-recreate frontend` (also rebuild `backend celery_worker celery_beat` if earlier backend commits have not been deployed yet).
+
+---
+
+### Session Entry 107
+- **Timestamp:** 2026-11-28 21:27:00 IST (15:57:00 UTC)
+- **User Prompt:**
+  `Chart Analysis toolbar paste -> "Now you have made dropdown in indicators but it sisnt open when clicked only that arrow moves upside and downside there is none indicators in it , so how can i add or remove indicators in chart add capsules for on off the indicators in indicators dropdown so it seems better."`
+- **Root Causes Diagnosed & Fixed:**
+  1. **Dropdown Clipped Invisible by `.mobile-scroll-tabs` ([ChartPage.tsx](file:///d:/Stock%20Prediction%20System/frontend/src/pages/ChartPage.tsx), [index.css](file:///d:/Stock%20Prediction%20System/frontend/src/index.css#L647-L656))**:
+     - `indicatorMenuRef` was rendered inside `<div className="mobile-scroll-tabs">`, which sets `overflow-x: auto` (implicitly forcing `overflow-y: auto` per CSS spec), clipping the `position: absolute` dropdown cleanly out of sight while still rotating the `<ChevronDown />` arrow.
+     - Moved `indicatorMenuRef` outside `.mobile-scroll-tabs` (keeping horizontal scroll strictly on sibling `Events | VP | Depth | Draw | Anchor VWAP | Clear | Replay`), added `Escape` close support, unified `?? false` fallbacks for series/pane visibility, and applied CSS theme variables cleanly for both light and dark modes.
+  2. **Pure Helper Extraction & Interactive ON/OFF Toggle Capsules ([chartIndicators.ts](file:///d:/Stock%20Prediction%20System/frontend/src/utils/chartIndicators.ts), [chartIndicators.test.ts](file:///d:/Stock%20Prediction%20System/frontend/src/utils/chartIndicators.test.ts))**:
+     - Added removable **Active** indicator capsules at the top of the dropdown (`[ ● Label × ]`), clickable preset capsules, an `All Off` pill, search filter, and accessible `role="switch"` sliding **ON / OFF** toggle capsules on all 10 indicators grouped under **Price Overlays** (`EMA 21`, `EMA 9`, `EMA 50`, `EMA 200`, `VWAP`, `Supertrend`, `Bollinger Bands`) and **Oscillators & Volume** (`RSI (14)`, `MACD (12, 26, 9)`, `Volume`).
+     - Added viewport-clamping horizontal offset helper `computeDropdownLeftOffset()` so the menu stays onscreen at `390px` mobile width as well as `1440px` desktop.
+- **Verification Evidence:**
+  - `npm --prefix frontend run lint` (`eslint . --ext ts,tsx --report-unused-disable-directives`): **exit code 0 (`0` errors/warnings)**.
+  - `npm --prefix frontend run test -- --run`: **5 test files passed, 25 tests passed, 0 failed in `1.91s`** (including 4 unit tests in [chartIndicators.test.ts](file:///d:/Stock%20Prediction%20System/frontend/src/utils/chartIndicators.test.ts)).
+  - `npm --prefix frontend run build` (`tsc && vite build`): **2,000 modules transformed, 0 TypeScript errors, built in `15.36s`**.
+- **Next Safe Step:**
+  - Commit & push locally (`git add -A && git commit && git push origin main`), then run on live server: `cd /home/opc/StockAI && git pull origin main && docker compose build frontend && docker compose up -d --no-build --force-recreate frontend`.

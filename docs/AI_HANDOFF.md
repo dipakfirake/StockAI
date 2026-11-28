@@ -14,6 +14,21 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25 / 2026-11-26 / 2026-11-27 / 2026-11-28)
 
+- **CHART INDICATORS DROPDOWN CLIPPING FIX & ON/OFF CAPSULE SWITCHES (COMPLETE & VERIFIED - 2026-11-28):**
+  - **1. Root Cause Diagnosed (`frontend/src/pages/ChartPage.tsx`, `frontend/src/index.css`)**:
+    - The Chart toolbar wrapped `<div ref={indicatorMenuRef}>` directly inside `.mobile-scroll-tabs` (`overflow-x: auto`). By CSS specification, setting `overflow-x: auto` forces `overflow-y: auto`, turning the 36px toolbar bar into a vertical clipping box: clicking `Indicators` rotated `<ChevronDown />` while clipping the `position: absolute` menu completely invisible.
+    - Series/sub-chart fallback checks (`indicatorToggles.X ?? true`) also diverged from `activeIndicators` (`?? false`), and the dropdown used hardcoded dark `#0f172a` colors instead of theme CSS variables.
+  - **2. Implemented Fixes (`frontend/src/pages/ChartPage.tsx`, `frontend/src/utils/chartIndicators.ts`)**:
+    - Moved `<div ref={indicatorMenuRef}>` out of `.mobile-scroll-tabs` (keeping `.mobile-scroll-tabs` strictly on `Events | VP | Depth | Draw | Anchor VWAP | Clear | Replay`) so the Indicators dropdown is never clipped horizontally or vertically.
+    - Extracted `CHART_INDICATOR_CATALOG`, `DEFAULT_INDICATOR_TOGGLES`, `applyChartPreset`, `toggleChartIndicator`, `getActiveIndicatorKeys`, and `computeDropdownLeftOffset` into `frontend/src/utils/chartIndicators.ts` so narrow (`390px`) screens automatically clamp horizontal dropdown alignment cleanly inside the viewport.
+    - Upgraded the dropdown to theme-aware styling (`--color-bg-card`, `--color-bg-secondary`, `--color-border`, `--color-text-*`), grouped into `Price Overlays` & `Oscillators & Volume`, with **removable Active indicator capsules** at the top, **preset capsules**, `All Off` button, live indicator values, `Escape` closing, and accessible `role="switch"` sliding **ON / OFF** toggle capsules on every indicator row.
+    - Unified `?? false` fallbacks across main chart overlays, volume, and RSI/MACD sub-panes.
+  - **3. Verification**:
+    - `npm --prefix frontend run lint`: **exit code 0 (`0` errors/warnings)**.
+    - `npm --prefix frontend run test -- --run`: **5 test files, 25 tests passed, 0 failed (`1.91s`)** — including 4 new tests in `frontend/src/utils/chartIndicators.test.ts`.
+    - `npm --prefix frontend run build` (`tsc && vite build`): **2,000 modules transformed, 0 TypeScript errors (`15.36s`)**.
+  - **Exact Next Safe Step**: Commit & push locally (`git add -A && git commit && git push origin main`), then deploy frontend on live server (`cd /home/opc/StockAI && git pull origin main && docker compose build frontend && docker compose up -d --no-build --force-recreate frontend`).
+
 - **GTT / ORDER TICKET UI CLEANUP & `SL-M` TRIGGER BUG FIX (COMPLETE & VERIFIED - 2026-11-28):**
   - **1. Fixed `SL` / `SL-M` Trigger Default & Active Valuation Bug (`frontend/src/components/ZerodhaOrderModal.tsx`, `frontend/src/utils/orderTicket.ts`)**:
     - Previously `ZerodhaOrderModal` defaulted `triggerPrice` to `initialStopLoss` (`₹2457.28` on `ASIANPAINT.NS`) and ignored `triggerPrice` when computing `activePrice` in `SL_M` mode.
