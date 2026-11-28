@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { sanitizeBrowserUrl } from '../utils/urlSecurity'
 import { alertsApi, stocksApi, paperTradingApi, notificationsApi } from '../services/api'
 import { 
   Bell, PlusCircle, Trash2, BellOff, ShieldAlert, ShieldCheck, 
@@ -72,14 +73,25 @@ const PATTERN_TYPES = [
 
 export default function AlertsPage() {
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const initialTab = searchParams.get('tab')?.toUpperCase()
+  const location = useLocation()
+  const resolveAlertTab = (): 'SCREENER_RADAR' | 'HOLDINGS' | 'RADAR' | 'CUSTOM' | 'INBOX' | null => {
+    const stateTab = String((location.state as any)?.tab || '').toUpperCase()
+    const queryTab = (() => {
+      try {
+        return new URLSearchParams(window.location.search).get('tab')?.toUpperCase()
+      } catch {
+        return undefined
+      }
+    })()
+    const candidate = stateTab || queryTab
+    if (candidate === 'INBOX' || candidate === 'NOTIFICATIONS') return 'INBOX'
+    if (candidate === 'HOLDINGS' || candidate === 'RADAR' || candidate === 'CUSTOM' || candidate === 'SCREENER_RADAR') {
+      return candidate as 'HOLDINGS' | 'RADAR' | 'CUSTOM' | 'SCREENER_RADAR'
+    }
+    return null
+  }
   const [activeTab, setActiveTab] = useState<'SCREENER_RADAR' | 'HOLDINGS' | 'RADAR' | 'CUSTOM' | 'INBOX'>(
-    initialTab === 'INBOX' || initialTab === 'NOTIFICATIONS'
-      ? 'INBOX'
-      : initialTab === 'HOLDINGS' || initialTab === 'RADAR' || initialTab === 'CUSTOM'
-      ? (initialTab as 'HOLDINGS' | 'RADAR' | 'CUSTOM')
-      : 'SCREENER_RADAR'
+    resolveAlertTab() || 'SCREENER_RADAR'
   )
 
   // Persisted User Notifications Inbox State (Auto-Sells, Order Fills, System Notices)
@@ -245,13 +257,14 @@ export default function AlertsPage() {
   }, [activeTab, radarSector, radarProximityPct, radarStage])
 
   useEffect(() => {
-    const qTab = searchParams.get('tab')?.toUpperCase()
-    if (qTab === 'INBOX' || qTab === 'NOTIFICATIONS') {
-      setActiveTab('INBOX')
-    } else if (qTab === 'HOLDINGS' || qTab === 'RADAR' || qTab === 'CUSTOM' || qTab === 'SCREENER_RADAR') {
-      setActiveTab(qTab as any)
+    const nextTab = resolveAlertTab()
+    if (nextTab) {
+      setActiveTab(nextTab)
     }
-  }, [searchParams])
+    if (typeof window !== 'undefined' && window.location.search) {
+      sanitizeBrowserUrl('/alerts')
+    }
+  }, [location.state])
 
   async function loadInboxNotifications(markSeenIfOpen: boolean = false) {
     setLoadingInbox(true)
@@ -552,7 +565,7 @@ export default function AlertsPage() {
         </button>
 
         <button
-          onClick={() => { setActiveTab('CUSTOM'); setSearchParams({}) }}
+          onClick={() => setActiveTab('CUSTOM')}
           style={{
             padding: '10px 14px',
             fontSize: 13.5,
@@ -574,10 +587,7 @@ export default function AlertsPage() {
         </button>
 
         <button
-          onClick={() => {
-            setActiveTab('INBOX')
-            setSearchParams({ tab: 'INBOX' })
-          }}
+          onClick={() => setActiveTab('INBOX')}
           style={{
             padding: '10px 14px',
             fontSize: 13.5,

@@ -40,6 +40,7 @@ For prose-only requests, do not run unrelated destructive or expensive checks. S
 - Treat account data, tokens, `.env` values, and personal data as secrets. Never print, commit, or send them externally.
 - Build original UI and indicator implementations. Do not copy proprietary code, design assets, branding, or licensed indicators from brokers or charting vendors.
 - Preserve accessibility, responsive behavior, loading/error/empty states, and keyboard-friendly interaction.
+- Strictly adhere to `.agents/rules/ui-design-standards.md` for all frontend layout, theme tokens, zero-emoji/anti-bloat rules, INR formatting, mobile responsiveness (`0px` overflow), clean URLs (no exposed `?tab=` or `?redirect=` query strings), and strict user vs. admin UI boundaries unless the user explicitly asks to modify them.
 
 ## Safety and repository discipline
 

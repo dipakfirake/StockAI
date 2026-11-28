@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { marketApi, paperTradingApi, alertsApi, swingAuditApi } from '../services/api'
+import { useAuth } from '../AuthContext'
 import { 
   TrendingUp, TrendingDown, Minus, RefreshCw, Search, Filter, 
   ExternalLink, Briefcase, Bell, CheckCircle2, ShieldAlert, 
@@ -101,6 +102,8 @@ const SECTOR_OPTIONS = [
 
 export default function SwingScreenerPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = Boolean(user?.is_admin)
   const [sector, setSector] = useState('NIFTY_50')
   const [activeTab, setActiveTab] = useState<'BUY' | 'SELL' | 'HOLD' | 'ALL'>('BUY')
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({})
@@ -429,16 +432,18 @@ export default function SwingScreenerPage() {
             </span>
           </button>
 
-          <button
-            onClick={handleSyncAudit}
-            disabled={syncingAudit}
-            className="btn btn-secondary"
-            style={{ gap: 6, color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.35)' }}
-            title="Update cycle close prices & P&L"
-          >
-            <RefreshCw size={14} className={syncingAudit ? 'spin' : ''} />
-            <span>{syncingAudit ? 'Syncing…' : 'Sync Prices'}</span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={handleSyncAudit}
+              disabled={syncingAudit}
+              className="btn btn-secondary"
+              style={{ gap: 6, color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.35)' }}
+              title="Update cycle close prices & P&L"
+            >
+              <RefreshCw size={14} className={syncingAudit ? 'spin' : ''} />
+              <span>{syncingAudit ? 'Syncing…' : 'Sync Prices'}</span>
+            </button>
+          )}
 
           <button
             onClick={handleDownloadLatestExcel}
@@ -508,22 +513,24 @@ export default function SwingScreenerPage() {
             </span>
           </div>
 
-          <button
-            onClick={handleRolloverCycle}
-            disabled={rollingOver}
-            className="btn btn-secondary"
-            style={{
-              gap: 6,
-              fontSize: 12,
-              padding: '6px 12px',
-              borderColor: 'rgba(16, 185, 129, 0.35)',
-              color: '#10b981',
-            }}
-            title="Finalize current cycle and start the next 11-day cycle"
-          >
-            <RefreshCw size={13} className={rollingOver ? 'spin' : ''} />
-            <span>{rollingOver ? 'Rolling Over…' : `Start Cycle #${(cycleData?.cycle_number || 1) + 1}`}</span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={handleRolloverCycle}
+              disabled={rollingOver}
+              className="btn btn-secondary"
+              style={{
+                gap: 6,
+                fontSize: 12,
+                padding: '6px 12px',
+                borderColor: 'rgba(16, 185, 129, 0.35)',
+                color: '#10b981',
+              }}
+              title="Finalize current cycle and start the next 11-day cycle"
+            >
+              <RefreshCw size={13} className={rollingOver ? 'spin' : ''} />
+              <span>{rollingOver ? 'Rolling Over…' : `Start Cycle #${(cycleData?.cycle_number || 1) + 1}`}</span>
+            </button>
+          )}
         </div>
       )}
 

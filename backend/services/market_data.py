@@ -2420,16 +2420,18 @@ class MarketDataService:
             session.headers.update({"User-Agent": "Mozilla/5.0"})
             ticker = yf.Ticker(yf_symbol, session=session)
 
-            try:
-                cal = ticker.calendar
-                if isinstance(cal, dict) and "Earnings Date" in cal:
-                    dates = cal["Earnings Date"]
-                    if len(dates) > 0:
-                        events["earnings_date"] = str(dates[0])
-                elif hasattr(cal, "empty") and not cal.empty:
-                    events["earnings_date"] = str(cal.iloc[0, 0])
-            except Exception:
-                pass
+            # Benchmark indices (e.g. ^NSEI) do not have corporate earnings calendars on Yahoo
+            if not str(yf_symbol).startswith("^"):
+                try:
+                    cal = ticker.calendar
+                    if isinstance(cal, dict) and "Earnings Date" in cal:
+                        dates = cal["Earnings Date"]
+                        if len(dates) > 0:
+                            events["earnings_date"] = str(dates[0])
+                    elif hasattr(cal, "empty") and not cal.empty:
+                        events["earnings_date"] = str(cal.iloc[0, 0])
+                except Exception:
+                    pass
 
             try:
                 divs = ticker.dividends

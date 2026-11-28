@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { authApi } from '../services/api'
+import { sanitizeBrowserUrl } from '../utils/urlSecurity'
 import { Mail, ShieldCheck, ArrowLeft, RefreshCw, Clock, CheckCircle2, Circle } from 'lucide-react'
 import {
   validateEmail,
@@ -42,15 +43,23 @@ export default function LoginPage() {
   
   const googleBtnRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const redirectTarget = searchParams.get('redirect') || '/dashboard'
   const { login } = useAuth()
 
   useEffect(() => {
-    if (searchParams.get('expired') === '1') {
-      setError('Your session has expired. Please sign in again to continue.')
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const expiredByStorage = sessionStorage.getItem('auth_session_expired') === '1'
+      if (params.get('expired') === '1' || expiredByStorage) {
+        sessionStorage.removeItem('auth_session_expired')
+        setError('Your session has expired. Please sign in again to continue.')
+      }
+      if (window.location.search) {
+        sanitizeBrowserUrl('/login')
+      }
+    } catch {
+      // ignore storage/URL sanitization errors
     }
-  }, [searchParams])
+  }, [])
 
   // 1. Fetch public Google Client ID configuration
   useEffect(() => {
@@ -114,7 +123,7 @@ export default function LoginPage() {
     try {
       const res = await authApi.googleAuth(response.credential)
       await login(res.data.access_token, res.data.user)
-      navigate(redirectTarget)
+      navigate('/dashboard', { replace: true })
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Google sign-in failed. Please try again.')
     } finally {
@@ -173,7 +182,7 @@ export default function LoginPage() {
         // --- LOGIN FLOW ---
         const res = await authApi.login(email.trim(), password)
         await login(res.data.access_token, res.data.user)
-        navigate(redirectTarget)
+        navigate('/dashboard', { replace: true })
       } else {
         // --- REGISTRATION STEP 1: SEND OTP ---
         const res = await authApi.sendRegistrationOtp({
@@ -215,7 +224,7 @@ export default function LoginPage() {
       const res = await authApi.verifyRegistrationOtp({ email: email.trim(), otp: otp.trim() })
       setSuccessMsg('Email successfully verified! Redirecting to your dashboard...')
       await login(res.data.access_token, res.data.user)
-      setTimeout(() => navigate(redirectTarget), 400)
+      setTimeout(() => navigate('/dashboard', { replace: true }), 400)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Invalid or expired verification code. Please check and retry.')
     } finally {

@@ -60,7 +60,7 @@ export default function NotificationBell({ compact = false }: NotificationBellPr
             body: newest.message || '',
             severity: newest.priority || 'INFO',
             tag: `notif-${newest.id}`,
-            url: newest.metadata?.link || '/alerts?tab=INBOX',
+            url: String(newest.metadata?.link || '/alerts').split('?')[0] || '/alerts',
           })
         }
       }
@@ -147,7 +147,7 @@ export default function NotificationBell({ compact = false }: NotificationBellPr
 
   const handleOpenInboxTab = () => {
     setOpen(false)
-    navigate('/alerts?tab=INBOX')
+    navigate('/alerts', { state: { tab: 'INBOX' } })
   }
 
   const handleOpenNotificationItem = async (n: any) => {
@@ -160,7 +160,13 @@ export default function NotificationBell({ compact = false }: NotificationBellPr
       // ignore
     }
     setOpen(false)
-    navigate(n.metadata?.link || '/alerts?tab=INBOX')
+    const rawLink = String(n.metadata?.link || '/alerts')
+    const [basePath, queryStr] = rawLink.split('?')
+    const parsedTab =
+      n.metadata?.open_tab ||
+      (queryStr ? new URLSearchParams(queryStr).get('tab')?.toUpperCase() : null) ||
+      'INBOX'
+    navigate(basePath || '/alerts', { state: parsedTab ? { tab: parsedTab } : undefined })
   }
 
   const renderCategoryBadge = (cat: string) => {

@@ -19,6 +19,40 @@ logger = get_logger(__name__)
 AI_TRADER_ID = "00000000-0000-0000-0000-000000000000"
 MAX_CAPITAL_PER_TRADE = 100000  # ₹1 Lakh virtual capital per trade
 
+def _extract_macd_values(indicators: dict | None) -> tuple[float, float]:
+    """Safely extract numeric (macd, signal) whether MACD is nested as a dict or scalar."""
+    if not isinstance(indicators, dict):
+        return 0.0, 0.0
+
+    raw_macd = indicators.get("macd")
+    if isinstance(raw_macd, dict):
+        try:
+            macd_val = float(raw_macd.get("macd") if raw_macd.get("macd") is not None else 0.0)
+        except (TypeError, ValueError):
+            macd_val = 0.0
+        raw_sig = raw_macd.get("signal")
+        if raw_sig is None:
+            raw_sig = indicators.get("macd_signal")
+        try:
+            macd_sig = float(raw_sig if raw_sig is not None else 0.0)
+        except (TypeError, ValueError):
+            macd_sig = 0.0
+        return macd_val, macd_sig
+
+    try:
+        macd_val = float(raw_macd if raw_macd is not None else 0.0)
+    except (TypeError, ValueError):
+        macd_val = 0.0
+
+    raw_sig = indicators.get("macd_signal")
+    try:
+        macd_sig = float(raw_sig if raw_sig is not None else 0.0)
+    except (TypeError, ValueError):
+        macd_sig = 0.0
+
+    return macd_val, macd_sig
+
+
 async def check_existing_position(db: AsyncSession, symbol: str) -> bool:
     """Check if the AI already holds an open position in this stock."""
     result = await db.execute(
@@ -61,10 +95,13 @@ async def execute_smc_trade_if_confirmed(*args, **kwargs):
         current_price = candles_15m[-1].get("close", 0)
         
         # Analyze the 15-minute structure
-        indicators_15m = indicator_service.compute_all(candles_15m)
-        rsi_15m = indicators_15m.get("rsi_14", 50)
-        macd_val = indicators_15m.get("macd", 0)
-        macd_signal = indicators_15m.get("macd_signal", 0)
+        indicators_15m = indicator_service.compute_all(candles_15m) or {}
+        raw_rsi_15m = indicators_15m.get("rsi_14", 50)
+        try:
+            rsi_15m = float(50 if raw_rsi_15m is None else raw_rsi_15m)
+        except (TypeError, ValueError):
+            rsi_15m = 50.0
+        macd_val, macd_signal = _extract_macd_values(indicators_15m)
         
         # Are we inside any POI?
         for fvg in fvgs:

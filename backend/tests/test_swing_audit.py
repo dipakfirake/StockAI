@@ -314,7 +314,7 @@ async def test_generate_excel_workbook_creates_valid_file(mock_db, tmp_path):
 async def test_swing_audit_api_routes():
     from httpx import AsyncClient, ASGITransport
     from backend.main import app
-    from backend.core.auth import get_current_user_optional
+    from backend.core.auth import get_current_user
     from backend.core.database import get_db
 
     mock_cycle_data = {
@@ -334,8 +334,9 @@ async def test_swing_audit_api_routes():
     }
 
     mock_db = AsyncMock()
+    mock_admin = MagicMock(id="admin_user", email="admin@test.com", is_admin=True, is_active=True)
 
-    app.dependency_overrides[get_current_user_optional] = lambda: {"id": "test_user"}
+    app.dependency_overrides[get_current_user] = lambda: mock_admin
     app.dependency_overrides[get_db] = lambda: mock_db
 
     transport = ASGITransport(app=app)
@@ -498,6 +499,7 @@ async def test_swing_audit_api_download_latest_route(tmp_path):
     """
     from httpx import AsyncClient, ASGITransport
     from backend.main import app
+    from backend.core.auth import get_current_user
     from backend.core.database import get_db
 
     mock_cycle = SwingTradeAuditCycle(
@@ -516,6 +518,8 @@ async def test_swing_audit_api_download_latest_route(tmp_path):
     wb.save(test_excel_file)
 
     mock_db = AsyncMock()
+    mock_user = MagicMock(id="u_dl", email="trader@test.com", is_admin=False, is_active=True)
+    app.dependency_overrides[get_current_user] = lambda: mock_user
     app.dependency_overrides[get_db] = lambda: mock_db
 
     transport = ASGITransport(app=app)
@@ -551,6 +555,7 @@ async def test_swing_audit_api_files_and_specific_download(tmp_path):
     """
     from httpx import AsyncClient, ASGITransport
     from backend.main import app
+    from backend.core.auth import get_current_user
     from backend.core.database import get_db
 
     # Create dummy workbook in tmp_path
@@ -579,6 +584,8 @@ async def test_swing_audit_api_files_and_specific_download(tmp_path):
     mock_result.scalars.return_value.first.return_value = mock_cycle
     mock_db.execute.return_value = mock_result
 
+    mock_user = MagicMock(id="u_files", email="trader@test.com", is_admin=False, is_active=True)
+    app.dependency_overrides[get_current_user] = lambda: mock_user
     app.dependency_overrides[get_db] = lambda: mock_db
 
     transport = ASGITransport(app=app)
@@ -668,9 +675,12 @@ async def test_sync_audit_prices_endpoint_with_run_scan():
     """Verify POST /api/swing-audit/sync?run_scan=true executes multi-sector scan step."""
     from httpx import AsyncClient, ASGITransport
     from backend.main import app
+    from backend.core.auth import get_current_user
     from backend.core.database import get_db
 
     mock_db = AsyncMock()
+    mock_admin = MagicMock(id="admin_sync", email="admin@test.com", is_admin=True, is_active=True)
+    app.dependency_overrides[get_current_user] = lambda: mock_admin
     app.dependency_overrides[get_db] = lambda: mock_db
 
     fake_screener = {

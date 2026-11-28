@@ -11,6 +11,8 @@ import json
 from starlette.requests import ClientDisconnect
 
 from backend.services.presence import presence_service
+from backend.core.auth import get_current_user_optional
+from backend.models.user import User
 from backend.core.logging_config import get_logger
 from backend.core.geoip import resolve_ip_location_nonblocking
 from backend.models.user import User
@@ -42,21 +44,36 @@ class PresencePayload(BaseModel):
 
 
 @router.post("/heartbeat", status_code=status.HTTP_200_OK)
-async def heartbeat(payload: PresencePayload, request: Request):
+async def heartbeat(
+    payload: PresencePayload,
+    request: Request,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
     Record or refresh a client session heartbeat.
-    Passes optional user, device, and coarse IP-derived location metadata to Redis in-memory storage (0 DB queries).
-    Complies with DPDPA 2023 & CERT-In 2022 log requirements without invading GPS coordinates.
-    Returns the current number of active users online.
+    Derives identity and role strictly from verified JWT credentials when present,
+    never trusting client-supplied role/user impersonation fields.
     """
     client_ip = _get_client_ip(request)
     location = await resolve_ip_location_nonblocking(client_ip, request.headers)
 
+    if current_user is not None:
+        verified_user_id = str(current_user.id)
+        verified_email = current_user.email
+        verified_name = getattr(current_user, "name", None) or payload.user_name or current_user.email
+        verified_role = "ADMIN" if bool(getattr(current_user, "is_admin", False)) else "USER"
+    else:
+        verified_user_id = None
+        verified_email = None
+        raw_name = (payload.user_name or "").strip()
+        verified_name = raw_name if raw_name.startswith("Guest") else "Guest"
+        verified_role = "GUEST"
+
     meta = {
-        "user_id": payload.user_id,
-        "user_name": payload.user_name,
-        "user_email": payload.user_email,
-        "role": payload.role or "GUEST",
+        "user_id": verified_user_id,
+        "user_name": verified_name,
+        "user_email": verified_email,
+        "role": verified_role,
         "path": payload.path or "/dashboard",
         "device": payload.device or "Desktop",
         "ip": client_ip,

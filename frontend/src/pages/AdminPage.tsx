@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { adminApi, settingsApi, healthApi, swingAuditApi } from '../services/api';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { usePresenceContext } from '../PresenceContext';
+import { toast } from '../components/Toast';
+import { sanitizeBrowserUrl } from '../utils/urlSecurity';
 import {
   Smartphone,
   ExternalLink,
@@ -93,16 +95,26 @@ interface FyersStatus {
 export default function AdminPage() {
   const { user } = useAuth();
   const isAdmin = Boolean(user?.is_admin);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
 
-  const initialAdminTab = searchParams.get('tab')?.toLowerCase();
   const validAdminTabs = ['live', 'fyers', 'users', 'ops', 'audit', 'threats'] as const;
   type AdminTab = (typeof validAdminTabs)[number];
 
+  const resolveAdminTab = (): AdminTab | null => {
+    const stateTab = String((location.state as any)?.tab || '').toLowerCase();
+    const queryTab = (() => {
+      try {
+        return new URLSearchParams(window.location.search).get('tab')?.toLowerCase() || '';
+      } catch {
+        return '';
+      }
+    })();
+    const candidate = (stateTab || queryTab) as AdminTab;
+    return validAdminTabs.includes(candidate) ? candidate : null;
+  };
+
   // Navigation tab: 'live' | 'fyers' | 'users' | 'ops' | 'audit' | 'threats'
-  const [activeTab, setActiveTab] = useState<AdminTab>(
-    validAdminTabs.includes(initialAdminTab as AdminTab) ? (initialAdminTab as AdminTab) : 'fyers'
-  );
+  const [activeTab, setActiveTab] = useState<AdminTab>(resolveAdminTab() || 'fyers');
 
   // Admin Threats, System Failures & Error Logs Hub State
   const [alertsHubData, setAlertsHubData] = useState<any>({
@@ -124,15 +136,23 @@ export default function AdminPage() {
   const [threatsSubView, setThreatsSubView] = useState<'ALERTS' | 'LOGS' | 'AUDIT_LOG'>('ALERTS');
   const [noticeForm, setNoticeForm] = useState({ title: '', message: '', priority: 'INFO' });
   const [broadcastingNotice, setBroadcastingNotice] = useState(false);
+  const [noticeFeedback, setNoticeFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const fetchAdminAlertsHub = async (markSeenOnOpen: boolean = false) => {
+  const fetchAdminAlertsHub = async (
+    markSeenOnOpen: boolean = false,
+    overrides?: { category?: string; severity?: string; status?: string; search?: string }
+  ) => {
     setAlertsHubLoading(true);
     try {
+      const cat = overrides?.category ?? threatsCategory;
+      const sev = overrides?.severity ?? threatsSeverity;
+      const stat = overrides?.status ?? threatsStatus;
+      const q = (overrides?.search ?? threatsSearch).trim();
       const res = await adminApi.getAlertsHub({
-        category: threatsCategory,
-        severity: threatsSeverity,
-        status_filter: threatsStatus,
-        search: threatsSearch || undefined,
+        category: cat,
+        severity: sev,
+        status_filter: stat,
+        search: q || undefined,
         limit: 100,
       });
       const payload = res.data || {};
@@ -151,40 +171,70 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    const qTab = searchParams.get('tab')?.toLowerCase();
-    if (qTab && validAdminTabs.includes(qTab as AdminTab)) {
-      setActiveTab(qTab as AdminTab);
+    const nextTab = resolveAdminTab();
+    if (nextTab) {
+      setActiveTab(nextTab);
     }
-  }, [searchParams]);
+    if (
+      typeof window !== 'undefined' &&
+      window.location.search &&
+      !window.location.search.includes('auth_code=')
+    ) {
+      sanitizeBrowserUrl('/admin');
+    }
+  }, [location.state]);
 
   useEffect(() => {
     if (!isAdmin) return;
-    fetchAdminAlertsHub(activeTab === 'threats');
+    const timer = setTimeout(() => {
+      fetchAdminAlertsHub(activeTab === 'threats');
+    }, threatsSearch ? 220 : 0);
     const onAdmEvt = () => fetchAdminAlertsHub(activeTab === 'threats');
     window.addEventListener('stockai:admin-alerts-updated', onAdmEvt);
-    return () => window.removeEventListener('stockai:admin-alerts-updated', onAdmEvt);
-  }, [isAdmin, activeTab, threatsCategory, threatsSeverity, threatsStatus]);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('stockai:admin-alerts-updated', onAdmEvt);
+    };
+  }, [isAdmin, activeTab, threatsCategory, threatsSeverity, threatsStatus, threatsSearch]);
 
   const handleAcknowledgeAdminAlert = async (alertId?: string, action: 'ACKNOWLEDGE' | 'RESOLVE' = 'ACKNOWLEDGE', markAll = false) => {
     try {
       await adminApi.acknowledgeAlertsHub({ alert_id: alertId, action, mark_all: markAll });
       await fetchAdminAlertsHub(true);
       window.dispatchEvent(new CustomEvent('stockai:admin-alerts-updated'));
+      toast.success(action === 'RESOLVE' ? 'Incident resolved' : 'Incident acknowledged');
     } catch (err: any) {
-      alert(`Failed to update alert status: ${err?.response?.data?.detail || err.message}`);
+      toast.error('Failed to update alert status', err?.response?.data?.detail || err.message);
     }
   };
 
   const handleBroadcastSystemNotice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!noticeForm.title.trim() || !noticeForm.message.trim()) return;
+    const cleanTitle = noticeForm.title.trim();
+    const cleanMessage = noticeForm.message.trim();
+    if (!cleanTitle || !cleanMessage) {
+      setNoticeFeedback({ type: 'error', text: 'Title and message are required.' });
+      toast.error('Notice incomplete', 'Please provide both title and message.');
+      return;
+    }
     setBroadcastingNotice(true);
+    setNoticeFeedback(null);
     try {
-      const res = await adminApi.broadcastNotice(noticeForm);
-      alert(`System announcement delivered to ${res.data?.recipients || 0} active user(s).`);
+      const res = await adminApi.broadcastNotice({
+        title: cleanTitle,
+        message: cleanMessage,
+        priority: noticeForm.priority,
+      });
+      const count = Number(res.data?.recipients || 0);
+      const summary = `Delivered to ${count} active user account${count === 1 ? '' : 's'}.`;
+      setNoticeFeedback({ type: 'success', text: summary });
+      toast.success('System Notice Broadcast', summary);
       setNoticeForm({ title: '', message: '', priority: 'INFO' });
+      window.dispatchEvent(new CustomEvent('stockai:notifications-updated'));
     } catch (err: any) {
-      alert(`Broadcast failed: ${err?.response?.data?.detail || err.message}`);
+      const msg = err?.response?.data?.detail || err.message || 'Broadcast failed';
+      setNoticeFeedback({ type: 'error', text: msg });
+      toast.error('Broadcast Failed', msg);
     } finally {
       setBroadcastingNotice(false);
     }
@@ -405,10 +455,6 @@ export default function AdminPage() {
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      const tabParam = urlParams.get('tab');
-      if (tabParam === 'live' || tabParam === 'fyers' || tabParam === 'users' || tabParam === 'ops') {
-        setActiveTab(tabParam as any);
-      }
 
       let code = urlParams.get('auth_code');
       if (!code && window.location.hash) {
@@ -418,6 +464,9 @@ export default function AdminPage() {
       if (code && !authInput) {
         setAuthInput(window.location.href);
         setActiveTab('fyers');
+      }
+      if (window.location.search || window.location.hash) {
+        sanitizeBrowserUrl('/admin');
       }
     } catch {
       // Ignore URL parsing errors
@@ -912,7 +961,6 @@ export default function AdminPage() {
         <button
           onClick={() => {
             setActiveTab('threats');
-            setSearchParams({ tab: 'threats' });
             fetchAdminAlertsHub(true);
           }}
           className="no-shrink"
@@ -2828,6 +2876,22 @@ export default function AdminPage() {
                 {broadcastingNotice ? 'Sending...' : 'Broadcast'}
               </button>
             </form>
+            {noticeFeedback && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  border: noticeFeedback.type === 'success' ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(239, 68, 68, 0.35)',
+                  background: noticeFeedback.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  color: noticeFeedback.type === 'success' ? '#34d399' : '#f87171',
+                }}
+              >
+                {noticeFeedback.text}
+              </div>
+            )}
           </div>
 
           {/* Controls + Sub-View Switcher */}
@@ -2872,41 +2936,63 @@ export default function AdminPage() {
               </div>
             </div>
 
+            {/* Unified Filter Bar (applies to Incidents, Wrong Logs & Security Audit Log) */}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
+              {threatsSubView === 'ALERTS' && (
+                <select className="input" style={{ maxWidth: 200 }} value={threatsCategory} onChange={(e) => setThreatsCategory(e.target.value)}>
+                  <option value="ALL">All Categories</option>
+                  <option value="SECURITY_THREAT">Security Threats</option>
+                  <option value="SYSTEM_FAILURE">System Failures</option>
+                  <option value="ERROR_LOG">Error Logs</option>
+                  <option value="CELERY_FAILURE">Celery Task Crashes</option>
+                  <option value="BROKER_FEED">Fyers &amp; Data Feed</option>
+                </select>
+              )}
+              <select className="input" style={{ maxWidth: 160 }} value={threatsSeverity} onChange={(e) => setThreatsSeverity(e.target.value)}>
+                <option value="ALL">All Severities</option>
+                <option value="CRITICAL">CRITICAL</option>
+                <option value="ERROR">ERROR</option>
+                <option value="WARNING">WARNING</option>
+                <option value="INFO">INFO</option>
+              </select>
+              {threatsSubView === 'ALERTS' && (
+                <select className="input" style={{ maxWidth: 160 }} value={threatsStatus} onChange={(e) => setThreatsStatus(e.target.value)}>
+                  <option value="ALL">All Statuses</option>
+                  <option value="OPEN">OPEN</option>
+                  <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
+                  <option value="RESOLVED">RESOLVED</option>
+                </select>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 200 }}>
+                <Search size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                <input
+                  className="input"
+                  placeholder="Filter by IP, Trace ID, title, or module..."
+                  value={threatsSearch}
+                  onChange={(e) => setThreatsSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchAdminAlertsHub(true)}
+                />
+              </div>
+              {(threatsCategory !== 'ALL' || threatsSeverity !== 'ALL' || threatsStatus !== 'ALL' || threatsSearch.trim() !== '') && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12, padding: '6px 12px' }}
+                  onClick={() => {
+                    setThreatsCategory('ALL');
+                    setThreatsSeverity('ALL');
+                    setThreatsStatus('ALL');
+                    setThreatsSearch('');
+                    fetchAdminAlertsHub(false, { category: 'ALL', severity: 'ALL', status: 'ALL', search: '' });
+                  }}
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+
             {threatsSubView === 'ALERTS' && (
               <>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-                  <select className="input" style={{ maxWidth: 200 }} value={threatsCategory} onChange={(e) => setThreatsCategory(e.target.value)}>
-                    <option value="ALL">All Categories</option>
-                    <option value="SECURITY_THREAT">Security Threats</option>
-                    <option value="SYSTEM_FAILURE">System Failures</option>
-                    <option value="ERROR_LOG">Error Logs</option>
-                    <option value="CELERY_FAILURE">Celery Task Crashes</option>
-                    <option value="BROKER_FEED">Fyers &amp; Data Feed</option>
-                  </select>
-                  <select className="input" style={{ maxWidth: 160 }} value={threatsSeverity} onChange={(e) => setThreatsSeverity(e.target.value)}>
-                    <option value="ALL">All Severities</option>
-                    <option value="CRITICAL">CRITICAL</option>
-                    <option value="WARNING">WARNING</option>
-                    <option value="INFO">INFO</option>
-                  </select>
-                  <select className="input" style={{ maxWidth: 160 }} value={threatsStatus} onChange={(e) => setThreatsStatus(e.target.value)}>
-                    <option value="ALL">All Statuses</option>
-                    <option value="OPEN">OPEN</option>
-                    <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
-                    <option value="RESOLVED">RESOLVED</option>
-                  </select>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 200 }}>
-                    <Search size={14} style={{ color: 'var(--text-secondary)' }} />
-                    <input
-                      className="input"
-                      placeholder="Filter by IP, Trace ID, title, or module..."
-                      value={threatsSearch}
-                      onChange={(e) => setThreatsSearch(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && fetchAdminAlertsHub(true)}
-                    />
-                  </div>
-                </div>
-
                 {(alertsHubData.alerts || []).length === 0 ? (
                   <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-secondary)' }}>
                     No matching threats, failures, or error logs recorded.

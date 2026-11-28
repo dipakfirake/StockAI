@@ -298,6 +298,7 @@ async def broadcast_system_notice_to_users(
     category: str = "SYSTEM_NOTICE",
     metadata: dict[str, Any] | None = None,
     only_admins: bool = False,
+    auto_commit: bool = False,
 ) -> int:
     """Persist an important system announcement across active user accounts."""
     if db is None or _is_mock_obj(db):
@@ -309,6 +310,7 @@ async def broadcast_system_notice_to_users(
             stmt = stmt.where(User.is_admin == True)
         users = (await db.execute(stmt)).scalars().all()
         sent = 0
+        pending_ws: list[tuple[str, dict[str, Any]]] = []
         for u in users:
             n = await create_user_notification(
                 db,
@@ -318,11 +320,30 @@ async def broadcast_system_notice_to_users(
                 priority=priority,
                 category=category,
                 metadata=metadata,
-                broadcast=True,
+                broadcast=False,
             )
             if n is not None:
                 sent += 1
+                pending_ws.append(
+                    (
+                        str(u.id),
+                        {
+                            "type": "NOTIFICATION_NEW",
+                            "notification": serialize_notification(n),
+                        },
+                    )
+                )
+        await db.flush()
+        if auto_commit:
+            await db.commit()
+        if pending_ws:
+            try:
+                from backend.api.websocket import broadcast_alert
+                for uid_str, ws_payload in pending_ws:
+                    await broadcast_alert(ws_payload, user_id=uid_str)
+            except Exception as ws_exc:
+                logger.warning(f"System notice saved ({sent} users) but WS push failed: {ws_exc}")
         return sent
     except Exception as exc:
-        logger.debug(f"Could not broadcast system notice: {exc}")
-        return 0
+        logger.error(f"Could not broadcast system notice: {exc}", exc_info=True)
+        raise

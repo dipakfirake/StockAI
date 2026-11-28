@@ -211,7 +211,7 @@ def _extract_auth_code(raw_input: str) -> str:
 async def get_fyers_status(
     force_refresh: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """
     Check current Fyers connection status, trader name, and whether real-time data is active.
@@ -698,12 +698,49 @@ async def update_fyers_token(
     except Exception as e:
         logger.warning(f"Could not cache fyers_creds: {e}")
 
-    # Automatically persist into .env file if path exists
+    # Persist token to .env when writable without failing on Docker bind-mount inode locks (EBUSY)
     if env_path:
+        import errno
+        import re as _re
+
         try:
             dotenv.set_key(str(env_path), "FYERS_ACCESS_TOKEN", token)
+        except OSError as e:
+            if getattr(e, "errno", None) == errno.EBUSY:
+                try:
+                    content = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+                    new_line = f'FYERS_ACCESS_TOKEN="{token}"'
+                    if _re.search(r"^FYERS_ACCESS_TOKEN=.*$", content, flags=_re.MULTILINE):
+                        updated_content = _re.sub(
+                            r"^FYERS_ACCESS_TOKEN=.*$",
+                            new_line,
+                            content,
+                            count=1,
+                            flags=_re.MULTILINE,
+                        )
+                    else:
+                        sep = "" if (not content or content.endswith("\n")) else "\n"
+                        updated_content = f"{content}{sep}{new_line}\n"
+                    with open(env_path, "r+", encoding="utf-8") as fh:
+                        fh.seek(0)
+                        fh.write(updated_content)
+                        fh.truncate()
+                    logger.info("Updated FYERS_ACCESS_TOKEN in-place on bind-mounted .env file.")
+                except Exception as in_place_err:
+                    logger.info(
+                        "Skipping bind-mounted .env write (%s); token persisted cleanly in SystemSettings DB & Redis.",
+                        in_place_err,
+                    )
+            else:
+                logger.info(
+                    "Skipping .env write (%s); token persisted cleanly in SystemSettings DB & Redis.",
+                    e,
+                )
         except Exception as e:
-            logger.warning(f"Failed to update .env directly: {e}")
+            logger.info(
+                "Skipping .env write (%s); token persisted cleanly in SystemSettings DB & Redis.",
+                e,
+            )
 
     # Hot-reload MarketDataService in-process & restore primary engine
     from backend.services.market_data import MarketDataService

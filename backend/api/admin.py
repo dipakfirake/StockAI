@@ -16,17 +16,34 @@ from backend.core.audit_logger import log_security_event
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+_suppress_rbac_audit: ContextVar[bool] = ContextVar("_suppress_rbac_audit", default=False)
+
+
+@contextmanager
+def suppress_expected_rbac_audit():
+    """Suppress synthetic UNAUTHORIZED_ADMIN_ACCESS_ATTEMPT audit logs for expected RBAC self-tests."""
+    token = _suppress_rbac_audit.set(True)
+    try:
+        yield
+    finally:
+        _suppress_rbac_audit.reset(token)
+
+
 async def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """Validate that the requesting user has administrative privileges."""
     is_admin = bool(current_user.is_admin)
     if not is_admin:
-        log_security_event(
-            event_type="UNAUTHORIZED_ADMIN_ACCESS_ATTEMPT",
-            severity="WARNING",
-            ip_address="internal",
-            user_id=str(current_user.id),
-            details={"email": current_user.email, "message": "Non-admin attempted admin access"},
-        )
+        if not _suppress_rbac_audit.get():
+            log_security_event(
+                event_type="UNAUTHORIZED_ADMIN_ACCESS_ATTEMPT",
+                severity="WARNING",
+                ip_address="internal",
+                user_id=str(current_user.id),
+                details={"email": current_user.email, "message": "Non-admin attempted admin access"},
+            )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrative privileges required to access this resource",
@@ -327,6 +344,12 @@ async def acknowledge_admin_alerts(
         updated += 1
 
     await db.commit()
+    if target_status == "RESOLVED" and updated > 0:
+        try:
+            from backend.services.sentinel import sentinel_service
+            sentinel_service._security_log_watermark = now
+        except Exception:
+            pass
     return {"success": True, "updated": updated, "status": target_status}
 
 
@@ -347,13 +370,13 @@ async def admin_broadcast_system_notice(
 
     sent_count = await broadcast_system_notice_to_users(
         db,
-        title=f"📢 {clean_title}",
+        title=clean_title,
         message=clean_msg,
         priority=prio,
         category="SYSTEM_NOTICE",
-        metadata={"sent_by": admin.email, "link": "/alerts?tab=INBOX"},
+        metadata={"sent_by": admin.email, "link": "/alerts", "open_tab": "INBOX"},
+        auto_commit=True,
     )
-    await db.commit()
     log_security_event(
         event_type="ADMIN_SYSTEM_NOTICE_BROADCAST",
         severity="INFO",

@@ -125,8 +125,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       setPreferences({});
       if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-        const currentPath = window.location.pathname + window.location.search;
-        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}&expired=1`;
+        try {
+          sessionStorage.setItem('auth_session_expired', '1');
+        } catch {
+          // ignore sessionStorage failure
+        }
+        window.location.href = '/login';
       }
     };
     window.addEventListener('auth_session_expired', handleSessionExpired);

@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.logging_config import get_logger
 from backend.core.database import get_db
-from backend.core.auth import get_current_user, get_current_user_optional
+from backend.core.auth import get_current_user
+from backend.api.admin import require_admin
+from backend.models.user import User
 from backend.models.swing_audit import SwingTradeAuditCycle
 from backend.services.swing_audit_service import swing_audit_service, get_audit_dir
 
@@ -43,7 +45,7 @@ class TrackSwingAuditRequest(BaseModel):
 async def track_swing_recommendation(
     req: TrackSwingAuditRequest,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user_optional)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Catalog a stock recommendation from Swing Trade Analysis into the 11-Day Audit Ledger.
@@ -89,7 +91,7 @@ async def track_swing_recommendation(
 @router.get("/current-cycle")
 async def get_current_audit_cycle(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user_optional)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Retrieve live status and scorecard of the active 11-day audit cycle.
@@ -106,7 +108,7 @@ async def get_current_audit_cycle(
 async def sync_audit_prices(
     run_scan: bool = Query(False, description="If True, runs fresh Swing Screener scan before price sync"),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user_optional)
+    admin: User = Depends(require_admin),
 ):
     """
     Evaluate daily price milestones (Day 1..11), check Stop Loss and Target hits,
@@ -170,7 +172,7 @@ async def sync_audit_prices(
 async def recalculate_audit_ledger(
     reset_exited: bool = Query(True, description="If True, resets prematurely stopped trades to re-evaluate with chronological isolation"),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user_optional)
+    admin: User = Depends(require_admin),
 ):
     """
     Recalculates the active audit ledger from scratch using chronological state isolation.
@@ -190,7 +192,8 @@ async def recalculate_audit_ledger(
 @router.api_route("/download-latest", methods=["GET", "HEAD"])
 async def download_latest_audit_excel(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Download the latest 11-day audit Excel workbook (.xlsx) with formatting and formulas.
@@ -264,7 +267,8 @@ async def download_latest_audit_excel(
 @router.get("/download-latest-file")
 async def download_latest_file_direct(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Direct browser link endpoint for downloading the active 11-day audit spreadsheet.
@@ -276,7 +280,7 @@ async def download_latest_file_direct(
 @router.get("/files")
 async def list_audit_files(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user_optional)
+    current_user: User = Depends(get_current_user),
 ):
     """
     List all available 11-day audit cycle Excel workbooks, both active and historical archives.
@@ -364,7 +368,8 @@ async def list_audit_files(
 @router.get("/download/{filename}")
 async def download_specific_audit_excel(
     filename: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Download a specific 11-day audit Excel workbook by its file name.
@@ -441,7 +446,7 @@ async def download_specific_audit_excel(
 async def rollover_audit_cycle(
     square_off_remaining: bool = Query(True, description="If True, squares off remaining IN_PROGRESS trades at latest close prices"),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user_optional)
+    admin: User = Depends(require_admin),
 ):
     """
     Formally completes and archives the active 11-day audit cycle (e.g. Cycle #1),

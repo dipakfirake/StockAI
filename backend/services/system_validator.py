@@ -235,12 +235,15 @@ class SystemValidatorService:
                 subscription_tier="FREE",
             )
 
+            from backend.api.admin import suppress_expected_rbac_audit
+
             blocked = False
-            try:
-                await require_admin(regular_user)
-            except HTTPException as exc:
-                if exc.status_code == 403:
-                    blocked = True
+            with suppress_expected_rbac_audit():
+                try:
+                    await require_admin(regular_user)
+                except HTTPException as exc:
+                    if exc.status_code == 403:
+                        blocked = True
 
             duration = (time.perf_counter() - t0) * 1000
             if blocked:

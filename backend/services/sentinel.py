@@ -53,6 +53,7 @@ class SentinelService:
         }
         self._recent_incidents: List[Dict[str, Any]] = []
         self._audit_runs = 0
+        self._security_log_watermark: datetime | None = None
 
     def start_background_surveillance(self):
         """Launch the continuous 24/7 background watchdog loop."""
@@ -241,6 +242,14 @@ class SentinelService:
                 critical_sec_count = 0
                 unhandled_500_count = 0
 
+                from datetime import timedelta as _timedelta
+
+                now_utc = datetime.now(timezone.utc)
+                cutoff_utc = now_utc - _timedelta(minutes=30)
+                watermark = getattr(self, "_security_log_watermark", None)
+                if watermark is not None and watermark > cutoff_utc:
+                    cutoff_utc = watermark
+
                 for line in lines:
                     raw = line.strip()
                     if not raw:
@@ -249,6 +258,13 @@ class SentinelService:
                     sev = "INFO"
                     try:
                         rec = _json.loads(raw)
+                        ts_val = rec.get("timestamp")
+                        if isinstance(ts_val, str) and ts_val.strip():
+                            rec_dt = datetime.fromisoformat(ts_val.strip().replace("Z", "+00:00"))
+                            if rec_dt.tzinfo is None:
+                                rec_dt = rec_dt.replace(tzinfo=timezone.utc)
+                            if rec_dt < cutoff_utc:
+                                continue
                         evt = str(rec.get("event_type") or "")
                         sev = str(rec.get("severity") or "INFO")
                     except Exception:
@@ -428,6 +444,8 @@ class SentinelService:
                 inc["status"] = "RESOLVED"
                 inc["resolved_at"] = now.isoformat()
                 inc["resolved_by"] = resolved_by
+                if inc.get("subsystem") in ("SECURITY", "API_ENDPOINT"):
+                    self._security_log_watermark = now
                 found_in_memory = True
 
         try:
@@ -441,6 +459,8 @@ class SentinelService:
                     inc.status = "RESOLVED"
                     inc.resolved_at = now
                     inc.resolved_by = resolved_by
+                    if inc.subsystem in ("SECURITY", "API_ENDPOINT"):
+                        self._security_log_watermark = now
                     from backend.models.admin_alert_event import AdminAlertEvent
                     adm_rows = (
                         await session.execute(select(AdminAlertEvent).where(AdminAlertEvent.title == inc.title))

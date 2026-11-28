@@ -101,6 +101,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "/api/settings",
             "/api/admin",
             "/api/subscription",
+            "/api/notifications",
+            "/api/sentinel",
+            "/api/validator",
+            "/api/swing-audit",
+            "/api/preferences",
             "/metrics",
         )
         if any(p.startswith(prefix) for prefix in sensitive_prefixes):

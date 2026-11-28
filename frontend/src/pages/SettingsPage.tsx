@@ -139,7 +139,9 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Automated Algorithmic Swing Trading Card */}
+      {/* Automated Algorithmic Swing Trading & Global Risk Controls (Admin Only) */}
+      {isAdmin ? (
+        <>
       <div
         className="card"
         style={{
@@ -402,6 +404,27 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+        </>
+      ) : (
+        <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, margin: '0 0 12px 0' }}>Account &amp; Workspace Profile</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 12 }}>
+            <div style={{ padding: '12px 14px', background: 'var(--color-bg-secondary)', borderRadius: 8, border: '1px solid var(--color-border)' }}>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Signed In As</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{user?.name || user?.email || 'Trader'}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>{user?.email}</div>
+            </div>
+            <div style={{ padding: '12px 14px', background: 'var(--color-bg-secondary)', borderRadius: 8, border: '1px solid var(--color-border)' }}>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Plan &amp; Role</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{user?.subscription_tier || 'FREE'} Plan</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>Standard Trader Workspace</div>
+            </div>
+          </div>
+          <div style={{ marginTop: 14, fontSize: 12.5, color: 'var(--color-text-muted)' }}>
+            System-wide broker credentials, algorithm parameters, and infrastructure controls are managed centrally by platform administrators.
+          </div>
+        </div>
+      )}
 
       {/* Audit Workbooks Shortcut + Privacy & Cookies */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 16 }}>

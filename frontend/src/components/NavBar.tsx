@@ -100,7 +100,7 @@ export default function NavBar() {
             body: (newest.detail || '').slice(0, 140),
             severity: newest.severity || 'CRITICAL',
             tag: `admin-poll-${newest.id}`,
-            url: '/admin?tab=threats',
+            url: '/admin',
           })
         }
         prevAdminUnseenRef.current = nextUnseen

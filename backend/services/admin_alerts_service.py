@@ -391,6 +391,41 @@ async def fetch_admin_alerts_hub_summary(
         if len(filtered) >= limit:
             break
 
+    sev_filter = severity.strip().upper() if severity and severity.strip().upper() != "ALL" else None
+    q_filter = search.strip().lower() if search and search.strip() else None
+
+    recent_logs = get_recent_captured_logs(level=sev_filter, limit=80)
+    if q_filter:
+        recent_logs = [
+            log_item
+            for log_item in recent_logs
+            if (
+                q_filter in str(log_item.get("message") or "").lower()
+                or q_filter in str(log_item.get("logger") or "").lower()
+                or q_filter in str(log_item.get("category") or "").lower()
+                or q_filter in str(log_item.get("traceback") or "").lower()
+            )
+        ]
+
+    audit_tail = read_security_audit_tail(limit=80)
+    if sev_filter:
+        audit_tail = [
+            entry
+            for entry in audit_tail
+            if str(entry.get("severity") or "").upper() == sev_filter
+        ]
+    if q_filter:
+        audit_tail = [
+            entry
+            for entry in audit_tail
+            if (
+                q_filter in str(entry.get("event_type") or "").lower()
+                or q_filter in str(entry.get("ip_address") or "").lower()
+                or q_filter in str(entry.get("user_id") or "").lower()
+                or q_filter in json.dumps(entry.get("details") or {}, default=str).lower()
+            )
+        ]
+
     return {
         "unseen_count": unseen_count,
         "unread_count": unread_count,
@@ -398,6 +433,6 @@ async def fetch_admin_alerts_hub_summary(
         "critical_count": critical_count,
         "counts_by_category": counts_by_category,
         "alerts": filtered,
-        "recent_logs": get_recent_captured_logs(limit=60),
-        "security_audit_tail": read_security_audit_tail(limit=50),
+        "recent_logs": recent_logs[:60],
+        "security_audit_tail": audit_tail[:50],
     }

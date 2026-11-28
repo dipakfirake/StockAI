@@ -24,6 +24,24 @@ class AdminErrorLogHandler(logging.Handler):
         # Never recursively process alerts hub internals
         if record.name.startswith("backend.services.admin_alerts_service"):
             return
+        # Ignore transient per-symbol third-party Yahoo probes (rate limits / delisted fallbacks)
+        if record.name.startswith("yfinance"):
+            try:
+                raw_msg = record.getMessage()
+            except Exception:
+                raw_msg = ""
+            if any(
+                noise in raw_msg
+                for noise in (
+                    "possibly delisted",
+                    "429 Client Error",
+                    "Expecting value",
+                    "Failed to get ticker",
+                    "No data found",
+                    "No timezone found",
+                )
+            ):
+                return
 
         _LOCAL_GUARD.active = True
         try:
@@ -91,7 +109,7 @@ def setup_logging(level: str = "INFO") -> None:
     # Quiet noisy third-party loggers
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-    logging.getLogger("yfinance").setLevel(logging.WARNING)
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 
 def get_logger(name: str) -> logging.Logger:

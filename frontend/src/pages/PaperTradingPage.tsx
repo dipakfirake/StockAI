@@ -1,32 +1,50 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { paperTradingApi, stocksApi } from '../services/api'
 import { TrendingUp, TrendingDown, X, ShieldCheck, WalletCards, Briefcase, Clock, PlusCircle, Calendar, Eye, AlignJustify, Bot, User } from 'lucide-react'
 import StockSearchBox from '../components/StockSearchBox'
 import HoldingDetailModal from '../components/HoldingDetailModal'
 import MarketDepthModal from '../components/MarketDepthModal'
 import { formatINR, formatNumber2Dec, getPnlColor, getPnlClass, getPnlSign } from '../utils/formatters'
+import { sanitizeBrowserUrl } from '../utils/urlSecurity'
 
 export default function PaperTradingPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const [trades, setTrades] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [quote, setQuote] = useState<any>(null)
-  const initialTab = searchParams.get('tab')?.toUpperCase()
+  const resolveTabFromSource = (): 'POSITIONS' | 'ORDERS' | 'HISTORY' | null => {
+    const stateTab = String((location.state as any)?.tab || '').toUpperCase()
+    if (stateTab === 'ORDERS' || stateTab === 'HISTORY' || stateTab === 'POSITIONS') {
+      return stateTab as 'POSITIONS' | 'ORDERS' | 'HISTORY'
+    }
+    try {
+      const qTab = new URLSearchParams(window.location.search).get('tab')?.toUpperCase()
+      if (qTab === 'ORDERS' || qTab === 'HISTORY' || qTab === 'POSITIONS') {
+        return qTab as 'POSITIONS' | 'ORDERS' | 'HISTORY'
+      }
+    } catch {
+      // ignore
+    }
+    return null
+  }
   const [activeTab, setActiveTab] = useState<'POSITIONS' | 'ORDERS' | 'HISTORY'>(
-    initialTab === 'ORDERS' || initialTab === 'HISTORY' ? (initialTab as 'ORDERS' | 'HISTORY') : 'POSITIONS'
+    resolveTabFromSource() || 'POSITIONS'
   )
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [selectedPosition, setSelectedPosition] = useState<any | null>(null)
   const [depthModalSymbol, setDepthModalSymbol] = useState<string | null>(null)
 
   useEffect(() => {
-    const qTab = searchParams.get('tab')?.toUpperCase()
-    if (qTab === 'ORDERS' || qTab === 'HISTORY' || qTab === 'POSITIONS') {
-      setActiveTab(qTab as 'POSITIONS' | 'ORDERS' | 'HISTORY')
+    const nextTab = resolveTabFromSource()
+    if (nextTab) {
+      setActiveTab(nextTab)
     }
-  }, [searchParams])
+    if (typeof window !== 'undefined' && window.location.search) {
+      sanitizeBrowserUrl('/paper-trading')
+    }
+  }, [location.state])
   
   const [form, setForm] = useState({ 
     symbol: '', 
@@ -150,19 +168,19 @@ export default function PaperTradingPage() {
       {/* Tabs */}
       <div className="mobile-scroll-tabs" style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--color-border-light)', marginBottom: 16 }}>
         <div
-          onClick={() => { setActiveTab('POSITIONS'); setSearchParams({ tab: 'positions' }) }}
+          onClick={() => setActiveTab('POSITIONS')}
           style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', borderBottom: activeTab === 'POSITIONS' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'POSITIONS' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
         >
           <Briefcase size={15} style={{ display: 'inline', marginRight: 6, verticalAlign: '-3px' }} /> Positions ({openTrades.length})
         </div>
         <div
-          onClick={() => { setActiveTab('ORDERS'); setSearchParams({ tab: 'orders' }) }}
+          onClick={() => setActiveTab('ORDERS')}
           style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', borderBottom: activeTab === 'ORDERS' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'ORDERS' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
         >
           <Clock size={15} style={{ display: 'inline', marginRight: 6, verticalAlign: '-3px' }} /> Orders ({pendingTrades.length})
         </div>
         <div
-          onClick={() => { setActiveTab('HISTORY'); setSearchParams({ tab: 'history' }) }}
+          onClick={() => setActiveTab('HISTORY')}
           style={{ padding: '10px 0', cursor: 'pointer', fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', borderBottom: activeTab === 'HISTORY' ? '2px solid var(--color-accent-blue)' : '2px solid transparent', color: activeTab === 'HISTORY' ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)' }}
         >
           History ({closedTrades.length})
@@ -193,7 +211,7 @@ export default function PaperTradingPage() {
             type="button"
             className="btn btn-secondary"
             style={{ padding: '4px 12px', fontSize: 12, borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}
-            onClick={() => { setActiveTab('ORDERS'); setSearchParams({ tab: 'orders' }) }}
+            onClick={() => setActiveTab('ORDERS')}
           >
             View Pending
           </button>

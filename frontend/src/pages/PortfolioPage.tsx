@@ -132,7 +132,7 @@ export default function PortfolioPage() {
 
             <div
               className="card"
-              onClick={() => navigate(portfolio.pending_orders > 0 ? '/paper-trading?tab=orders' : '/paper-trading')}
+              onClick={() => navigate('/paper-trading', portfolio.pending_orders > 0 ? { state: { tab: 'ORDERS' } } : undefined)}
               style={{ padding: '12px 14px', cursor: 'pointer' }}
             >
               <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -340,7 +340,7 @@ export default function PortfolioPage() {
                   type="button"
                   className="btn btn-secondary"
                   style={{ padding: '4px 10px', fontSize: 12 }}
-                  onClick={() => navigate('/paper-trading?tab=orders')}
+                  onClick={() => navigate('/paper-trading', { state: { tab: 'ORDERS' } })}
                 >
                   Manage Orders <ArrowRight size={12} />
                 </button>
@@ -434,7 +434,7 @@ export default function PortfolioPage() {
                   type="button"
                   className="btn btn-ghost"
                   style={{ padding: '5px 10px', fontSize: 12 }}
-                  onClick={() => navigate('/paper-trading?tab=history')}
+                  onClick={() => navigate('/paper-trading', { state: { tab: 'HISTORY' } })}
                 >
                   Full History <ArrowRight size={12} />
                 </button>

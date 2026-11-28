@@ -232,11 +232,17 @@ async def test_download_archive_vs_active_collision():
     archive_file = audit_dir / "Swing_Trade_Audit_Archive_Test.xlsx"
     archive_file.write_bytes(b"TEST_ARCHIVE_EXCEL_BYTES_12345")
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Request the archive file
-        resp = await client.get("/api/swing-audit/download/Swing_Trade_Audit_Archive_Test.xlsx")
-        assert resp.status_code == 200
-        assert resp.content == b"TEST_ARCHIVE_EXCEL_BYTES_12345"
-        assert "Swing_Trade_Audit_Archive_Test.xlsx" in resp.headers.get("content-disposition", "")
+    from backend.core.auth import get_current_user
+    mock_user = MagicMock(id="u_arch", email="trader@test.com", is_admin=False, is_active=True)
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # Request the archive file
+            resp = await client.get("/api/swing-audit/download/Swing_Trade_Audit_Archive_Test.xlsx")
+            assert resp.status_code == 200
+            assert resp.content == b"TEST_ARCHIVE_EXCEL_BYTES_12345"
+            assert "Swing_Trade_Audit_Archive_Test.xlsx" in resp.headers.get("content-disposition", "")
+    finally:
+        app.dependency_overrides.clear()
 
