@@ -145,7 +145,7 @@ export default function MarketDepthWidget({
     return (
       <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)' }}>
         <RefreshCw size={24} className="spin" style={{ marginBottom: 12 }} />
-        <div>Loading Zerodha Kite Market Depth for {cleanSymbol(symbol)}...</div>
+        <div>Loading Market Depth for {cleanSymbol(symbol)}...</div>
       </div>
     );
   }
@@ -352,7 +352,7 @@ export default function MarketDepthWidget({
                 fontWeight: 600,
               }}
             >
-              Kite 0.00 Mode
+              Exchange Closed (0.00)
             </span>
           </div>
 
@@ -373,7 +373,7 @@ export default function MarketDepthWidget({
               transition: 'all 0.15s ease',
             }}
           >
-            {previewPracticeDepth ? '✓ Showing Practice Depth' : '⚡ Preview Practice Depth'}
+            {previewPracticeDepth ? 'Showing Practice Depth' : 'Preview Practice Depth'}
           </button>
         </div>
       )}

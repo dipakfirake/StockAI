@@ -1040,7 +1040,7 @@ export default function SwingScreenerPage() {
                               onClick={() => handleOpenGttModal(stock)}
                               className="btn btn-secondary"
                               style={{ padding: '4px 8px', height: 28, fontSize: 11, borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
-                              title="Set automated Zerodha GTT (Good-Till-Triggered) Trigger Order"
+                              title="Set automated GTT bracket order"
                             >
                               GTT
                             </button>
@@ -1048,7 +1048,7 @@ export default function SwingScreenerPage() {
                               onClick={() => handleOpenOrderModal(stock)}
                               className={`btn ${isBuy ? 'btn-primary' : 'btn-secondary'}`}
                               style={{ padding: '4px 10px', height: 28, fontSize: 11 }}
-                              title="Open Zerodha Kite-style order execution window"
+                              title="Open virtual paper trade order ticket"
                             >
                               Trade
                             </button>

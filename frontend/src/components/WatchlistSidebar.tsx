@@ -320,7 +320,7 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
                           e.stopPropagation();
                           setSelectedDepthSymbol(q.symbol);
                         }}
-                        title="View Market Depth (Kite 5 Bids/Asks)"
+                        title="View 5-Level Market Depth"
                         style={{ marginLeft: 4, opacity: 0.8 }}
                       >
                         <AlignJustify size={15} />

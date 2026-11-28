@@ -2016,7 +2016,7 @@ export default function ChartPage() {
               onClick={() => setShowDepthModal(true)}
               className="btn btn-ghost no-shrink" 
               style={{ fontSize: 13, padding: '4px 10px', height: '28px', color: showDepthModal ? 'var(--color-accent-blue)' : 'var(--color-text-muted)', fontWeight: showDepthModal ? 600 : 400 }}
-              title="View Zerodha Kite 5-Level Market Depth"
+              title="View 5-Level Market Depth"
             >
               <AlignJustify size={14} style={{ marginRight: 4 }} /> Depth
             </button>

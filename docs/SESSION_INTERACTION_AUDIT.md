@@ -5976,3 +5976,26 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Frontend: `eslint` **0 errors/warnings**; `vitest --run` **16 passed, 0 failed**; `tsc && vite build` **1,998 modules transformed in 11.79s**.
 - **Next Safe Step:**
   - Commit/push locally and run on live server: `cd /home/opc/StockAI && git pull origin main && docker compose build backend celery_worker celery_beat frontend && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend`.
+
+---
+
+### Session Entry 106
+- **Timestamp:** 2026-11-28 21:11:00 IST (15:41:00 UTC)
+- **User Prompt:**
+  `Pasted GTT modal for ASIANPAINT.NS (CMP ₹2532.60, At Best Buy, Target ₹2711.82 +7.1%, Stop Loss ₹2457.28 -3%, Zerodha Kite GTT branding & ⚡ emojis, SL-M selected) -> asked: (1) whether this UI was also cleaned up and requested cleaner UI here, (2) how GTT + SL-M auto-buy/auto-sell works in Alerts tab, and (3) if SL-M + Place GTT Trigger is submitted now for ASIANPAINT.NS (At Best Buy), whether it buys tomorrow or when.`
+- **Root Causes Diagnosed & Fixed:**
+  1. **Unfinished Order Modal Cleanup (`ZerodhaOrderModal.tsx`, `AlertsPage.tsx`, `MarketDepthWidget.tsx`, `WatchlistSidebar.tsx`, `ChartPage.tsx`, `SwingScreenerPage.tsx`)**:
+     - Prior UI audit had wrapped grid layouts inside `ZerodhaOrderModal.tsx` without removing `Zerodha Kite` / `⚡` branding, `(Longterm / Delivery)` parenthetical labels, or fixing the `overflow: hidden` modal clipping charges breakdown popovers.
+     - Cleaned to institutional Virtual Paper GTT UI (`NSE · Virtual`, `Paper GTT Bracket Order`, `OCO: Target + Stop Loss Auto-Exit`, `CNC` / `Delivery`, `MIS` / `Intraday 5x`, `%`/`₹` pills, inline expandable fee breakdown, `maxHeight: '92vh', overflowY: 'auto'`, CSS theme tokens) and scrubbed visible broker/emoji labels in surrounding buttons/depth modals.
+  2. **`SL` / `SL-M` Default Trigger Bug & Helper Extraction (`frontend/src/utils/orderTicket.ts`, `ZerodhaOrderModal.tsx`)**:
+     - Switching to `SL` / `SL-M` previously defaulted `triggerPrice` to `initialStopLoss` (`₹2457.28` instead of `₹2532.60`), and `activePrice` ignored `triggerPrice` when `orderType === 'SL_M'`.
+     - Extracted pure helpers into `orderTicket.ts` (`resolveEntryBasePrice`, `resolveInitialTriggerPrice`, `resolveInitialOrderType`, `resolveActiveOrderPrice`, `buildOrderExecutionSummary`, `buildPaperOrderPayload`) and added 5 regression tests in `frontend/src/utils/orderTicket.test.ts`.
+  3. **Weekend Execution Answer (`backend/tasks/trading_tasks.py`, `backend/services/paper_trading.py`)**:
+     - Verified virtual Paper Trading engine (`paperTradingApi.place`) guards order fills via `_is_market_open()` (`09:15–15:30 IST`, `weekday() < 5`). Since `2026-11-28` is Saturday and `2026-11-29` is Sunday, NSE is closed tomorrow; a Saturday `SL-M` BUY stays `PENDING` over the weekend and executes Monday morning (`09:15 AM IST`) once Monday LTP `>= stop_price`, after which OCO Target/Stop Loss auto-sells the position.
+- **Verification Evidence:**
+  - `npm --prefix frontend run lint` (`eslint . --ext ts,tsx --report-unused-disable-directives`): **exit code 0 (`0` errors/warnings)**.
+  - `npm --prefix frontend run test -- --run`: **4 test files passed, 21 tests passed, 0 failed in `2.40s`** (including 5 tests in `frontend/src/utils/orderTicket.test.ts`).
+  - `npm --prefix frontend run build` (`tsc && vite build`): **1,999 modules transformed, 0 errors, built in `23.10s`**.
+  - `Select-String` across `frontend/src`: confirmed zero remaining visible `Zerodha`/`Kite` UI copy.
+- **Next Safe Step:**
+  - Commit & push locally (`git add -A && git commit && git push origin main`), then deploy frontend on live server: `cd /home/opc/StockAI && git pull origin main && docker compose build frontend && docker compose up -d --no-build --force-recreate frontend` (also rebuild `backend celery_worker celery_beat` if earlier backend commits have not been deployed yet).

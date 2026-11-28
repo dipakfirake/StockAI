@@ -14,6 +14,22 @@ Every agent must read `AGENTS.md`, this file, and the current `git status --shor
 
 ## Latest verified checks (2026-11-18 / 2026-11-19 / 2026-11-20 / 2026-11-22 / 2026-11-25 / 2026-11-26 / 2026-11-27 / 2026-11-28)
 
+- **GTT / ORDER TICKET UI CLEANUP & `SL-M` TRIGGER BUG FIX (COMPLETE & VERIFIED - 2026-11-28):**
+  - **1. Fixed `SL` / `SL-M` Trigger Default & Active Valuation Bug (`frontend/src/components/ZerodhaOrderModal.tsx`, `frontend/src/utils/orderTicket.ts`)**:
+    - Previously `ZerodhaOrderModal` defaulted `triggerPrice` to `initialStopLoss` (`₹2457.28` on `ASIANPAINT.NS`) and ignored `triggerPrice` when computing `activePrice` in `SL_M` mode.
+    - Extracted pure helpers into `frontend/src/utils/orderTicket.ts` (`resolveEntryBasePrice`, `resolveInitialTriggerPrice`, `resolveInitialOrderType`, `resolveActiveOrderPrice`, `buildOrderExecutionSummary`, `buildPaperOrderPayload`): `SL` / `SL-M` trigger prices now default cleanly to entry/CMP (`bestBuyPrice` or `currentPrice`), `activePrice` uses `triggerPrice` for `SL_M`, and `"At Best Buy"` setups default to `MARKET` (distinct dip GTT setups default to `LIMIT`).
+  - **2. Institutional Order Ticket & Market Depth Copy Cleanup (`ZerodhaOrderModal.tsx`, `AlertsPage.tsx`, `MarketDepthWidget.tsx`, `WatchlistSidebar.tsx`, `ChartPage.tsx`, `SwingScreenerPage.tsx`)**:
+    - Removed `Zerodha Kite` branding, `⚡` emojis, parenthetical label clutter (`(Longterm / Delivery)` -> `CNC` + `Delivery`), and `overflow: hidden` charges-popover clipping (now inline expandable breakdown card with `maxHeight: '92vh', overflowY: 'auto'`).
+    - Replaced hardcoded light surfaces with CSS theme tokens, added responsive `minmax(min(100%, ...), 1fr)` grids, `NSE · Virtual` + `Paper GTT Bracket Order` (`OCO: Target + Stop Loss Auto-Exit`) ribbons, clear 1-line NSE timing summary (`09:15–15:30 IST Mon–Fri`, Pending outside hours), and clean CTA (`Place BUY GTT` / `Place SELL GTT`).
+  - **3. Execution Timing Root Cause Confirmed (`backend/tasks/trading_tasks.py`, `backend/services/paper_trading.py`, `backend/api/paper_trading.py`, `backend/api/portfolio.py`)**:
+    - GTT triggers in this app place **virtual Paper Trades** (`POST /api/paper-trading/place`) with optional coupled watcher rules (`POST /api/alerts/screener-setup`).
+    - NSE evaluation (`_is_market_open` / `is_indian_market_open`) strictly allows **Monday–Friday, `09:15–15:30 IST`**. Any weekend `SL-M` BUY order (including `ASIANPAINT.NS` placed on Saturday `2026-11-28`) stays `PENDING` through Sunday and triggers on **Monday `09:15 AM IST`** once live price `>= stop_price` (`evaluate_pending_orders`), after which `evaluate_open_trades` monitors Target & Stop Loss for auto-exit.
+  - **4. Verification**:
+    - `npm --prefix frontend run lint`: **exit code 0 (`0` errors/warnings)**.
+    - `npm --prefix frontend run test -- --run`: **4 test files, 21 tests passed, 0 failed (`2.40s`)** — including 5 new regression tests in `frontend/src/utils/orderTicket.test.ts`.
+    - `npm --prefix frontend run build` (`tsc && vite build`): **1,999 modules transformed, 0 TypeScript errors (`23.10s`)**.
+  - **Exact Next Safe Step**: Commit & push frontend changes locally (`git add -A && git commit && git push origin main`), then deploy on live server (`cd /home/opc/StockAI && git pull origin main && docker compose build frontend && docker compose up -d --no-build --force-recreate frontend`; include `backend celery_worker celery_beat` if earlier backend changes were not yet rebuilt on the server).
+
 - **ADVANCED SECURITY HARDENING (HTTPONLY COOKIES, CSRF, REDIS REVOCATION & RATE LIMITING, FERNET DB ENCRYPTION, ZERO-LOCKOUT ADMIN TOTP MFA + OWNERSHIP TRANSFER, HARDENED CSP) & SENTINEL 100/100 + RESOLVE ALL (COMPLETE & VERIFIED - 2026-11-28):**
   - **1. Sentinel `100/100` Recovery & Admin `Resolve All` (`backend/services/sentinel.py`, `backend/api/admin.py`, `frontend/src/pages/AdminPage.tsx`)**:
     - Fixed Sentinel `get_health_summary()` deduction arithmetic (`statuses.count("DEGRADED") + statuses.count("WARNING")`), `_probe_broker()` DB `SystemSettings(key="fyers_access_token")` + `decrypt_secret()` lookup (in addition to `settings`/`env`/`MarketDataService`), and added `sync_security_health_after_resolve()` + `SentinelIncident` resolution inside `resolve_incident()` and `acknowledge_admin_alerts(action="RESOLVE")`.

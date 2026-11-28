@@ -1453,7 +1453,7 @@ export default function AlertsPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Target size={18} />
-                <span>Create Zerodha Kite GTT Trigger</span>
+                <span>Create GTT Trigger Order</span>
               </div>
               <button onClick={() => setShowGttSearchPrompt(false)} style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer' }}>
                 <X size={18} />
