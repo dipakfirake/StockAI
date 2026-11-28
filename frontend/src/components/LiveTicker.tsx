@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { marketApi } from '../services/api'
-import { isWebSocketSupportedOnHost } from '../services/websocket'
+import { isWebSocketSupportedOnHost, fetchWsTicketUrl } from '../services/websocket'
+import { useAuth } from '../AuthContext'
 import { NavLink } from 'react-router-dom'
 import { formatNumber2Dec } from '../utils/formatters'
 
@@ -55,6 +56,7 @@ export const isIndexMatch = (
 }
 
 export default function LiveTicker() {
+  const { user } = useAuth()
   const [nifty, setNifty] = useState<IndexData | null>(null)
   const [bankNifty, setBankNifty] = useState<IndexData | null>(null)
   const pollTimerRef = useRef<number | null>(null)
@@ -147,8 +149,7 @@ export default function LiveTicker() {
     }
 
     const scheduleReconnect = () => {
-      const token = localStorage.getItem('auth_token')
-      if (!isMounted || !token || !supportsWs) return
+      if (!isMounted || !user || !supportsWs) return
       if (reconnectTimerRef.current !== null) return
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = null
@@ -158,9 +159,8 @@ export default function LiveTicker() {
       }, 5000)
     }
 
-    const connectWebSocket = () => {
-      const token = localStorage.getItem('auth_token')
-      if (!isMounted || !token || !supportsWs) {
+    const connectWebSocket = async () => {
+      if (!isMounted || !user || !supportsWs) {
         startFallbackPolling()
         return
       }
@@ -180,9 +180,16 @@ export default function LiveTicker() {
         ws = null
       }
 
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = await fetchWsTicketUrl()
+      if (!isMounted) return
+      if (!wsUrl) {
+        startFallbackPolling()
+        scheduleReconnect()
+        return
+      }
+
       try {
-        ws = new WebSocket(`${protocol}//${window.location.host}/ws/?token=${token}`)
+        ws = new WebSocket(wsUrl)
 
         ws.onopen = () => {
           if (!isMounted) return
@@ -315,7 +322,7 @@ export default function LiveTicker() {
         } catch (_) {}
       }
     }
-  }, [])
+  }, [user?.id])
 
   // Symbol is passed via navigation STATE, not in the URL path
   const renderTicker = (data: IndexData | null, fallbackName: string, symbol: string) => {

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { authApi, preferencesApi } from './services/api';
+import { authApi, preferencesApi, setAdminStepUpToken } from './services/api';
 
 interface User {
   id: string;
@@ -7,6 +7,7 @@ interface User {
   name: string;
   subscription_tier: 'FREE' | 'PRO';
   is_admin?: boolean;
+  totp_enabled?: boolean;
   pro_status?: string;
   pro_requested_at?: string;
 }
@@ -62,12 +63,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [preferences, setPreferences] = useState<Record<string, any>>({});
 
   const loadUser = async () => {
-    const token = localStorage.getItem('auth_token');
-    if (!token) {
-      setUser(null);
-      localStorage.removeItem('auth_user_cache');
-      setLoading(false);
-      return;
+    // Purge legacy persisted JWT tokens from localStorage; auth uses HttpOnly cookies now
+    try {
+      localStorage.removeItem('auth_token');
+    } catch {
+      // ignore storage errors
     }
     try {
       const res = await authApi.me();
@@ -137,10 +137,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => window.removeEventListener('auth_session_expired', handleSessionExpired);
   }, []);
 
-  const login = async (token: string, userData?: User) => {
-    localStorage.setItem('auth_token', token);
+  const login = async (_token: string, userData?: User) => {
+    try {
+      localStorage.removeItem('auth_token');
+    } catch {
+      // ignore storage errors
+    }
+    setAdminStepUpToken(null);
     if (userData) {
-      // Instant hydration: user profile is already in the login response payload
+      // Instant hydration: user profile is already in the login response payload, HttpOnly cookie holds session JWT
       setUser(userData);
       try {
         localStorage.setItem('auth_user_cache', JSON.stringify(userData));
@@ -148,22 +153,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Ignore storage write issues
       }
       setLoading(false);
-      // Non-blocking background fetch for user preferences so login transitions immediately
       preferencesApi.get()
         .then(prefRes => setPreferences(prefRes.data ?? {}))
         .catch(() => {});
       return;
     }
-    // Fallback if userData was not provided
     await loadUser();
   };
 
   const logout = () => {
+    authApi.logout().catch(() => {});
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user_cache');
+    setAdminStepUpToken(null);
     setUser(null);
     setPreferences({});
-    // Seamless SPA navigation to /login without forcing a heavy page reload
     if (window.location.pathname !== '/login') {
       window.history.pushState({}, '', '/login');
       window.dispatchEvent(new PopStateEvent('popstate'));

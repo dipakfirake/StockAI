@@ -191,8 +191,36 @@ class SentinelService:
             return {"status": "DEGRADED", "active_workers": 0, "error": str(e)}
 
     async def _probe_broker(self) -> Dict[str, Any]:
-        token = os.getenv("FYERS_ACCESS_TOKEN", "").strip()
-        has_token = bool(token and token != "your_fyers_access_token_here")
+        from backend.core.config import settings as app_settings
+        from backend.core.encryption import decrypt_secret
+        from backend.services.market_data import MarketDataService
+
+        token = (
+            os.getenv("FYERS_ACCESS_TOKEN", "").strip()
+            or (getattr(app_settings, "FYERS_ACCESS_TOKEN", None) or "").strip()
+            or (getattr(MarketDataService, "_last_loaded_token", None) or "").strip()
+        )
+        if not token or token == "your_fyers_access_token_here":
+            try:
+                from backend.models.settings import SystemSettings
+                async with AsyncSessionLocal() as session:
+                    row = (
+                        await session.execute(
+                            select(SystemSettings).where(SystemSettings.key == "fyers_access_token")
+                        )
+                    ).scalar_one_or_none()
+                    if row and row.value:
+                        token = decrypt_secret(row.value).strip()
+            except Exception:
+                pass
+
+        has_token = bool(token and token != "your_fyers_access_token_here" and len(token) > 10)
+        if not has_token and getattr(MarketDataService, "_fyers_token_valid", False):
+            # Only trust valid health flag if feed isn't waiting on initial startup fallback
+            feed_state = MarketDataService.get_feed_status()
+            if feed_state.get("active_engine") == "PRIMARY_FYERS":
+                has_token = True
+
         if not has_token:
             await self._record_incident(
                 subsystem="BROKER_API",
@@ -404,11 +432,29 @@ class SentinelService:
         except Exception:
             pass
 
+    def sync_security_health_after_resolve(self, remaining_open_security: int = 0) -> None:
+        """Immediately restore security health status when Admin resolves open security/failure alerts."""
+        now = datetime.now(timezone.utc)
+        if remaining_open_security <= 0:
+            self._security_log_watermark = now
+            for inc in self._recent_incidents:
+                if inc.get("status") != "RESOLVED" and inc.get("subsystem") in ("SECURITY", "API_ENDPOINT"):
+                    inc["status"] = "RESOLVED"
+                    inc["resolved_at"] = now.isoformat()
+                    inc["resolved_by"] = "Admin"
+            self._subsystem_status["security"] = {
+                "status": "HEALTHY",
+                "threat_level": "LOW",
+                "last_check": now.isoformat(),
+                "checked_at": now.isoformat(),
+                "active_threats": 0,
+            }
+
     def get_health_summary(self) -> Dict[str, Any]:
         """Calculate aggregate system score (0-100) and subsystem matrix."""
         statuses = [s.get("status") for s in self._subsystem_status.values()]
         down_count = statuses.count("DOWN")
-        degraded_count = statuses.count("DEGRADED") or statuses.count("WARNING")
+        degraded_count = statuses.count("DEGRADED") + statuses.count("WARNING")
 
         score = 100
         if down_count > 0:
@@ -472,6 +518,13 @@ class SentinelService:
                         a_ev.is_seen = True
                         a_ev.is_read = True
                     await session.commit()
+            remaining_sec = sum(
+                1
+                for i in self._recent_incidents
+                if i.get("status") != "RESOLVED" and i.get("subsystem") in ("SECURITY", "API_ENDPOINT")
+            )
+            if remaining_sec == 0:
+                self.sync_security_health_after_resolve(0)
             return True
         except Exception:
             return found_in_memory

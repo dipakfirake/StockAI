@@ -107,18 +107,40 @@ When an algorithmic stock trading and research system is hosted on the public in
   - **Composite Risk Rating (0 to 100):** Requests scoring $\ge 70$ (CRITICAL) are automatically blocked with a CERT-In incident log emitted.
 
 
+### 2.9 HttpOnly Cookie Sessions, Double-Submit CSRF, Redis `jti` Revocation & WS Tickets (`backend/core/auth.py`, `backend/core/security_middleware.py`, `backend/api/auth.py`, `backend/api/websocket.py`)
+- Authentication routes (`/api/auth/login`, `/google`, `/mfa/verify-login`) set `stockai_access_token` (`HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS) and `stockai_csrf_token` cookies cleanly, removing persistent JWT storage from `localStorage`.
+- Unsafe cookie-authenticated requests (`POST`, `PUT`, `PATCH`, `DELETE`) without a Bearer `Authorization` header must supply a matching `X-CSRF-Token` header equal to `stockai_csrf_token`.
+- Explicit `/api/auth/logout` revokes the token's `jti` claim in Redis (`revoked_jti:<jti>`); `users.token_version` invalidates all prior sessions upon `/api/admin/users/{id}/revoke-sessions` or admin demotion (`set-admin`).
+- WebSocket handshakes obtain short-lived 45-second single-purpose tickets (`scope: "ws_ticket"`) from `POST /api/auth/ws-ticket` (`fetchWsTicketUrl()`).
+
+### 2.10 Zero-Lockout Admin Ownership Transfer, Phone TOTP MFA (`pyotp`) & Step-Up Re-Auth (`backend/core/totp_mfa.py`, `backend/api/admin.py`, `frontend/src/components/AdminStepUpModal.tsx`)
+- Supports offline RFC 6238 TOTP MFA (`pyotp` + `qrcode` SVG QR + 8 SHA-256 single-use recovery codes) with zero email delivery dependency.
+- Admin role management (`set-admin`) exposes `Make Admin` / `Revoke Admin` / `Revoke Sessions` in Admin Users while blocking self-demotion and last-admin removal.
+- Destructive admin & broker mutations require `X-Admin-StepUp-Token` / `X-Admin-TOTP` (`require_admin_stepup`, 10-min TTL) whenever `admin.totp_enabled` is enabled.
+
+### 2.11 Distributed Redis Rate Limiting & Brute-Force Lockouts (`backend/core/rate_limiter.py`, `backend/core/auth_security.py`)
+- Uses atomic Redis Lua token buckets (`rl:*`) with 50ms fail-fast connection timeout + identity-aware local fallback cooldown, plus Redis-backed distributed brute-force counters (`bf:fail:*` / `bf:lock:*`).
+
+### 2.12 Application-Layer Encrypted DB Secrets (`backend/core/encryption.py`, `backend/api/settings.py`)
+- Sensitive DB secrets (`fyers_access_token`, API secrets, and `users.totp_secret_encrypted`) are encrypted using Fernet (`enc:v1:`) derived from `SETTINGS_ENCRYPTION_KEY` (or `SECRET_KEY`), preserving zero-downtime compatibility for legacy plaintext records.
+
+### 2.13 Hardened Content-Security-Policy (`backend/core/security_middleware.py`)
+- Eliminated `'unsafe-eval'` globally and restricted Swagger UI `'unsafe-inline'` script allowances strictly to `/docs` and `/redoc`.
+
 ---
 
 ## 3. Verification & Test Evidence
 
-All cybersecurity protections were verified with dedicated automated tests:
+All cybersecurity protections were verified with automated tests (`test_cybersecurity.py`, `test_advanced_security_upgrades.py`, and regression suites):
 
 ```bash
-# Executed Test Command
-pytest backend/tests/test_cybersecurity.py
+# Executed Test Commands (2026-11-28)
+venv\Scripts\python.exe -m pytest backend\tests\test_advanced_security_upgrades.py backend\tests\test_cybersecurity.py backend\tests\test_security_fixes_and_alerts_hub.py ... -k "not suite_execution" -v
+npm --prefix frontend run lint && npm --prefix frontend run test -- --run && npm --prefix frontend run build
 ```
 
-### Results:
+### Key Results:
+- `backend/tests/test_advanced_security_upgrades.py`: **7/7 PASSED** (Fernet `enc:v1:` roundtrip & legacy plaintext compatibility; Sentinel 100/100 arithmetic & DB-encrypted Fyers probe; `Acknowledge` vs `Resolve All`; `HttpOnly` cookies, CSRF double-submit block/pass, `jti` Redis revocation, `token_version` session revocation & WS ticket; Zero-lockout admin ownership transfer, `pyotp` TOTP enrollment, offline SVG QR, single-use recovery codes & `X-Admin-StepUp-Token` re-auth; Redis Lua rate limiter & distributed lockout; WebSocket `/ws/?ticket=...` acceptance & revoked-`jti` rejection).
 - `test_token_bucket_consume_and_exhaust`: **PASSED** (Bucket depletes and enforces HTTP 429 when empty)
 - `test_token_bucket_refill`: **PASSED** (Tokens replenish at configured rate over time)
 - `test_rate_limiter_tier_mapping`: **PASSED** (Correct tier mapping for AUTH, TRADING, AI, GENERAL)
@@ -131,12 +153,13 @@ pytest backend/tests/test_cybersecurity.py
 - `test_brute_force_lockout`: **PASSED** (5 failed attempts locks IP/account for 15 min)
 - `test_security_audit_logger_redaction`: **PASSED** (Logs structured JSON and redacts passwords)
 
-### Full Regression Test Suite:
+### Full Regression Test Suite (2026-11-28):
 ```text
-======================= 43 passed, 1 warning in 17.56s ========================
+========= 102 passed, 1 deselected, 14 warnings in 186.36s (0:03:06) ==========
 ```
-- Frontend Lint: `npm run lint` -> **PASSED (0 errors)**
-- Frontend Production Build: `npm run build` -> **PASSED (49.07s)**
+- Frontend Lint: `npm --prefix frontend run lint` -> **PASSED (0 errors)**
+- Frontend Vitest: `npm --prefix frontend run test -- --run` -> **16 passed across 3 files (`urlSecurity.test.ts`, `api.test.ts`, `csrfAndStepUp.test.ts`)**
+- Frontend Production Build: `npm --prefix frontend run build` (`tsc && vite build`) -> **PASSED (`1,998` modules, `21.61s`)**
 
 ---
 

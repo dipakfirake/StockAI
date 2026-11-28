@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { marketApi, aiApi } from '../services/api'
-import { isWebSocketSupportedOnHost } from '../services/websocket'
+import { isWebSocketSupportedOnHost, fetchWsTicketUrl } from '../services/websocket'
+import { useAuth } from '../AuthContext'
 import { isIndexMatch } from '../components/LiveTicker'
 import { formatNumber2Dec, formatISTTimestamp, cleanBriefMarkdown } from '../utils/formatters'
 import { TrendingUp, TrendingDown, Minus, Activity, Globe, AlertCircle, RefreshCw } from 'lucide-react'
@@ -103,6 +104,7 @@ function AIScoreRing({ score, label }: { score: number; label: string }) {
 }
 
 export default function Dashboard() {
+  const { user } = useAuth()
   const [indices, setIndices] = useState<Index[]>([])
   const [regime, setRegime] = useState<RegimeData | null>(null)
   const [vix, setVix] = useState<VIXData | null>(null)
@@ -116,18 +118,18 @@ export default function Dashboard() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (!localStorage.getItem('auth_token')) {
+    if (!user) {
       navigate('/login')
       return
     }
     loadDashboard()
     const interval = setInterval(loadDashboard, 60000) // refresh every 60s
     return () => clearInterval(interval)
-  }, [navigate])
+  }, [navigate, user?.id])
 
   // Load AI morning brief once
   useEffect(() => {
-    if (!localStorage.getItem('auth_token')) return
+    if (!user) return
     async function fetchBrief() {
       try {
         const res = await aiApi.chat('Give me a 2-sentence market morning brief for Indian NSE markets today. Be concise, data-driven, and mention the key trend.', undefined)
@@ -137,10 +139,10 @@ export default function Dashboard() {
       }
     }
     fetchBrief()
-  }, [])
+  }, [user?.id])
 
   async function loadDashboard(manual = false) {
-    if (!localStorage.getItem('auth_token')) return
+    if (!user) return
     if (manual) setRefreshing(true)
     try {
       const [indicesRes, regimeRes, vixRes, eventsRes, sectorsRes] = await Promise.allSettled([
@@ -167,17 +169,13 @@ export default function Dashboard() {
 
   // Real-time tick updates for indices via WebSocket (when supported)
   useEffect(() => {
-    if (indices.length === 0 || !isWebSocketSupportedOnHost()) return
-
-    const token = localStorage.getItem('auth_token')
-    if (!token) return
+    if (indices.length === 0 || !isWebSocketSupportedOnHost() || !user) return
 
     let isMounted = true
     let ws: WebSocket | null = null
 
     const scheduleReconnect = () => {
-      const currentToken = localStorage.getItem('auth_token')
-      if (!isMounted || !currentToken || !isWebSocketSupportedOnHost()) return
+      if (!isMounted || !user || !isWebSocketSupportedOnHost()) return
       if (reconnectTimerRef.current !== null) return
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = null
@@ -187,9 +185,8 @@ export default function Dashboard() {
       }, 5000)
     }
 
-    const connectWebSocket = () => {
-      const currentToken = localStorage.getItem('auth_token')
-      if (!isMounted || !currentToken || !isWebSocketSupportedOnHost()) return
+    const connectWebSocket = async () => {
+      if (!isMounted || !user || !isWebSocketSupportedOnHost()) return
 
       if (ws) {
         ws.onopen = null
@@ -200,9 +197,15 @@ export default function Dashboard() {
         ws = null
       }
 
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = await fetchWsTicketUrl()
+      if (!isMounted) return
+      if (!wsUrl) {
+        scheduleReconnect()
+        return
+      }
+
       try {
-        ws = new WebSocket(`${protocol}//${window.location.host}/ws/?token=${currentToken}`)
+        ws = new WebSocket(wsUrl)
 
         ws.onopen = () => {
           if (!isMounted) return
@@ -302,7 +305,7 @@ export default function Dashboard() {
         } catch (_) {}
       }
     }
-  }, [indices.length]) // Only re-run if number of indices changes
+  }, [indices.length, user?.id])
 
 
   const RegimeIcon = regime?.regime === 'BULLISH' ? TrendingUp : regime?.regime === 'BEARISH' ? TrendingDown : Minus

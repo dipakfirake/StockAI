@@ -695,8 +695,11 @@ class MarketDataService:
                     try:
                         fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
                         fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
-                        cid = fyers_client_obj.value.strip() if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3 else None
-                        tok = fyers_token_obj.value.strip() if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10 else None
+                        from backend.core.encryption import decrypt_secret
+                        raw_cid = decrypt_secret(fyers_client_obj.value).strip() if fyers_client_obj and fyers_client_obj.value else ""
+                        raw_tok = decrypt_secret(fyers_token_obj.value).strip() if fyers_token_obj and fyers_token_obj.value else ""
+                        cid = raw_cid if len(raw_cid) > 3 else None
+                        tok = raw_tok if len(raw_tok) > 10 else None
                         return cid, tok
                     finally:
                         await asyncio.shield(db.close())
@@ -806,11 +809,15 @@ class MarketDataService:
             try:
                 fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
                 fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
-                
-                if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
-                    client_id = fyers_client_obj.value.strip()
-                if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10:
-                    access_token = fyers_token_obj.value.strip()
+                from backend.core.encryption import decrypt_secret
+                if fyers_client_obj and fyers_client_obj.value:
+                    dec_cid = decrypt_secret(fyers_client_obj.value).strip()
+                    if len(dec_cid) > 3:
+                        client_id = dec_cid
+                if fyers_token_obj and fyers_token_obj.value:
+                    dec_tok = decrypt_secret(fyers_token_obj.value).strip()
+                    if len(dec_tok) > 10:
+                        access_token = dec_tok
             finally:
                 await asyncio.shield(db.close())
 

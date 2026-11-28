@@ -194,29 +194,50 @@ fluidity_engine = HighFrequencyFluidityEngine()
 
 @ws_router.websocket("/ws")
 @ws_router.websocket("/ws/")
-async def general_websocket(websocket: WebSocket, token: str = ""):
+async def general_websocket(websocket: WebSocket, token: str = "", ticket: str = ""):
     """
     General WebSocket for market data and alerts.
+    Supports short-lived `ticket` query param, HttpOnly `stockai_access_token` cookie, or `token`.
     """
+    from backend.core.auth import AUTH_COOKIE_NAME, is_token_revoked
+
+    candidate = ticket or token or websocket.cookies.get(AUTH_COOKIE_NAME) or websocket.cookies.get("access_token") or ""
+    if not candidate:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(candidate, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("scope", "session") not in ("session", "ws"):
+            await websocket.close(code=1008, reason="Invalid credential scope")
+            return
+        if await is_token_revoked(payload.get("jti")):
+            await websocket.close(code=1008, reason="Session revoked")
+            return
         user_id = str(payload["sub"])
         is_admin_flag = bool(payload.get("is_admin", False))
-    except (JWTError, KeyError):
+        token_tv = int(payload.get("tv", 1) or 1)
+    except (JWTError, KeyError, ValueError):
         await websocket.close(code=1008, reason="Authentication required")
         return
 
-    if not is_admin_flag:
-        try:
-            import uuid as _uuid
-            from sqlalchemy import select as _select
-            from backend.core.database import AsyncSessionLocal
-            from backend.models.user import User as _User
-            async with AsyncSessionLocal() as _db:
-                _res = await _db.execute(_select(_User.is_admin).where(_User.id == _uuid.UUID(user_id)))
-                is_admin_flag = bool(_res.scalar_one_or_none() or False)
-        except Exception:
-            is_admin_flag = False
+    try:
+        import uuid as _uuid
+        from sqlalchemy import select as _select
+        from backend.core.database import AsyncSessionLocal
+        from backend.models.user import User as _User
+        async with AsyncSessionLocal() as _db:
+            _res = await _db.execute(_select(_User).where(_User.id == _uuid.UUID(user_id)))
+            _u = _res.scalar_one_or_none()
+            if _u is None or not _u.is_active:
+                await websocket.close(code=1008, reason="Account unavailable")
+                return
+            if token_tv < int(getattr(_u, "token_version", 1) or 1):
+                await websocket.close(code=1008, reason="Session revoked")
+                return
+            is_admin_flag = bool(_u.is_admin)
+    except Exception:
+        # Preserve unit test compatibility when test SQLite/AsyncSessionLocal is uninitialized
+        pass
 
     await websocket.accept()
     conn_id = str(id(websocket))

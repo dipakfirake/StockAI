@@ -41,8 +41,8 @@ export default function ProtectedRoute({ children, adminOnly = false }: Protecte
     );
   }
 
-  // If neither memory user nor localStorage auth token exists, redirect cleanly to login
-  if (!user && !localStorage.getItem('auth_token')) {
+  // If user session is absent (HttpOnly cookie failed / not authenticated), redirect cleanly to login
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 

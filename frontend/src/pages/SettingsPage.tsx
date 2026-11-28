@@ -14,6 +14,7 @@ import {
 import { Link } from 'react-router-dom'
 import { settingsApi } from '../services/api'
 import { useAuth } from '../AuthContext'
+import AdminStepUpModal from '../components/AdminStepUpModal'
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -22,6 +23,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [stepUpOpen, setStepUpOpen] = useState(false)
 
   useEffect(() => {
     fetchSettings()
@@ -47,7 +49,12 @@ export default function SettingsPage() {
       setSettings(res.data)
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
-    } catch (err) {
+    } catch (err: any) {
+      const detail = String(err?.response?.data?.detail || '').toLowerCase()
+      if (err?.response?.status === 403 && (err?.response?.headers?.['x-stepup-required'] === 'totp' || detail.includes('step-up'))) {
+        setStepUpOpen(true)
+        return
+      }
       console.error('Failed to save settings:', err)
     } finally {
       setLoading(false)
@@ -459,6 +466,16 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+
+      <AdminStepUpModal
+        open={stepUpOpen}
+        title="Verify Authenticator to Save Settings"
+        onCancel={() => setStepUpOpen(false)}
+        onVerified={() => {
+          setStepUpOpen(false)
+          saveSettings()
+        }}
+      />
     </div>
   )
 }

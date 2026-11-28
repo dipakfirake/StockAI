@@ -5,7 +5,7 @@ import secrets
 import httpx
 from typing import Optional, Tuple, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -14,11 +14,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.database import get_db
 from backend.core.config import settings
 from backend.core.logging_config import get_logger
-from backend.core.auth import verify_password, hash_password, create_access_token, get_current_user, oauth2_scheme
+from backend.core.auth import (
+    AUTH_COOKIE_NAME,
+    CSRF_COOKIE_NAME,
+    verify_password,
+    hash_password,
+    create_access_token,
+    get_current_user,
+    oauth2_scheme,
+    oauth2_scheme_optional,
+    extract_request_jwt,
+    revoke_token_jti,
+    is_token_revoked,
+    invalidate_user_auth_cache,
+    create_mfa_challenge_token,
+    decode_mfa_challenge_token,
+    create_ws_ticket,
+)
 from backend.core.auth_security import validate_password_strength, brute_force_protector, validate_email_syntax, sanitize_display_name
 from backend.core.audit_logger import log_security_event
 from backend.core.email_intelligence import validate_email_for_registration, canonicalize_email
 from backend.core.fraud_detection import fraud_detection_engine
+from backend.core.encryption import decrypt_secret
+from backend.core.totp_mfa import verify_totp_code, consume_recovery_code
 from backend.services.email_service import email_otp_service
 from backend.models.user import User
 
@@ -60,6 +78,52 @@ class ClientTelemetryRequest(BaseModel):
     lon: Optional[float] = None
     screen_resolution: Optional[str] = None
     consent_version: Optional[str] = None
+
+
+class MfaVerifyLoginRequest(BaseModel):
+    challenge_token: str
+    code: str
+
+
+def _attach_auth_cookies(response: Response, req: Request, token: str) -> None:
+    """Attach HttpOnly session JWT + double-submit CSRF cookie cleanly across HTTP dev and HTTPS prod."""
+    is_https = (
+        getattr(req.url, "scheme", "") == "https"
+        or req.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower() == "https"
+    )
+    max_age = max(300, int(settings.ACCESS_TOKEN_EXPIRE_MINUTES) * 60)
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=is_https,
+        path="/",
+        max_age=max_age,
+    )
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=secrets.token_urlsafe(24),
+        httponly=False,
+        samesite="lax",
+        secure=is_https,
+        path="/",
+        max_age=max_age,
+    )
+
+
+def _build_user_payload(user: User) -> dict:
+    is_admin = bool(user.is_admin)
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "subscription_tier": "PRO" if is_admin else user.subscription_tier,
+        "is_admin": is_admin,
+        "totp_enabled": bool(getattr(user, "totp_enabled", False)),
+        "pro_status": "APPROVED" if is_admin else (user.pro_status or "NONE"),
+        "pro_requested_at": user.pro_requested_at.isoformat() if user.pro_requested_at else None,
+    }
 
 
 def _get_client_ip(request: Request) -> str:
@@ -172,7 +236,7 @@ async def send_registration_otp(request: SendOtpRequest, req: Request, db: Async
 
 
 @router.post("/verify-registration-otp")
-async def verify_registration_otp(request: VerifyOtpRequest, req: Request, db: AsyncSession = Depends(get_db)):
+async def verify_registration_otp(request: VerifyOtpRequest, req: Request, response: Response, db: AsyncSession = Depends(get_db)):
     """
     Verifies 6-digit OTP code. Upon successful verification, creates the user account
     in PostgreSQL and returns the authentication token and user profile.
@@ -220,7 +284,8 @@ async def verify_registration_otp(request: VerifyOtpRequest, req: Request, db: A
     db.add(new_user)
     await db.flush()
 
-    token = create_access_token({"sub": str(new_user.id)})
+    token = create_access_token({"sub": str(new_user.id)}, token_version=int(getattr(new_user, "token_version", 1) or 1))
+    _attach_auth_cookies(response, req, token)
     log_security_event(
         event_type="AUTH_REGISTER_OTP_SUCCESS",
         severity="INFO",
@@ -229,19 +294,10 @@ async def verify_registration_otp(request: VerifyOtpRequest, req: Request, db: A
         details={"email": new_user.email, "canonical": canonical},
     )
 
-    user_payload = {
-        "id": str(new_user.id),
-        "email": new_user.email,
-        "name": new_user.name,
-        "subscription_tier": new_user.subscription_tier,
-        "is_admin": is_admin,
-        "pro_status": new_user.pro_status,
-        "pro_requested_at": None,
-    }
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": user_payload
+        "user": _build_user_payload(new_user),
     }
 
 
@@ -260,7 +316,7 @@ async def verify_google_id_token(cred: str) -> dict:
 
 
 @router.post("/google")
-async def google_auth(request: GoogleAuthRequest, req: Request, db: AsyncSession = Depends(get_db)):
+async def google_auth(request: GoogleAuthRequest, req: Request, response: Response, db: AsyncSession = Depends(get_db)):
     """
     Verifies Google OAuth2 ID token, automatically registering or logging in real users.
     100% Free: uses Google tokeninfo cryptographic endpoint directly.
@@ -327,26 +383,26 @@ async def google_auth(request: GoogleAuthRequest, req: Request, db: AsyncSession
             details={"email": user.email},
         )
 
-    token = create_access_token({"sub": str(user.id)})
-    user_is_admin = bool(user.is_admin)
+    if bool(getattr(user, "totp_enabled", False)) and getattr(user, "totp_secret_encrypted", None):
+        return {
+            "mfa_required": True,
+            "mfa_challenge_token": create_mfa_challenge_token(str(user.id)),
+            "token_type": "mfa",
+            "user_preview": {"email": user.email, "name": user.name},
+        }
+
+    token = create_access_token({"sub": str(user.id)}, token_version=int(getattr(user, "token_version", 1) or 1))
+    _attach_auth_cookies(response, req, token)
 
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "name": user.name,
-            "subscription_tier": "PRO" if user_is_admin else user.subscription_tier,
-            "is_admin": user_is_admin,
-            "pro_status": "APPROVED" if user_is_admin else (user.pro_status or "NONE"),
-            "pro_requested_at": user.pro_requested_at.isoformat() if user.pro_requested_at else None,
-        }
+        "user": _build_user_payload(user),
     }
 
 
 @router.post("/register", response_model=RegisterResponse)
-async def register(request: RegisterRequest, req: Request, db: AsyncSession = Depends(get_db)):
+async def register(request: RegisterRequest, req: Request, response: Response, db: AsyncSession = Depends(get_db)):
     """Register a new user with password strength validation and Anti-Temp-Mail defense."""
     client_ip = _get_client_ip(req)
 
@@ -406,7 +462,8 @@ async def register(request: RegisterRequest, req: Request, db: AsyncSession = De
     db.add(user)
     await db.flush()
 
-    token = create_access_token({"sub": str(user.id)})
+    token = create_access_token({"sub": str(user.id)}, token_version=int(getattr(user, "token_version", 1) or 1))
+    _attach_auth_cookies(response, req, token)
     log_security_event(
         event_type="AUTH_REGISTER_SUCCESS",
         severity="INFO",
@@ -420,10 +477,11 @@ async def register(request: RegisterRequest, req: Request, db: AsyncSession = De
 @router.post("/login")
 async def login(
     req: Request,
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Login with brute-force lockout protection and security auditing."""
+    """Login with distributed brute-force lockout protection, TOTP MFA challenge, and HttpOnly cookies."""
     client_ip = _get_client_ip(req)
     username = form_data.username.lower().strip()
 
@@ -432,14 +490,14 @@ async def login(
     if len(form_data.password) > 128:
         raise HTTPException(status_code=400, detail="Password length exceeds maximum allowable limit.")
 
-    # Check brute-force lockout
-    brute_force_protector.check_lockout(client_ip, username)
+    # Check distributed brute-force lockout
+    await brute_force_protector.check_lockout_async(client_ip, username)
 
     result = await db.execute(select(User).where(User.email == username))
     user = result.scalar_one_or_none()
 
     if not user:
-        brute_force_protector.record_failure(client_ip, username)
+        await brute_force_protector.record_failure_async(client_ip, username)
         is_stuffing, stuffing_reason = fraud_detection_engine.record_failed_attempt(client_ip, username)
         log_security_event(
             event_type="AUTH_CREDENTIAL_STUFFING_ALERT" if is_stuffing else "AUTH_LOGIN_FAILED",
@@ -456,7 +514,7 @@ async def login(
     # Offload CPU-intensive bcrypt to thread pool so async event loop never blocks
     is_valid = await asyncio.to_thread(verify_password, form_data.password, user.hashed_password)
     if not is_valid:
-        brute_force_protector.record_failure(client_ip, username)
+        await brute_force_protector.record_failure_async(client_ip, username)
         is_stuffing, stuffing_reason = fraud_detection_engine.record_failed_attempt(client_ip, username)
         log_security_event(
             event_type="AUTH_CREDENTIAL_STUFFING_ALERT" if is_stuffing else "AUTH_LOGIN_FAILED",
@@ -511,8 +569,26 @@ async def login(
         )
 
     # Record success and reset failed attempts
-    brute_force_protector.record_success(client_ip, username)
-    token = create_access_token({"sub": str(user.id)})
+    await brute_force_protector.record_success_async(client_ip, username)
+
+    # Gate MFA-enabled accounts behind a short-lived signed TOTP challenge
+    if bool(getattr(user, "totp_enabled", False)) and getattr(user, "totp_secret_encrypted", None):
+        log_security_event(
+            event_type="AUTH_MFA_CHALLENGE_ISSUED",
+            severity="INFO",
+            ip_address=client_ip,
+            user_id=str(user.id),
+            details={"email": username},
+        )
+        return {
+            "mfa_required": True,
+            "mfa_challenge_token": create_mfa_challenge_token(str(user.id)),
+            "token_type": "mfa",
+            "user_preview": {"email": user.email, "name": user.name},
+        }
+
+    token = create_access_token({"sub": str(user.id)}, token_version=int(getattr(user, "token_version", 1) or 1))
+    _attach_auth_cookies(response, req, token)
 
     log_security_event(
         event_type="AUTH_LOGIN_SUCCESS",
@@ -522,38 +598,117 @@ async def login(
         details={"email": username, "risk_level": fraud_eval.risk_level},
     )
 
-    is_admin = bool(user.is_admin)
-    user_payload = {
-        "id": str(user.id),
-        "email": user.email,
-        "name": user.name,
-        "subscription_tier": "PRO" if is_admin else user.subscription_tier,
-        "is_admin": is_admin,
-        "pro_status": "APPROVED" if is_admin else (user.pro_status or "NONE"),
-        "pro_requested_at": user.pro_requested_at.isoformat() if user.pro_requested_at else None,
-    }
-
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": user_payload,
+        "user": _build_user_payload(user),
     }
 
+
+@router.post("/mfa/verify-login")
+async def verify_mfa_login(
+    payload: MfaVerifyLoginRequest,
+    req: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Complete password/Google login when Admin TOTP MFA is enabled on the account."""
+    client_ip = _get_client_ip(req)
+    user_id = decode_mfa_challenge_token(payload.challenge_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="MFA challenge expired or invalid. Please sign in again.")
+
+    lock_key = f"mfa:{user_id}"
+    await brute_force_protector.check_lockout_async(client_ip, lock_key)
+
+    result = await db.execute(select(User).where(User.id == uuid.UUID(str(user_id))))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Account unavailable.")
+
+    secret = decrypt_secret(getattr(user, "totp_secret_encrypted", None))
+    is_totp_ok = verify_totp_code(secret, payload.code)
+    used_recovery = False
+    if not is_totp_ok:
+        used_recovery, updated_hashes = consume_recovery_code(
+            getattr(user, "totp_recovery_hashes", None), payload.code
+        )
+        if used_recovery:
+            user.totp_recovery_hashes = updated_hashes
+            db.add(user)
+            await db.commit()
+
+    if not is_totp_ok and not used_recovery:
+        await brute_force_protector.record_failure_async(client_ip, lock_key)
+        log_security_event(
+            event_type="AUTH_MFA_FAILED",
+            severity="WARNING",
+            ip_address=client_ip,
+            user_id=str(user.id),
+            details={"email": user.email},
+        )
+        raise HTTPException(status_code=401, detail="Invalid 6-digit authenticator or recovery code.")
+
+    await brute_force_protector.record_success_async(client_ip, lock_key)
+    token = create_access_token({"sub": str(user.id)}, token_version=int(getattr(user, "token_version", 1) or 1))
+    _attach_auth_cookies(response, req, token)
+    log_security_event(
+        event_type="AUTH_MFA_RECOVERY_CODE_USED" if used_recovery else "AUTH_MFA_LOGIN_SUCCESS",
+        severity="WARNING" if used_recovery else "INFO",
+        ip_address=client_ip,
+        user_id=str(user.id),
+        details={"email": user.email},
+    )
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _build_user_payload(user),
+    }
+
+
+@router.post("/logout")
+async def logout(
+    req: Request,
+    response: Response,
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+):
+    """Revoke active JWT ID in Redis and clear HttpOnly auth & CSRF cookies cleanly."""
+    from jose import jwt as _jwt
+    jwt_token = extract_request_jwt(req, token)
+    if jwt_token:
+        try:
+            claims = _jwt.decode(jwt_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            await revoke_token_jti(claims.get("jti"), claims.get("exp"))
+            if claims.get("sub"):
+                invalidate_user_auth_cache(claims.get("sub"))
+            log_security_event(
+                event_type="AUTH_LOGOUT",
+                severity="INFO",
+                ip_address=_get_client_ip(req),
+                user_id=str(claims.get("sub") or ""),
+            )
+        except Exception:
+            pass
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+    response.delete_cookie(key=CSRF_COOKIE_NAME, path="/")
+    return {"status": "logged_out"}
+
+
+@router.post("/ws-ticket")
+async def issue_ws_ticket(current_user: User = Depends(get_current_user)):
+    """Issue a short-lived 45-second single-purpose ticket for authenticated WebSocket handshakes."""
+    ticket = create_ws_ticket(
+        current_user.id,
+        bool(getattr(current_user, "is_admin", False)),
+        int(getattr(current_user, "token_version", 1) or 1),
+    )
+    return {"ws_ticket": ticket, "expires_in": 45}
 
 
 @router.get("/me")
 async def get_me(current_user: User = Depends(get_current_user)):
-    """Get current user profile with role and pro status."""
-    is_admin = bool(current_user.is_admin)
-    return {
-        "id": str(current_user.id),
-        "email": current_user.email,
-        "name": current_user.name,
-        "subscription_tier": "PRO" if is_admin else current_user.subscription_tier,
-        "is_admin": is_admin,
-        "pro_status": "APPROVED" if is_admin else (current_user.pro_status or "NONE"),
-        "pro_requested_at": current_user.pro_requested_at.isoformat() if current_user.pro_requested_at else None,
-    }
+    """Get current user profile with role, MFA state, and pro status."""
+    return _build_user_payload(current_user)
 
 
 @router.post("/upgrade")
@@ -569,16 +724,21 @@ async def upgrade_tier(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/ping")
-async def ping_auth(token: str = Depends(oauth2_scheme)):
+async def ping_auth(req: Request, token: Optional[str] = Depends(oauth2_scheme_optional)):
     """
-    Ultra-lightweight JWT validation endpoint.
-    Returns minimal user info from token claims without any DB query.
-    Used for silent session heartbeat without burdening the DB pool.
+    Ultra-lightweight JWT validation endpoint supporting Bearer header or HttpOnly cookie.
     """
     from jose import JWTError, jwt
     from backend.core.config import settings
+    jwt_token = extract_request_jwt(req, token)
+    if not jwt_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(jwt_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("scope", "session") != "session":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token scope")
+        if await is_token_revoked(payload.get("jti")):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")

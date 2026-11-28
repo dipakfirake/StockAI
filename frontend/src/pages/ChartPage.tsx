@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate, useLocation, useParams, Link } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, HistogramData, LineData } from 'lightweight-charts'
 import { stocksApi, aiApi, swingAuditApi } from '../services/api'
-import { isWebSocketSupportedOnHost } from '../services/websocket'
+import { isWebSocketSupportedOnHost, fetchWsTicketUrl } from '../services/websocket'
 import { Search, TrendingUp, BarChart2, Activity, ListFilter, Lock, Play, Pencil, Zap, ShoppingCart, Scale, FastForward, Clock, Download, Info, FileSpreadsheet, CheckCircle2, AlignJustify, ChevronDown } from 'lucide-react'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
@@ -1239,8 +1239,7 @@ export default function ChartPage() {
     let isMounted = true
 
     const scheduleReconnect = () => {
-      const token = localStorage.getItem('auth_token')
-      if (!token || !isWebSocketSupportedOnHost() || !isMounted) return
+      if (!user || !isWebSocketSupportedOnHost() || !isMounted) return
       if (reconnectTimerRef.current !== null) return
 
       reconnectAttemptsRef.current += 1
@@ -1252,9 +1251,8 @@ export default function ChartPage() {
       }, delay)
     }
 
-    const connectWebSocket = () => {
-      const token = localStorage.getItem('auth_token')
-      if (!token || !isMounted) return
+    const connectWebSocket = async () => {
+      if (!user || !isMounted) return
 
       if (wsRef.current) {
         const socket = wsRef.current
@@ -1271,9 +1269,15 @@ export default function ChartPage() {
         wsRef.current = null
       }
 
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = await fetchWsTicketUrl()
+      if (!isMounted) return
+      if (!wsUrl) {
+        scheduleReconnect()
+        return
+      }
+
       try {
-        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/?token=${token}`)
+        const ws = new WebSocket(wsUrl)
         wsRef.current = ws
 
         ws.onopen = () => {
@@ -1413,7 +1417,7 @@ export default function ChartPage() {
       }
       isWsConnectedRef.current = false
     }
-  }, [symbol])
+  }, [symbol, user?.id])
 
 
   function handleSearch(e: React.FormEvent) {

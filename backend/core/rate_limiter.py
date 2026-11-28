@@ -10,6 +10,8 @@ Implements token bucket algorithm with:
 - Disconnect-safe middleware handling (catches Starlette BaseHTTPMiddleware client disconnects)
 """
 
+import asyncio
+import hashlib
 import time
 import threading
 from typing import Dict, Tuple, Optional
@@ -19,6 +21,45 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from backend.core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+_REDIS_TOKEN_BUCKET_LUA = """
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local refill_rate = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local cost = tonumber(ARGV[4])
+local ttl = tonumber(ARGV[5])
+
+local data = redis.call('HMGET', key, 'tokens', 'ts')
+local tokens = tonumber(data[1])
+local ts = tonumber(data[2])
+if tokens == nil or ts == nil then
+    tokens = capacity
+    ts = now
+else
+    local elapsed = math.max(0, now - ts)
+    tokens = math.min(capacity, tokens + elapsed * refill_rate)
+    ts = now
+end
+
+local allowed = 0
+local wait_time = 0
+if tokens >= cost then
+    tokens = tokens - cost
+    allowed = 1
+else
+    local needed = cost - tokens
+    if refill_rate > 0 then
+        wait_time = needed / refill_rate
+    else
+        wait_time = 60
+    end
+end
+
+redis.call('HSET', key, 'tokens', tostring(tokens), 'ts', tostring(ts))
+redis.call('EXPIRE', key, ttl)
+return {allowed, tostring(tokens), tostring(wait_time)}
+"""
 
 
 class RateLimitTier:
@@ -79,6 +120,8 @@ class TokenBucketRateLimiter:
         self._last_cleanup = time.time()
         self.cleanup_interval = 600  # Clean idle buckets every 10 min
         self.bucket_ttl = 900        # Expire buckets unused for 15 min
+        self._redis_down_until = 0.0
+        self._last_get_redis_ref = None
 
     def _get_client_ip(self, request: Request) -> str:
         """Extract trusted client IP address."""
@@ -121,31 +164,73 @@ class TokenBucketRateLimiter:
         tier = TIERS[tier_key]
         client_ip = self._get_client_ip(request)
 
-        # Check for Authorization token to limit per-user if present
+        # Check for Authorization Bearer token or HttpOnly session cookie (deterministic SHA-256 key)
         auth_header = request.headers.get("Authorization", "")
+        cookies = getattr(request, "cookies", None) or {}
+        cookie_tok = cookies.get("stockai_access_token") if isinstance(cookies, dict) or hasattr(cookies, "get") else None
         client_key = f"{tier_key}:{client_ip}"
-        if auth_header.startswith("Bearer "):
-            # Hash or truncate token to form a stable key without leaking raw token
-            token_fingerprint = str(hash(auth_header))
-            client_key = f"{tier_key}:user:{token_fingerprint[:16]}"
+        identity_secret = auth_header if auth_header.startswith("Bearer ") else (f"cookie:{cookie_tok}" if cookie_tok else "")
+        if identity_secret:
+            token_fingerprint = hashlib.sha256(identity_secret.encode("utf-8")).hexdigest()[:16]
+            client_key = f"{tier_key}:user:{token_fingerprint}"
 
-        with self._lock:
-            # Periodic cleanup of idle buckets to avoid memory leaks
-            now_wall = time.time()
-            if now_wall - self._last_cleanup > self.cleanup_interval:
-                stale_keys = [
-                    k for k, b in self._buckets.items()
-                    if now_wall - b.last_accessed > self.bucket_ttl
-                ]
-                for k in stale_keys:
-                    del self._buckets[k]
-                self._last_cleanup = now_wall
+        # Prefer atomic distributed Redis token bucket across workers; seamlessly fall back to local memory
+        used_redis = False
+        allowed = True
+        remaining = float(tier.capacity)
+        wait_time = 0.0
+        try:
+            from backend.core.cache import get_redis
 
-            if client_key not in self._buckets:
-                self._buckets[client_key] = TokenBucket(tier.capacity, tier.refill_rate)
+            now_mono = time.monotonic()
+            if not (now_mono < self._redis_down_until and self._last_get_redis_ref is get_redis):
+                async def _redis_consume():
+                    r = await get_redis()
+                    return await r.eval(
+                        _REDIS_TOKEN_BUCKET_LUA,
+                        1,
+                        f"rl:{client_key}",
+                        str(tier.capacity),
+                        str(tier.refill_rate),
+                        str(time.time()),
+                        "1.0",
+                        str(self.bucket_ttl),
+                    )
 
-            bucket = self._buckets[client_key]
-            allowed, remaining, wait_time = bucket.consume(1.0)
+                try:
+                    res = await asyncio.wait_for(_redis_consume(), timeout=0.05)
+                    if res and len(res) >= 3:
+                        self._redis_down_until = 0.0
+                        self._last_get_redis_ref = get_redis
+                        allowed = bool(int(res[0]))
+                        remaining = float(res[1])
+                        wait_time = float(res[2])
+                        used_redis = True
+                except Exception:
+                    self._last_get_redis_ref = get_redis
+                    self._redis_down_until = time.monotonic() + 5.0
+                    used_redis = False
+        except Exception:
+            used_redis = False
+
+        if not used_redis:
+            with self._lock:
+                # Periodic cleanup of idle buckets to avoid memory leaks
+                now_wall = time.time()
+                if now_wall - self._last_cleanup > self.cleanup_interval:
+                    stale_keys = [
+                        k for k, b in self._buckets.items()
+                        if now_wall - b.last_accessed > self.bucket_ttl
+                    ]
+                    for k in stale_keys:
+                        del self._buckets[k]
+                    self._last_cleanup = now_wall
+
+                if client_key not in self._buckets:
+                    self._buckets[client_key] = TokenBucket(tier.capacity, tier.refill_rate)
+
+                bucket = self._buckets[client_key]
+                allowed, remaining, wait_time = bucket.consume(1.0)
 
         headers = {
             "X-RateLimit-Limit": str(tier.capacity),

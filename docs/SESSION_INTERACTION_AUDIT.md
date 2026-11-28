@@ -5926,3 +5926,30 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Live Chrome DevTools (`http://127.0.0.1:5173`): `/admin?tab=threats` redirected cleanly to `/login` (`search === ""`), `/login?redirect=/admin&expired=1` scrubbed cleanly to `/login` with expired alert rendered, `/pricing` confirmed `390x844` mobile & `1440x900` desktop `0px` horizontal overflow and Lighthouse Mobile 100 Accessibility/Best Practices/SEO.
 - **Next Safe Step:**
   - Review optional Part 3 advanced security proposals (HttpOnly cookie JWT + CSRF, Admin TOTP 2FA, Redis-backed distributed rate limiting, encrypted-at-rest DB Fyers credentials, nonce CSP) if desired; commit/push and rebuild `backend`, `worker`, `beat`, and `frontend` on the live server using the provided commands.
+
+
+---
+
+### Session Entry 104
+- **Timestamp:** 2026-11-28 16:01:00 IST (10:31:00 UTC)
+- **User Prompt:**
+  `"yes you can go further for it . and i clicked on 1 resolved and acknowledge what happens with this and are you solved all warnings ang critical issues from threats and logs in admin control and what happens when we click acknowledge and resolve in it and do one thing for now click resolve if all warnings till now resolved and why sentinel health score is 90/100 now also fix that also. Admin Hardware / TOTP MFA (pyotp) & Re-Authentication ... and what is it you given as for now i have not access to the admins email and in this system i didnt signed my own personal email as admin here so what to do here. because totp goes on that mail of admin and it actually doesnt exixt or it can have to be with another person so what to do next?"`
+- **Root Causes Diagnosed & Remediated:**
+  1. **Sentinel Health Stuck at `90/100` & Admin Resolve All (`backend/services/sentinel.py`, `backend/api/admin.py`, `frontend/src/pages/AdminPage.tsx`)**:
+     - `_probe_broker()` checked `os.getenv("FYERS_ACCESS_TOKEN")` rather than encrypted DB `SystemSettings(key="fyers_access_token")`; `get_health_summary()` used `statuses.count("DEGRADED") or statuses.count("WARNING")`; `acknowledge_admin_alerts` (`RESOLVE`) did not close `SentinelIncident` rows or clear Sentinel security warning state.
+     - Fixed all three, exposed **`Resolve All`** button (`acknowledge_admin_alerts(action="RESOLVE", mark_all=True)`), dynamic Sentinel card colors, and Acknowledge vs Resolve explanation caption in [AdminPage.tsx](file:///d:/Stock%20Prediction%20System/frontend/src/pages/AdminPage.tsx).
+  2. **`HttpOnly` Cookie JWT Session, Double-Submit CSRF, Redis `jti` Revocation & Ephemeral WS Tickets (`backend/core/auth.py`, `backend/core/security_middleware.py`, `backend/api/auth.py`, `backend/api/websocket.py`, `frontend/src/*`)**:
+     - Replaced `localStorage.getItem('auth_token')` persistence with `stockai_access_token` (`HttpOnly`, `SameSite=Lax`) + `stockai_csrf_token` cookies, `X-CSRF-Token` validation on unsafe cookie requests, `POST /api/auth/logout` Redis `jti` revocation, `users.token_version` session invalidation, and `POST /api/auth/ws-ticket` (45s single-purpose WS ticket consumed via `fetchWsTicketUrl()` across `websocket.ts`, `LiveTicker.tsx`, `WatchlistSidebar.tsx`, `Dashboard.tsx`, and `ChartPage.tsx`).
+  3. **Zero-Lockout Admin Ownership Transfer & Phone TOTP MFA (`backend/core/totp_mfa.py`, `backend/models/user.py`, `backend/core/database.py`, `backend/api/admin.py`, `backend/api/settings.py`, `frontend/src/pages/{LoginPage,AdminPage,SettingsPage}.tsx`, `frontend/src/components/AdminStepUpModal.tsx`)**:
+     - Built offline `pyotp` + `qrcode` SVG QR enrollment (`/api/admin/mfa/*`) with 8 single-use recovery codes (zero dependency on the unowned dummy admin email!), safe admin transfer buttons (`Make Admin` / `Revoke Admin` / `Revoke Sessions` preventing sole-admin & self-demotion lockouts), `LoginPage` TOTP MFA challenge, and conditional 10-minute `X-Admin-StepUp-Token` verification (`require_admin_stepup`) strictly for MFA-enrolled admins.
+  4. **Distributed Redis Rate Limit / Brute-Force Lockout, Fernet DB Encryption & Hardened CSP (`backend/core/encryption.py`, `backend/core/rate_limiter.py`, `backend/core/auth_security.py`, `backend/core/security_middleware.py`, `backend/api/settings.py`, `backend/services/market_data.py`, `.env.example`, `backend/core/config.py`, `backend/requirements.txt`, `requirements.txt`)**:
+     - Added Fernet `enc:v1:` encryption/decryption for `fyers_access_token` / DB secrets & TOTP seeds with zero-downtime legacy plaintext read fallback.
+     - Migrated `TokenBucketRateLimiter` (`Lua` script `rl:*` + 50ms fail-fast timeout & identity-aware fallback cooldown) and `BruteForceProtector` (`bf:fail:*` / `bf:lock:*`) to distributed Redis.
+     - Removed `'unsafe-eval'` from CSP and isolated `'unsafe-inline'` scripts solely to `/docs` / `/redoc`.
+- **Verification Evidence:**
+  - `python -m py_compile` across all 16 modified/new backend Python files: **exit code 0**.
+  - `pytest` across 13 suites (`test_advanced_security_upgrades.py` [7 tests] + 12 core/regression suites, `-k "not suite_execution"`): **102 passed, 1 deselected, 0 failed in 186.36s**.
+  - Frontend: `eslint` **0 errors/warnings**; `vitest --run` **16 passed, 0 failed** (`api.test.ts` 10, `csrfAndStepUp.test.ts` 4, `urlSecurity.test.ts` 2); `tsc && vite build` **1,998 modules transformed, 0 TS errors, built in 21.61s**.
+  - Local Vite `/login` HTTP check returned **200** (`Invoke-WebRequest`), then Vite daemon (`task-20580`) was stopped cleanly; Chrome DevTools MCP timed out (`context deadline exceeded` waiting for Chrome remote-debugging approval).
+- **Next Safe Step:**
+  - Commit & push locally (`git add -A && git commit && git push origin main`), rebuild & recreate `backend`, `celery_worker`, `celery_beat`, and `frontend` on live server, click `Resolve All` in Admin Threats & Logs, transfer Head Admin ownership to personal email, and enable Phone Authenticator MFA.

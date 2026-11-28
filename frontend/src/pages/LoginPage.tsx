@@ -30,6 +30,10 @@ declare global {
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true)
   const [regStep, setRegStep] = useState<'FORM' | 'OTP'>('FORM')
+  const [mfaStep, setMfaStep] = useState<'NONE' | 'TOTP'>('NONE')
+  const [mfaChallengeToken, setMfaChallengeToken] = useState('')
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaEmailHint, setMfaEmailHint] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -122,6 +126,15 @@ export default function LoginPage() {
 
     try {
       const res = await authApi.googleAuth(response.credential)
+      if (res.data?.mfa_required && res.data?.mfa_challenge_token) {
+        setMfaChallengeToken(res.data.mfa_challenge_token)
+        setMfaEmailHint(res.data.email || '')
+        setMfaCode('')
+        setMfaStep('TOTP')
+        setError('')
+        setSuccessMsg(res.data.message || 'Enter the 6-digit code from your Authenticator app.')
+        return
+      }
       await login(res.data.access_token, res.data.user)
       navigate('/dashboard', { replace: true })
     } catch (err: any) {
@@ -181,6 +194,15 @@ export default function LoginPage() {
       if (isLogin) {
         // --- LOGIN FLOW ---
         const res = await authApi.login(email.trim(), password)
+        if (res.data?.mfa_required && res.data?.mfa_challenge_token) {
+          setMfaChallengeToken(res.data.mfa_challenge_token)
+          setMfaEmailHint(res.data.email || email.trim())
+          setMfaCode('')
+          setMfaStep('TOTP')
+          setError('')
+          setSuccessMsg(res.data.message || 'Enter the 6-digit code from your Authenticator app.')
+          return
+        }
         await login(res.data.access_token, res.data.user)
         navigate('/dashboard', { replace: true })
       } else {
@@ -255,11 +277,34 @@ export default function LoginPage() {
     }
   }
 
+  const handleVerifyMfaLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const clean = mfaCode.trim()
+    if (!clean) {
+      setError('Enter your 6-digit Authenticator code or recovery code.')
+      return
+    }
+    setError('')
+    setSuccessMsg('')
+    setLoading(true)
+    try {
+      const res = await authApi.verifyMfaLogin({ challenge_token: mfaChallengeToken, code: clean })
+      await login(res.data.access_token, res.data.user)
+      navigate('/dashboard', { replace: true })
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Invalid authenticator or recovery code.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="auth-container">
       <div className="auth-card">
         <h2>
-          {isLogin
+          {mfaStep === 'TOTP'
+            ? 'Authenticator Verification'
+            : isLogin
             ? 'Login to AI Stock Research'
             : regStep === 'OTP'
             ? 'Verify Your Email'
@@ -269,6 +314,48 @@ export default function LoginPage() {
         {/* Status Alerts */}
         {error && <div className="auth-alert error">{error}</div>}
         {successMsg && <div className="auth-alert success">{successMsg}</div>}
+        {mfaStep === 'TOTP' ? (
+          <form onSubmit={handleVerifyMfaLogin} className="auth-form">
+            <div style={{ fontSize: '0.84rem', color: 'var(--color-text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
+              Admin protection active for <strong>{mfaEmailHint || email}</strong>. Open your phone Authenticator app (Google Authenticator / Authy / 1Password) and enter the 6-digit code or an 8-character recovery code.
+            </div>
+            <div className="form-group">
+              <label htmlFor="auth-mfa-code-input">Authenticator / Recovery Code</label>
+              <input
+                id="auth-mfa-code-input"
+                type="text"
+                autoComplete="one-time-code"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                placeholder="123456 or ABCD-EFGH"
+                autoFocus
+                required
+                style={{ fontFamily: 'monospace', letterSpacing: '0.1em', textAlign: 'center', fontSize: '1.05rem' }}
+              />
+            </div>
+            <button type="submit" disabled={loading || !mfaCode.trim()} className="auth-button">
+              {loading ? 'Verifying...' : 'Verify & Sign In'}
+            </button>
+            <div className="otp-actions-row">
+              <button
+                type="button"
+                onClick={() => {
+                  setMfaStep('NONE')
+                  setMfaChallengeToken('')
+                  setMfaCode('')
+                  setError('')
+                  setSuccessMsg('')
+                }}
+                className="otp-back-btn"
+              >
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ArrowLeft size={13} /> Back to login
+                </span>
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
 
         {/* =========================================================================
             REGISTRATION STEP 2: 6-DIGIT EMAIL OTP FORM
@@ -469,6 +556,8 @@ export default function LoginPage() {
             </form>
           </>
         )}
+          </>
+        )}
 
         {/* Toggle between Login and Register */}
         <p className="auth-toggle">
@@ -477,6 +566,8 @@ export default function LoginPage() {
             onClick={() => {
               setIsLogin(!isLogin)
               setRegStep('FORM')
+              setMfaStep('NONE')
+              setMfaChallengeToken('')
               setError('')
               setSuccessMsg('')
             }}

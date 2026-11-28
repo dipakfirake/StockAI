@@ -86,6 +86,79 @@ class BruteForceProtector:
         if key in self._attempts:
             del self._attempts[key]
 
+    async def check_lockout_async(self, ip: str, email: str):
+        """Distributed Redis-backed lockout check with automatic in-memory fallback."""
+        key = self._get_key(ip, email)
+        try:
+            from backend.core.cache import get_redis
+            r = await get_redis()
+            ttl = await r.ttl(f"bf:lock:{key}")
+            if ttl and int(ttl) > 0:
+                log_security_event(
+                    event_type="AUTH_LOCKOUT_BLOCKED",
+                    severity="WARNING",
+                    ip_address=ip,
+                    details={"email": email, "remaining_seconds": int(ttl), "store": "redis"},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Account or IP temporarily locked due to too many failed attempts. Try again in {int(ttl)} seconds.",
+                    headers={"Retry-After": str(int(ttl))},
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+        self.check_lockout(ip, email)
+
+    async def record_failure_async(self, ip: str, email: str):
+        """Distributed Redis-backed failure increment & lockout with local fallback."""
+        self.record_failure(ip, email)
+        key = self._get_key(ip, email)
+        try:
+            import asyncio as _asyncio
+            from backend.core.cache import get_redis
+
+            async def _rec_fail():
+                r = await get_redis()
+                fail_key = f"bf:fail:{key}"
+                count = await r.incr(fail_key)
+                if count == 1:
+                    await r.expire(fail_key, ATTEMPT_WINDOW_SECONDS)
+                if int(count) >= MAX_FAILED_ATTEMPTS:
+                    await r.setex(f"bf:lock:{key}", LOCKOUT_DURATION_SECONDS, "1")
+                    log_security_event(
+                        event_type="AUTH_ACCOUNT_LOCKED",
+                        severity="CRITICAL",
+                        ip_address=ip,
+                        details={
+                            "email": email,
+                            "failed_count": int(count),
+                            "lockout_seconds": LOCKOUT_DURATION_SECONDS,
+                            "store": "redis",
+                        },
+                    )
+
+            await _asyncio.wait_for(_rec_fail(), timeout=0.12)
+        except Exception:
+            pass
+
+    async def record_success_async(self, ip: str, email: str):
+        """Clear failed attempts across Redis and in-memory state upon successful login."""
+        self.record_success(ip, email)
+        key = self._get_key(ip, email)
+        try:
+            import asyncio as _asyncio
+            from backend.core.cache import get_redis
+
+            async def _clear_fail():
+                r = await get_redis()
+                await r.delete(f"bf:fail:{key}", f"bf:lock:{key}")
+
+            await _asyncio.wait_for(_clear_fail(), timeout=0.12)
+        except Exception:
+            pass
+
 
 brute_force_protector = BruteForceProtector()
 

@@ -4,7 +4,8 @@ import { X, TrendingUp, TrendingDown, Star, Trash2, AlignJustify } from 'lucide-
 import { watchlistApi } from '../services/api';
 import StockSearchBox from './StockSearchBox';
 import { formatINR } from '../utils/formatters';
-import { isWebSocketSupportedOnHost } from '../services/websocket';
+import { isWebSocketSupportedOnHost, fetchWsTicketUrl } from '../services/websocket';
+import { useAuth } from '../AuthContext';
 import MarketDepthModal from './MarketDepthModal';
 import './WatchlistSidebar.css';
 
@@ -19,6 +20,10 @@ const cleanSym = (s: string | null | undefined): string => {
 };
 
 export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarProps) {
+  const { user } = useAuth();
+  const isAuthedRef = useRef(Boolean(user));
+  isAuthedRef.current = Boolean(user);
+  const wsAttemptIdRef = useRef(0);
   const navigate = useNavigate();
   const [stocks, setStocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,8 +79,7 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
   }, []);
 
   const scheduleReconnect = useCallback(() => {
-    const token = localStorage.getItem('auth_token');
-    if (!token || !isWebSocketSupportedOnHost()) return;
+    if (!isAuthedRef.current || !isWebSocketSupportedOnHost()) return;
     if (reconnectTimerRef.current !== null) return;
 
     reconnectAttemptsRef.current += 1;
@@ -88,12 +92,13 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
     }, delay);
   }, []);
 
-  const connectWs = useCallback(() => {
-    const token = localStorage.getItem('auth_token');
-    if (!token || !isWebSocketSupportedOnHost()) {
+  const connectWs = useCallback(async () => {
+    if (!isAuthedRef.current || !isWebSocketSupportedOnHost()) {
       startFallbackPoll();
       return;
     }
+
+    const attemptId = ++wsAttemptIdRef.current;
 
     if (wsRef.current) {
       wsRef.current.onopen = null;
@@ -104,9 +109,16 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
       wsRef.current = null;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = await fetchWsTicketUrl();
+    if (attemptId !== wsAttemptIdRef.current || !isAuthedRef.current) return;
+    if (!wsUrl) {
+      startFallbackPoll();
+      scheduleReconnect();
+      return;
+    }
+
     try {
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/?token=${token}`);
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -204,6 +216,7 @@ export default function WatchlistSidebar({ isOpen, onClose }: WatchlistSidebarPr
     connectWs();
 
     return () => {
+      wsAttemptIdRef.current += 1;
       stopFallbackPoll();
       if (reconnectTimerRef.current !== null) {
         window.clearTimeout(reconnectTimerRef.current);

@@ -1,6 +1,8 @@
 /**
- * WebSocket client for real-time alert delivery with graceful HTTP fallback.
+ * WebSocket client for real-time alert and market delivery using short-lived 45s tickets
+ * so persistent JWTs never sit in localStorage or appear in WebSocket URLs.
  */
+import { authApi } from './api'
 
 export const isWebSocketSupportedOnHost = (): boolean => {
   if (typeof window !== 'undefined') {
@@ -9,6 +11,27 @@ export const isWebSocketSupportedOnHost = (): boolean => {
     if (host.endsWith('vercel.app')) return false
   }
   return true
+}
+
+let _pendingTicketPromise: Promise<string | null> | null = null
+
+export async function fetchWsTicketUrl(): Promise<string | null> {
+  if (typeof window === 'undefined' || !isWebSocketSupportedOnHost()) return null
+  if (!_pendingTicketPromise) {
+    _pendingTicketPromise = authApi
+      .getWsTicket()
+      .then((res) => res.data?.ws_ticket || null)
+      .catch(() => null)
+      .finally(() => {
+        setTimeout(() => {
+          _pendingTicketPromise = null
+        }, 1500)
+      })
+  }
+  const ticket = await _pendingTicketPromise
+  if (!ticket) return null
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}/ws/?ticket=${encodeURIComponent(ticket)}`
 }
 
 type AlertHandler = (alert: object) => void
@@ -22,16 +45,14 @@ class AlertWebSocket {
   private failedAttempts = 0
   private maxAttempts = 2
 
-  connect(token: string) {
-    if (!token) return
-
+  async connect(_unusedToken?: string) {
     // If host doesn't support persistent WebSockets or failed attempts exceeded, gracefully return
     if (!isWebSocketSupportedOnHost() || this.failedAttempts >= this.maxAttempts) {
       return
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${protocol}://${window.location.host}/ws/?token=${encodeURIComponent(token)}`
+    const url = await fetchWsTicketUrl()
+    if (!url) return
 
     try {
       this.ws = new WebSocket(url)
@@ -54,7 +75,7 @@ class AlertWebSocket {
       this.ws.onclose = () => {
         this.failedAttempts++
         if (this.shouldReconnect && this.failedAttempts < this.maxAttempts) {
-          setTimeout(() => this.connect(token), this.reconnectDelay)
+          setTimeout(() => this.connect(), this.reconnectDelay)
         }
       }
 

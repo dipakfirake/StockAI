@@ -5,6 +5,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { usePresenceContext } from '../PresenceContext';
 import { toast } from '../components/Toast';
 import { sanitizeBrowserUrl } from '../utils/urlSecurity';
+import AdminStepUpModal from '../components/AdminStepUpModal';
 import {
   Smartphone,
   ExternalLink,
@@ -50,6 +51,7 @@ interface AdminUser {
   name: string;
   subscription_tier: 'FREE' | 'PRO';
   is_admin: boolean;
+  totp_enabled?: boolean;
   pro_status: string;
   pro_requested_at: string | null;
   payment_method: string | null;
@@ -138,6 +140,46 @@ export default function AdminPage() {
   const [broadcastingNotice, setBroadcastingNotice] = useState(false);
   const [noticeFeedback, setNoticeFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Admin Ownership & Authenticator TOTP MFA State
+  const [mfaStatus, setMfaStatus] = useState<{
+    email: string;
+    totp_enabled: boolean;
+    recovery_codes_remaining: number;
+    active_admin_count: number;
+    admin_emails: string[];
+  } | null>(null);
+  const [mfaLoading, setMfaLoading] = useState(false);
+  const [mfaEnrollData, setMfaEnrollData] = useState<{
+    setup_token: string;
+    otpauth_uri: string;
+    manual_secret: string;
+    qr_svg: string;
+  } | null>(null);
+  const [mfaConfirmCode, setMfaConfirmCode] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  const [showDisableMfa, setShowDisableMfa] = useState(false);
+  const [disableMfaForm, setDisableMfaForm] = useState({ password: '', code: '' });
+  const [pendingStepUpAction, setPendingStepUpAction] = useState<{
+    title: string;
+    run: () => Promise<void>;
+  } | null>(null);
+
+  const isStepUpRequiredError = (err: any) => {
+    if (err?.response?.status !== 403) return false;
+    const hdr = err?.response?.headers?.['x-stepup-required'];
+    const detail = String(err?.response?.data?.detail || '').toLowerCase();
+    return hdr === 'totp' || detail.includes('step-up');
+  };
+
+  const fetchMfaStatus = async () => {
+    try {
+      const res = await adminApi.getMfaStatus();
+      setMfaStatus(res.data || null);
+    } catch {
+      // Non-fatal if endpoint unavailable during upgrade
+    }
+  };
+
   const fetchAdminAlertsHub = async (
     markSeenOnOpen: boolean = false,
     overrides?: { category?: string; severity?: string; status?: string; search?: string }
@@ -219,7 +261,7 @@ export default function AdminPage() {
     }
     setBroadcastingNotice(true);
     setNoticeFeedback(null);
-    try {
+    const executeBroadcast = async () => {
       const res = await adminApi.broadcastNotice({
         title: cleanTitle,
         message: cleanMessage,
@@ -231,7 +273,24 @@ export default function AdminPage() {
       toast.success('System Notice Broadcast', summary);
       setNoticeForm({ title: '', message: '', priority: 'INFO' });
       window.dispatchEvent(new CustomEvent('stockai:notifications-updated'));
+    };
+    try {
+      await executeBroadcast();
     } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({
+          title: 'Verify Authenticator to Broadcast Notice',
+          run: async () => {
+            setBroadcastingNotice(true);
+            try {
+              await executeBroadcast();
+            } finally {
+              setBroadcastingNotice(false);
+            }
+          },
+        });
+        return;
+      }
       const msg = err?.response?.data?.detail || err.message || 'Broadcast failed';
       setNoticeFeedback({ type: 'error', text: msg });
       toast.error('Broadcast Failed', msg);
@@ -448,6 +507,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (isAdmin) {
       fetchUsers();
+      fetchMfaStatus();
     }
   }, [isAdmin]);
 
@@ -576,82 +636,224 @@ export default function AdminPage() {
   };
 
   const handleUpdateToken = async () => {
-    if (!authInput.trim()) {
+    const trimmedInput = authInput.trim();
+    if (!trimmedInput) {
       setTokenMessage({ text: 'Please paste the redirected URL or auth code first.', type: 'error' });
       return;
     }
 
-    setUpdatingToken(true);
-    setTokenMessage(null);
+    const executeTokenUpdate = async () => {
+      setUpdatingToken(true);
+      setTokenMessage(null);
+      try {
+        const res = await settingsApi.updateFyersToken(trimmedInput);
+        const successMsg = res.data?.message || 'Fyers token updated successfully! Live feeds active with zero restart.';
+        setTokenMessage({ text: successMsg, type: 'success' });
+        setAuthInput('');
+
+        // Optimistically flip status to ACTIVE immediately
+        setFyersStatus((prev: any) => ({
+          ...prev,
+          configured: true,
+          connected: true,
+          token_status: 'ACTIVE',
+          name: res.data?.name || prev?.name || 'Trader',
+          fy_id: res.data?.fy_id || prev?.fy_id,
+          message: successMsg,
+          fyers_live_ping: true,
+        }));
+
+        // Background status refresh to sync full telemetry
+        setTimeout(() => {
+          fetchFyersStatus();
+        }, 1200);
+      } finally {
+        setUpdatingToken(false);
+      }
+    };
+
     try {
-      const res = await settingsApi.updateFyersToken(authInput.trim());
-      const successMsg = res.data?.message || 'Fyers token updated successfully! Live feeds active with zero restart.';
-      setTokenMessage({ text: successMsg, type: 'success' });
-      setAuthInput('');
-
-      // Optimistically flip status to ACTIVE immediately
-      setFyersStatus((prev: any) => ({
-        ...prev,
-        configured: true,
-        connected: true,
-        token_status: 'ACTIVE',
-        name: res.data?.name || prev?.name || 'Trader',
-        fy_id: res.data?.fy_id || prev?.fy_id,
-        message: successMsg,
-        fyers_live_ping: true,
-      }));
-
-      // Background status refresh to sync full telemetry
-      setTimeout(() => {
-        fetchFyersStatus();
-      }, 1200);
+      await executeTokenUpdate();
     } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({
+          title: 'Verify Authenticator to Update Fyers Token',
+          run: executeTokenUpdate,
+        });
+        return;
+      }
       setTokenMessage({
         text: err.response?.data?.detail || 'Failed to activate Fyers token. Please verify the code/URL.',
         type: 'error',
       });
-    } finally {
-      setUpdatingToken(false);
     }
   };
 
   const handleApprove = async (userId: string, email: string) => {
-    setActionLoading(userId);
+    const executeApprove = async () => {
+      setActionLoading(userId);
+      try {
+        await adminApi.approvePro(userId);
+        setMessage({ text: `Successfully approved PRO membership for ${email}`, type: 'success' });
+        await fetchUsers();
+      } finally {
+        setActionLoading(null);
+      }
+    };
     try {
-      await adminApi.approvePro(userId);
-      setMessage({ text: `Successfully approved PRO membership for ${email}`, type: 'success' });
-      await fetchUsers();
+      await executeApprove();
     } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({ title: `Approve PRO for ${email}`, run: executeApprove });
+        return;
+      }
       setMessage({ text: err.response?.data?.detail || 'Failed to approve user', type: 'error' });
-    } finally {
-      setActionLoading(null);
     }
   };
 
   const handleReject = async (userId: string, email: string) => {
-    setActionLoading(userId);
+    const executeReject = async () => {
+      setActionLoading(userId);
+      try {
+        await adminApi.rejectPro(userId);
+        setMessage({ text: `Rejected PRO request for ${email}`, type: 'success' });
+        await fetchUsers();
+      } finally {
+        setActionLoading(null);
+      }
+    };
     try {
-      await adminApi.rejectPro(userId);
-      setMessage({ text: `Rejected PRO request for ${email}`, type: 'success' });
-      await fetchUsers();
+      await executeReject();
     } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({ title: `Reject PRO request for ${email}`, run: executeReject });
+        return;
+      }
       setMessage({ text: err.response?.data?.detail || 'Failed to reject user', type: 'error' });
-    } finally {
-      setActionLoading(null);
     }
   };
 
   const handleRevoke = async (userId: string, email: string) => {
     if (!window.confirm(`Are you sure you want to revoke PRO status for ${email}?`)) return;
-    setActionLoading(userId);
+    const executeRevoke = async () => {
+      setActionLoading(userId);
+      try {
+        await adminApi.revokePro(userId);
+        setMessage({ text: `Revoked PRO membership for ${email}`, type: 'success' });
+        await fetchUsers();
+      } finally {
+        setActionLoading(null);
+      }
+    };
     try {
-      await adminApi.revokePro(userId);
-      setMessage({ text: `Revoked PRO membership for ${email}`, type: 'success' });
-      await fetchUsers();
+      await executeRevoke();
     } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({ title: `Revoke PRO for ${email}`, run: executeRevoke });
+        return;
+      }
       setMessage({ text: err.response?.data?.detail || 'Failed to revoke user', type: 'error' });
+    }
+  };
+
+  const handleSetAdmin = async (targetUser: AdminUser, makeAdmin: boolean) => {
+    const verb = makeAdmin ? 'grant Head Admin privileges to' : 'revoke Head Admin privileges and invalidate sessions for';
+    if (!window.confirm(`Are you sure you want to ${verb} ${targetUser.email}?`)) return;
+    const executeSetAdmin = async () => {
+      setActionLoading(targetUser.id);
+      try {
+        const res = await adminApi.setAdmin(targetUser.id, makeAdmin);
+        setMessage({ text: res.data?.message || `Updated admin role for ${targetUser.email}`, type: 'success' });
+        await Promise.all([fetchUsers(), fetchMfaStatus()]);
+      } finally {
+        setActionLoading(null);
+      }
+    };
+    try {
+      await executeSetAdmin();
+    } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({ title: `${makeAdmin ? 'Grant' : 'Revoke'} Admin Role: ${targetUser.email}`, run: executeSetAdmin });
+        return;
+      }
+      setMessage({ text: err.response?.data?.detail || 'Failed to update admin role', type: 'error' });
+    }
+  };
+
+  const handleRevokeSessions = async (targetUser: AdminUser) => {
+    if (!window.confirm(`Terminate all active cookies/sessions for ${targetUser.email}?`)) return;
+    const executeRevokeSessions = async () => {
+      setActionLoading(targetUser.id);
+      try {
+        const res = await adminApi.revokeSessions(targetUser.id);
+        setMessage({ text: res.data?.message || `Terminated active sessions for ${targetUser.email}`, type: 'success' });
+      } finally {
+        setActionLoading(null);
+      }
+    };
+    try {
+      await executeRevokeSessions();
+    } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({ title: `Revoke Sessions: ${targetUser.email}`, run: executeRevokeSessions });
+        return;
+      }
+      setMessage({ text: err.response?.data?.detail || 'Failed to revoke sessions', type: 'error' });
+    }
+  };
+
+  const handleStartMfaEnroll = async () => {
+    setMfaLoading(true);
+    setRecoveryCodes(null);
+    try {
+      const res = await adminApi.startMfaEnroll();
+      setMfaEnrollData(res.data || null);
+      setMfaConfirmCode('');
+    } catch (err: any) {
+      toast.error('MFA Setup Failed', err?.response?.data?.detail || err.message);
     } finally {
-      setActionLoading(null);
+      setMfaLoading(false);
+    }
+  };
+
+  const handleConfirmMfaEnroll = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaEnrollData?.setup_token || !mfaConfirmCode.trim()) return;
+    setMfaLoading(true);
+    try {
+      const res = await adminApi.confirmMfaEnroll({
+        setup_token: mfaEnrollData.setup_token,
+        code: mfaConfirmCode.trim(),
+      });
+      setRecoveryCodes(res.data?.recovery_codes || []);
+      setMfaEnrollData(null);
+      setMfaConfirmCode('');
+      await fetchMfaStatus();
+      toast.success('Authenticator MFA Active', 'Save your 8 single-use recovery codes now.');
+    } catch (err: any) {
+      toast.error('Verification Failed', err?.response?.data?.detail || 'Invalid 6-digit code.');
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const handleDisableMfa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMfaLoading(true);
+    try {
+      await adminApi.disableMfa({
+        password: disableMfaForm.password,
+        code: disableMfaForm.code.trim(),
+      });
+      setShowDisableMfa(false);
+      setDisableMfaForm({ password: '', code: '' });
+      setRecoveryCodes(null);
+      await fetchMfaStatus();
+      toast.success('Admin MFA Disabled', 'TOTP protection has been removed for your account.');
+    } catch (err: any) {
+      toast.error('Disable MFA Failed', err?.response?.data?.detail || err.message);
+    } finally {
+      setMfaLoading(false);
     }
   };
 
@@ -1821,8 +2023,231 @@ export default function AdminPage() {
          ========================================================================= */}
       {activeTab === 'users' && (
         <>
+          {/* Admin Ownership Transfer & Offline Phone Authenticator MFA */}
+          <div
+            className="card"
+            style={{
+              padding: 20,
+              marginBottom: 22,
+              border: `1px solid ${mfaStatus?.totp_enabled ? 'rgba(16, 185, 129, 0.38)' : 'rgba(245, 158, 11, 0.4)'}`,
+              background: mfaStatus?.totp_enabled ? 'rgba(16, 185, 129, 0.04)' : 'rgba(245, 158, 11, 0.04)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>
+              <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <ShieldCheck size={18} style={{ color: mfaStatus?.totp_enabled ? '#34d399' : '#fbbf24' }} />
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+                    Admin Security, Ownership Transfer &amp; Phone Authenticator (TOTP)
+                  </h3>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      background: mfaStatus?.totp_enabled ? 'rgba(16, 185, 129, 0.16)' : 'rgba(245, 158, 11, 0.16)',
+                      color: mfaStatus?.totp_enabled ? '#34d399' : '#fbbf24',
+                    }}
+                  >
+                    {mfaStatus?.totp_enabled ? 'MFA ACTIVE' : 'MFA OPTIONAL / NOT ENROLLED'}
+                  </span>
+                </div>
+                <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                  TOTP 2FA runs offline inside your phone Authenticator app (Google Authenticator / Authy / 1Password) — codes are <strong>never sent via email</strong>.
+                  If you are currently signed in with an unowned admin email, first promote your personal account below (<strong>Make Admin</strong>), log into your personal email, and then <strong>Revoke Admin</strong> on the old account before enabling MFA.
+                </p>
+                {mfaStatus && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+                    <span>Signed in: <strong>{mfaStatus.email}</strong></span>
+                    <span>Active Admins: <strong>{mfaStatus.active_admin_count}</strong></span>
+                    {mfaStatus.totp_enabled && (
+                      <span>Recovery Codes Left: <strong>{mfaStatus.recovery_codes_remaining}</strong></span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {!mfaStatus?.totp_enabled ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleStartMfaEnroll}
+                    disabled={mfaLoading}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}
+                  >
+                    <KeyRound size={14} />
+                    {mfaEnrollData ? 'Regenerate QR Setup' : 'Enable Authenticator MFA'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setShowDisableMfa((prev) => !prev)}
+                    style={{ fontSize: 12, color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                  >
+                    {showDisableMfa ? 'Cancel Disable' : 'Disable MFA'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {mfaEnrollData && (
+              <div
+                style={{
+                  marginTop: 16,
+                  paddingTop: 16,
+                  borderTop: '1px solid var(--border-color)',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
+                  gap: 18,
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                  <div style={{ background: '#ffffff', padding: 10, borderRadius: 10, display: 'inline-flex', flexShrink: 0 }}>
+                    <img src={mfaEnrollData.qr_svg} alt="Authenticator TOTP QR Code" style={{ width: 150, height: 150, display: 'block' }} />
+                  </div>
+                  <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>1. Scan QR in Authenticator App</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                      Or enter setup key manually:
+                    </div>
+                    <div
+                      className="mono"
+                      style={{
+                        fontSize: 12,
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        background: 'rgba(0,0,0,0.28)',
+                        border: '1px solid var(--border-color)',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {mfaEnrollData.manual_secret}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ marginTop: 8, fontSize: 11.5, padding: '4px 10px' }}
+                      onClick={() => handleCopyText(mfaEnrollData.manual_secret.replace(/\s+/g, ''), 'mfa-secret')}
+                    >
+                      <Copy size={12} /> {copiedSnippet === 'mfa-secret' ? 'Copied Secret' : 'Copy Secret Key'}
+                    </button>
+                  </div>
+                </div>
+
+                <form onSubmit={handleConfirmMfaEnroll} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>2. Enter Live 6-Digit Code to Activate</div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <input
+                      className="input"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="123456"
+                      value={mfaConfirmCode}
+                      onChange={(e) => setMfaConfirmCode(e.target.value)}
+                      required
+                      style={{ flex: '1 1 130px', fontFamily: 'monospace', fontSize: 15, letterSpacing: '0.12em' }}
+                    />
+                    <button type="submit" className="btn btn-primary" disabled={mfaLoading || !mfaConfirmCode.trim()}>
+                      {mfaLoading ? 'Activating...' : 'Confirm & Activate'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {recoveryCodes && recoveryCodes.length > 0 && (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 14,
+                  borderRadius: 8,
+                  border: '1px solid rgba(16, 185, 129, 0.4)',
+                  background: 'rgba(16, 185, 129, 0.08)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                  <strong style={{ fontSize: 13, color: '#34d399' }}>Save Your 8 Single-Use Emergency Recovery Codes Now</strong>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: 11.5, padding: '4px 10px' }}
+                      onClick={() => handleCopyText(recoveryCodes.join('\n'), 'mfa-recovery')}
+                    >
+                      <Copy size={12} /> {copiedSnippet === 'mfa-recovery' ? 'Copied All' : 'Copy All Codes'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: 11.5, padding: '4px 10px' }}
+                      onClick={() => setRecoveryCodes(null)}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+                  {recoveryCodes.map((rc) => (
+                    <code
+                      key={rc}
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: 6,
+                        background: 'rgba(0,0,0,0.35)',
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {rc}
+                    </code>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {showDisableMfa && mfaStatus?.totp_enabled && (
+              <form
+                onSubmit={handleDisableMfa}
+                style={{
+                  marginTop: 14,
+                  paddingTop: 14,
+                  borderTop: '1px solid var(--border-color)',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))',
+                  gap: 10,
+                  alignItems: 'center',
+                }}
+              >
+                <input
+                  className="input"
+                  type="password"
+                  placeholder="Account password"
+                  value={disableMfaForm.password}
+                  onChange={(e) => setDisableMfaForm({ ...disableMfaForm, password: e.target.value })}
+                  required
+                />
+                <input
+                  className="input"
+                  type="text"
+                  placeholder="Current 6-digit TOTP or recovery code"
+                  value={disableMfaForm.code}
+                  onChange={(e) => setDisableMfaForm({ ...disableMfaForm, code: e.target.value })}
+                  required
+                />
+                <button type="submit" className="btn btn-primary" disabled={mfaLoading} style={{ background: '#ef4444', borderColor: '#ef4444' }}>
+                  {mfaLoading ? 'Disabling...' : 'Confirm Disable MFA'}
+                </button>
+              </form>
+            )}
+          </div>
+
           {/* Metrics Row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div style={{ background: 'var(--surface-color)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
               <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Total Accounts</div>
               <div style={{ fontSize: '1.8rem', fontWeight: 800, marginTop: '4px' }}>{users.length}</div>
@@ -1931,11 +2356,16 @@ export default function AdminPage() {
                     return (
                       <tr key={u.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                         <td style={{ padding: '14px 18px' }}>
-                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                             {u.name || 'Unnamed Trader'}
                             {isUserAdmin && (
                               <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: '#3b82f6', color: 'white', borderRadius: '4px', fontWeight: 700 }}>
                                 ADMIN
+                              </span>
+                            )}
+                            {isUserAdmin && (u.totp_enabled || (mfaStatus?.email === u.email && mfaStatus?.totp_enabled)) && (
+                              <span style={{ fontSize: '0.68rem', padding: '2px 6px', background: 'rgba(16, 185, 129, 0.16)', color: '#34d399', borderRadius: '4px', fontWeight: 700 }}>
+                                MFA
                               </span>
                             )}
                           </div>
@@ -1991,7 +2421,7 @@ export default function AdminPage() {
                           )}
                         </td>
                         <td style={{ padding: '14px 18px', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                             {isRequested && (
                               <>
                                 <button
@@ -2066,6 +2496,61 @@ export default function AdminPage() {
                                 Revoke PRO
                               </button>
                             )}
+
+                            {!isUserAdmin ? (
+                              <button
+                                onClick={() => handleSetAdmin(u, true)}
+                                disabled={actionLoading === u.id}
+                                style={{
+                                  padding: '6px 10px',
+                                  background: 'rgba(16, 185, 129, 0.12)',
+                                  border: '1px solid rgba(16, 185, 129, 0.4)',
+                                  borderRadius: '6px',
+                                  color: '#34d399',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Make Admin
+                              </button>
+                            ) : (
+                              u.email !== user?.email && (
+                                <button
+                                  onClick={() => handleSetAdmin(u, false)}
+                                  disabled={actionLoading === u.id}
+                                  style={{
+                                    padding: '6px 10px',
+                                    background: 'rgba(245, 158, 11, 0.12)',
+                                    border: '1px solid rgba(245, 158, 11, 0.45)',
+                                    borderRadius: '6px',
+                                    color: '#fbbf24',
+                                    fontSize: '0.78rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Revoke Admin
+                                </button>
+                              )
+                            )}
+
+                            <button
+                              onClick={() => handleRevokeSessions(u)}
+                              disabled={actionLoading === u.id}
+                              style={{
+                                padding: '6px 10px',
+                                background: 'rgba(148, 163, 184, 0.1)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '6px',
+                                color: 'var(--text-secondary)',
+                                fontSize: '0.78rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Revoke Sessions
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -2831,15 +3316,22 @@ export default function AdminPage() {
               <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, fontFamily: 'monospace' }}>{(alertsHubData.recent_logs || []).length}</div>
               <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>WARNING / ERROR / CRITICAL buffer</div>
             </div>
-            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #10b981' }}>
-              <div style={{ fontSize: 11, color: '#34d399', fontWeight: 700, textTransform: 'uppercase' }}>Sentinel Health Score</div>
-              <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, fontFamily: 'monospace' }}>
-                {alertsHubData.sentinel_summary?.health_score ?? 100}/100
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                {alertsHubData.sentinel_summary?.overall_status || 'OPERATIONAL'}
-              </div>
-            </div>
+            {(() => {
+              const score = Number(alertsHubData.sentinel_summary?.health_score ?? 100);
+              const scoreColor = score >= 80 ? '#10b981' : score >= 50 ? '#f59e0b' : '#ef4444';
+              const textColor = score >= 80 ? '#34d399' : score >= 50 ? '#fbbf24' : '#f87171';
+              return (
+                <div className="card" style={{ padding: '16px 20px', borderLeft: `4px solid ${scoreColor}` }}>
+                  <div style={{ fontSize: 11, color: textColor, fontWeight: 700, textTransform: 'uppercase' }}>Sentinel Health Score</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, fontFamily: 'monospace' }}>
+                    {score}/100
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                    {alertsHubData.sentinel_summary?.overall_status || 'OPERATIONAL'}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Admin Important System Announcement Broadcaster */}
@@ -2928,12 +3420,25 @@ export default function AdminPage() {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  style={{ fontSize: 12, padding: '6px 12px', color: '#34d399', borderColor: 'rgba(16,185,129,0.4)' }}
+                  style={{ fontSize: 12, padding: '6px 12px', color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)' }}
                   onClick={() => handleAcknowledgeAdminAlert(undefined, 'ACKNOWLEDGE', true)}
+                  disabled={alertsHubLoading}
                 >
                   <CheckCheck size={13} /> Acknowledge All
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ fontSize: 12, padding: '6px 12px', background: '#10b981', borderColor: '#10b981' }}
+                  onClick={() => handleAcknowledgeAdminAlert(undefined, 'RESOLVE', true)}
+                  disabled={alertsHubLoading}
+                >
+                  <CheckCircle2 size={13} /> Resolve All
+                </button>
               </div>
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginBottom: 12 }}>
+              <strong>Acknowledge</strong> marks incidents under review while keeping them counted open; <strong>Resolve</strong> / <strong>Resolve All</strong> closes them and resets Sentinel security health cleanly to 100/100 once fixed.
             </div>
 
             {/* Unified Filter Bar (applies to Incidents, Wrong Logs & Security Audit Log) */}
@@ -3172,6 +3677,21 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      <AdminStepUpModal
+        open={Boolean(pendingStepUpAction)}
+        title={pendingStepUpAction?.title || 'Authenticator Step-Up Verification'}
+        onCancel={() => setPendingStepUpAction(null)}
+        onVerified={() => {
+          const act = pendingStepUpAction;
+          setPendingStepUpAction(null);
+          if (act) {
+            act.run().catch((err: any) => {
+              toast.error('Action Failed', err?.response?.data?.detail || err?.message || 'Verification failed');
+            });
+          }
+        }}
+      />
     </div>
   );
 }

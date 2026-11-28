@@ -2,16 +2,57 @@ import axios from 'axios'
 
 const BASE_URL = '/api'
 
+// Short-lived in-memory Admin Step-Up Re-Auth token (never stored in localStorage)
+let _inMemoryAdminStepUpToken: string | null = null
+let _stepUpExpiresAt = 0
+
+export function setAdminStepUpToken(token: string | null, expiresInSeconds: number = 600) {
+  _inMemoryAdminStepUpToken = token
+  _stepUpExpiresAt = token ? Date.now() + expiresInSeconds * 1000 : 0
+}
+
+export function getAdminStepUpToken(): string | null {
+  if (!_inMemoryAdminStepUpToken || Date.now() >= _stepUpExpiresAt) {
+    _inMemoryAdminStepUpToken = null
+    _stepUpExpiresAt = 0
+    return null
+  }
+  return _inMemoryAdminStepUpToken
+}
+
+function readCookieValue(name: string): string | null {
+  if (typeof document === 'undefined' || !document.cookie) return null
+  const prefix = `${name}=`
+  const parts = document.cookie.split(';')
+  for (const part of parts) {
+    const trimmed = part.trim()
+    if (trimmed.startsWith(prefix)) {
+      return decodeURIComponent(trimmed.slice(prefix.length))
+    }
+  }
+  return null
+}
+
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 60000,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Attach JWT token on every request
+// Attach double-submit CSRF header + optional in-memory Admin Step-Up token on every request
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  const method = String(config.method || 'get').toLowerCase()
+  if (['post', 'put', 'patch', 'delete'].includes(method)) {
+    const csrf = readCookieValue('stockai_csrf_token')
+    if (csrf) {
+      config.headers['X-CSRF-Token'] = csrf
+    }
+  }
+  const stepUpTok = getAdminStepUpToken()
+  if (stepUpTok) {
+    config.headers['X-Admin-StepUp-Token'] = stepUpTok
+  }
   return config
 })
 
@@ -69,17 +110,17 @@ api.interceptors.response.use(
       return api(config)
     }
 
-    // Only redirect on authentic HTTP 401 from protected routes, never on network error or server reload
+    // Only redirect on authentic HTTP 401 from protected routes when a user session was active
     if (err.response?.status === 401) {
-      const isAuthRoute = config?.url?.includes('/auth/login') || config?.url?.includes('/auth/register')
-      if (!isAuthRoute && localStorage.getItem('auth_token')) {
+      const isAuthRoute =
+        urlStr.includes('/auth/login') ||
+        urlStr.includes('/auth/register') ||
+        urlStr.includes('/auth/mfa/verify-login') ||
+        urlStr.includes('/auth/me')
+      if (!isAuthRoute && localStorage.getItem('auth_user_cache')) {
         localStorage.removeItem('auth_token')
         localStorage.removeItem('auth_user_cache')
-        // FIX: Dispatch a custom event instead of window.location.href='/login'.
-        // Hard page reload wipes the entire React SPA, destroys NavBar state, and
-        // forces a slow re-download of 700KB+ JS bundles.
-        // The auth_session_expired event is caught by AuthContext.tsx to gracefully
-        // reset user state and navigate via React Router without a page reload.
+        setAdminStepUpToken(null)
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('auth_session_expired'))
         }
@@ -317,6 +358,10 @@ export const authApi = {
     api.post('/auth/verify-registration-otp', data),
   googleAuth: (credential: string) =>
     api.post('/auth/google', { credential }),
+  verifyMfaLogin: (data: { challenge_token: string; code: string }) =>
+    api.post('/auth/mfa/verify-login', data),
+  logout: () => api.post('/auth/logout'),
+  getWsTicket: () => api.post<{ ws_ticket: string; expires_in: number }>('/auth/ws-ticket'),
   me: () => api.get('/auth/me'),
   upgrade: () => api.post('/auth/upgrade'),
 }
@@ -343,6 +388,13 @@ export const adminApi = {
   approvePro: (userId: string) => api.post(`/admin/users/${userId}/approve-pro`),
   rejectPro: (userId: string) => api.post(`/admin/users/${userId}/reject-pro`),
   revokePro: (userId: string) => api.post(`/admin/users/${userId}/revoke-pro`),
+  setAdmin: (userId: string, is_admin: boolean) => api.post(`/admin/users/${userId}/set-admin`, { is_admin }),
+  revokeSessions: (userId: string) => api.post(`/admin/users/${userId}/revoke-sessions`),
+  getMfaStatus: () => api.get('/admin/mfa/status'),
+  startMfaEnroll: () => api.post('/admin/mfa/enroll/start'),
+  confirmMfaEnroll: (data: { setup_token: string; code: string }) => api.post('/admin/mfa/enroll/confirm', data),
+  stepUpMfa: (code: string) => api.post('/admin/mfa/step-up', { code }),
+  disableMfa: (data: { password: string; code: string }) => api.post('/admin/mfa/disable', data),
   getAlertsHub: (params?: {
     category?: string
     severity?: string

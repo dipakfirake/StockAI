@@ -16,8 +16,9 @@ from backend.core.database import get_db
 from backend.models.settings import SystemSettings
 from backend.core.auth import get_current_user
 from backend.models.user import User
-from backend.api.admin import require_admin
+from backend.api.admin import require_admin, require_admin_stepup
 from backend.core.audit_logger import log_security_event
+from backend.core.encryption import encrypt_secret, decrypt_secret
 from backend.core.logging_config import get_logger
 from backend.core.config import settings
 from backend.core.cache import cache_get, cache_set, cache_delete
@@ -91,7 +92,11 @@ async def get_all_settings(
         if not is_admin:
             if s.key in SENSITIVE_SETTING_KEYS or "fyers" in k_lower or "token" in k_lower or "secret" in k_lower or "client_id" in k_lower:
                 continue
-        out[s.key] = s.get_typed_value()
+        if s.key in SENSITIVE_SETTING_KEYS:
+            val = decrypt_secret(s.value)
+            out[s.key] = "********" if (s.key == "fyers_access_token" and val) else val
+        else:
+            out[s.key] = s.get_typed_value()
     return out
 
 
@@ -103,7 +108,7 @@ class UpdateSettingsRequest(BaseModel):
 async def update_settings(
     request: UpdateSettingsRequest,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_stepup),
 ):
     """
     Update persisted dynamic configuration.
@@ -140,7 +145,8 @@ async def update_settings(
             elif item.value_type == "float":
                 item.value = str(float(value))
             else:
-                item.value = str(value)
+                raw_str = str(value)
+                item.value = encrypt_secret(raw_str) if (key in SENSITIVE_SETTING_KEYS and raw_str.strip()) else raw_str
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=f"Invalid value for {key}: {exc}") from exc
             
@@ -220,18 +226,22 @@ async def get_fyers_status(
     client_id = None
     access_token = None
 
-    # Priority 1: Check Database SystemSettings (persisted active token from mobile/admin renewal)
+    # Priority 1: Check Database SystemSettings (persisted encrypted/active token from mobile/admin renewal)
     try:
         fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalars().first()
-        if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 20:
-            access_token = fyers_token_obj.value.strip()
+        if fyers_token_obj and fyers_token_obj.value:
+            dec_tok = decrypt_secret(fyers_token_obj.value).strip()
+            if len(dec_tok) > 20:
+                access_token = dec_tok
     except Exception:
         pass
 
     try:
         fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalars().first()
-        if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
-            client_id = fyers_client_obj.value.strip()
+        if fyers_client_obj and fyers_client_obj.value:
+            dec_cid = decrypt_secret(fyers_client_obj.value).strip()
+            if len(dec_cid) > 3:
+                client_id = dec_cid
     except Exception:
         pass
 
@@ -588,7 +598,7 @@ async def get_fyers_auth_url(
 async def update_fyers_token(
     request: FyersTokenUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_stepup),
 ):
     """
     Directly exchange auth_code or save access_token into .env, hot-reloading
@@ -677,13 +687,14 @@ async def update_fyers_token(
     os.environ["FYERS_ACCESS_TOKEN"] = token
     settings.FYERS_ACCESS_TOKEN = token
 
-    # Persist into DB SystemSettings (authoritative storage across all workers and restarts)
+    # Persist into DB SystemSettings encrypted at rest (Fernet AES)
     try:
+        enc_token = encrypt_secret(token)
         fyers_setting = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalars().first()
         if fyers_setting:
-            fyers_setting.value = token
+            fyers_setting.value = enc_token
         else:
-            db.add(SystemSettings(key="fyers_access_token", value=token, value_type="string", description="Fyers Access Token (Update Daily)"))
+            db.add(SystemSettings(key="fyers_access_token", value=enc_token, value_type="string", description="Fyers Access Token (Update Daily)"))
         await db.commit()
     except Exception as e:
         logger.warning(f"Could not persist token in SystemSettings: {e}")

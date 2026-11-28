@@ -98,6 +98,10 @@ async def create_db_tables():
                 BEGIN
                     IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users') THEN
                         ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret_encrypted VARCHAR(512);
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT FALSE;
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_hashes TEXT;
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 1;
                         ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_status VARCHAR(50) DEFAULT 'NONE';
                         ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_requested_at TIMESTAMPTZ;
                         ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_approved_by VARCHAR(255);

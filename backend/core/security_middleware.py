@@ -8,6 +8,7 @@ Provides:
 - Correlation Trace ID tracking for security forensic auditing
 """
 
+import hmac
 import uuid
 from typing import Optional
 from fastapi import Request, Response, status
@@ -51,6 +52,32 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 pass
 
+        # --- Double-Submit CSRF Guard for Cookie-Authenticated Mutations ---
+        # Exempt explicit Authorization Bearer API callers, public pre-auth routes, and sendBeacon leaves.
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            auth_hdr = request.headers.get("Authorization", "")
+            cookies = getattr(request, "cookies", None) or {}
+            has_auth_cookie = bool(cookies.get("stockai_access_token"))
+            path_l = request.url.path.lower()
+            csrf_exempt = {
+                "/api/auth/login",
+                "/api/auth/register",
+                "/api/auth/google",
+                "/api/auth/send-registration-otp",
+                "/api/auth/verify-registration-otp",
+                "/api/auth/mfa/verify-login",
+                "/api/auth/logout",
+                "/api/presence/leave",
+            }
+            if has_auth_cookie and not auth_hdr.startswith("Bearer ") and path_l not in csrf_exempt:
+                cookie_csrf = cookies.get("stockai_csrf_token") or ""
+                header_csrf = request.headers.get("X-CSRF-Token") or ""
+                if not cookie_csrf or not header_csrf or not hmac.compare_digest(cookie_csrf, header_csrf):
+                    return JSONResponse(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        content={"detail": "CSRF token validation failed", "trace_id": trace_id},
+                    )
+
         # Execute downstream handlers
         try:
             response = await call_next(request)
@@ -70,23 +97,37 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         headers["Permissions-Policy"] = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
         headers["X-Request-ID"] = trace_id
 
-        # Content-Security-Policy: defence against XSS and data injection attacks
-        # Allow inline styles/scripts and Swagger UI & ReDoc CDN dependencies, allow same-origin frames
-        headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.redoc.ly; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.redoc.ly; "
-            "font-src 'self' https://fonts.gstatic.com https://cdn.redoc.ly data:; "
-            "img-src 'self' data: https: https://fastapi.tiangolo.com https://cdn.redoc.ly; "
-            "connect-src 'self' wss: ws: https:; "
-            "worker-src 'self' blob:; "
-            "frame-ancestors 'self'; "
-            "object-src 'none'; "
-            "base-uri 'self';"
-        )
+        # Content-Security-Policy: remove 'unsafe-eval', restrict 'unsafe-inline' scripts strictly to /docs & /redoc
+        p = request.url.path.lower()
+        is_docs_route = p in ("/docs", "/redoc", "/openapi.json") or p.startswith("/docs/") or p.startswith("/redoc/")
+        if is_docs_route:
+            headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.redoc.ly; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.redoc.ly; "
+                "font-src 'self' https://fonts.gstatic.com https://cdn.redoc.ly data:; "
+                "img-src 'self' data: https: https://fastapi.tiangolo.com https://cdn.redoc.ly; "
+                "connect-src 'self' wss: ws: https:; "
+                "frame-ancestors 'self'; "
+                "object-src 'none'; "
+                "base-uri 'self';"
+            )
+        else:
+            headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' https://accounts.google.com; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com data:; "
+                "img-src 'self' data: blob: https:; "
+                "connect-src 'self' wss: ws: https://accounts.google.com https://oauth2.googleapis.com; "
+                "frame-src https://accounts.google.com; "
+                "worker-src 'self' blob:; "
+                "frame-ancestors 'self'; "
+                "object-src 'none'; "
+                "base-uri 'self';"
+            )
 
         # Anti-caching for all financial and user API routes to prevent browser/disk caching of user activity
-        p = request.url.path.lower()
         sensitive_prefixes = (
             "/api/auth",
             "/api/stocks",
