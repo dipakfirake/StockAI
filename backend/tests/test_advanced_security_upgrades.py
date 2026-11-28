@@ -717,3 +717,174 @@ def test_websocket_accepts_ticket_and_rejects_revoked_jti():
 
     sync_s.close()
     engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_fyers_stream_decrypts_db_token_and_beats_stale_env():
+    import asyncio
+    from backend.services.fyers_stream import FyersStreamService
+    from backend.services.market_data import MarketDataService
+
+    engine, sync_s, _ = _create_sqlite_test_db()
+    sync_s.add_all(
+        [
+            SystemSettings(key="fyers_client_id", value="DB_CLIENT_999"),
+            SystemSettings(key="fyers_access_token", value=encrypt_secret("LIVE_VALID_DB_TOKEN_987654321")),
+        ]
+    )
+    sync_s.commit()
+
+    class _StreamDbProxy:
+        def __init__(self, s):
+            self._s = s
+
+        async def execute(self, stmt, params=None):
+            return self._s.execute(stmt, params or {})
+
+        async def close(self):
+            return None
+
+    captured_tokens = []
+
+    class _FakeSocket:
+        def __init__(self, access_token=None, **kwargs):
+            captured_tokens.append(access_token)
+
+        def connect(self):
+            return None
+
+        def close_connection(self):
+            return None
+
+    stream = FyersStreamService()
+    MarketDataService.reset_fyers_health()
+
+    try:
+        with patch("backend.services.fyers_stream.cache_get", AsyncMock_fn := patch_async(None)), \
+             patch("backend.core.database.AsyncSessionLocal", return_value=_StreamDbProxy(sync_s)), \
+             patch("backend.services.fyers_stream.FyersDataSocket", _FakeSocket), \
+             patch("backend.services.fyers_stream.settings") as mock_settings, \
+             patch("backend.services.market_data.MarketDataService._env_cache", {"FYERS_ACCESS_TOKEN": "OLD_EXPIRED_ENV"}):
+
+            mock_settings.FYERS_CLIENT_ID = "ENV_OLD_CID"
+            mock_settings.FYERS_ACCESS_TOKEN = "OLD_EXPIRED_ENV_TOKEN"
+
+            ok = await stream.start()
+            assert ok is True
+            assert len(captured_tokens) == 1
+            assert captured_tokens[0] == "DB_CLIENT_999:LIVE_VALID_DB_TOKEN_987654321"
+            assert "enc:v1:" not in captured_tokens[0]
+
+            # -99 token error cleanly engages failover and halts SDK reconnect loop
+            stream._on_error({"type": "cn", "code": -99, "message": "Token is expired", "s": "error"})
+            await asyncio.sleep(0.05)
+            assert MarketDataService._fyers_token_valid is False
+            assert stream._is_running is False
+            assert stream._socket is None
+    finally:
+        MarketDataService.reset_fyers_health()
+        sync_s.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_routine_admin_actions_stay_info_and_persist_sentinel_watermark():
+    import logging
+    from backend.core.logging_config import AdminErrorLogHandler
+    from backend.services.admin_alerts_service import _CAPTURED_LOGS, _PENDING_DB_ALERTS
+
+    engine, sync_s, async_s = _create_sqlite_test_db()
+    orig_subs = json.loads(json.dumps(sentinel_service._subsystem_status))
+    orig_incidents = list(sentinel_service._recent_incidents)
+    orig_wm = sentinel_service._security_log_watermark
+
+    admin1 = User(
+        id=uuid.uuid4(),
+        email="head.owner@example.com",
+        name="Head Owner",
+        hashed_password=hash_password("OwnerPass#123"),
+        is_active=True,
+        is_admin=True,
+        subscription_tier="PRO",
+        pro_status="APPROVED",
+        token_version=1,
+    )
+    user2 = User(
+        id=uuid.uuid4(),
+        email="old.admin@example.com",
+        name="Old Admin",
+        hashed_password=hash_password("OldPass#123"),
+        is_active=True,
+        is_admin=True,
+        subscription_tier="PRO",
+        pro_status="APPROVED",
+        token_version=1,
+    )
+    sync_s.add_all([admin1, user2])
+    sync_s.commit()
+
+    # Transient third-party websocket close noise must not capture into Admin alerts
+    handler = AdminErrorLogHandler(level=logging.WARNING)
+    before_logs = len(_CAPTURED_LOGS)
+    rec = logging.LogRecord(
+        name="websocket",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="Connection to remote host was lost. - goodbye",
+        args=(),
+        exc_info=None,
+    )
+    handler.emit(rec)
+    assert len(_CAPTURED_LOGS) == before_logs
+
+    async def _override_db():
+        yield async_s
+
+    _PENDING_DB_ALERTS.clear()
+    app.dependency_overrides[get_db] = _override_db
+    hdrs = {"Authorization": f"Bearer {create_access_token({'sub': str(admin1.id)}, token_version=1)}"}
+
+    try:
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="https://testserver") as client:
+            r1 = await client.post(
+                f"/api/admin/users/{user2.id}/set-admin",
+                headers=hdrs,
+                json={"is_admin": False},
+            )
+            assert r1.status_code == 200
+            r2 = await client.post(
+                f"/api/admin/users/{user2.id}/revoke-sessions",
+                headers=hdrs,
+            )
+            assert r2.status_code == 200
+            # Routine admin actions must stay INFO audit logs and NOT queue WARNING threat alerts
+            assert len(_PENDING_DB_ALERTS) == 0
+            assert sync_s.execute(select(AdminAlertEvent)).scalars().all() == []
+
+            # Resolve All persists sentinel_security_watermark in DB & returns 100/100 health summary
+            sentinel_service._subsystem_status["security"]["status"] = "WARNING"
+            for k in ("database", "redis", "celery", "broker_api"):
+                sentinel_service._subsystem_status[k]["status"] = "HEALTHY"
+            res_all = await client.post(
+                "/api/admin/alerts-hub/acknowledge",
+                headers=hdrs,
+                json={"action": "RESOLVE", "mark_all": True},
+            )
+            assert res_all.status_code == 200
+            body = res_all.json()
+            assert body["sentinel_summary"]["health_score"] == 100
+
+        wm_row = sync_s.execute(
+            select(SystemSettings).where(SystemSettings.key == "sentinel_security_watermark")
+        ).scalars().first()
+        assert wm_row is not None and wm_row.value
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        sentinel_service._subsystem_status = orig_subs
+        sentinel_service._recent_incidents = orig_incidents
+        sentinel_service._security_log_watermark = orig_wm
+        sync_s.close()
+        engine.dispose()

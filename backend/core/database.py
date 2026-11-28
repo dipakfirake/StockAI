@@ -189,6 +189,70 @@ async def create_db_tables():
             except Exception:
                 # Depending on the DB, this might fail if Timescale isn't installed.
                 pass
+
+        # One-time idempotent remediation closing pre-upgrade admin alerts/sentinel incidents cleanly
+        try:
+            from datetime import datetime, timezone
+            from sqlalchemy import select, update
+            from backend.models.settings import SystemSettings
+            from backend.models.admin_alert_event import AdminAlertEvent
+            from backend.models.sentinel_incident import SentinelIncident
+
+            async with AsyncSessionLocal() as rem_db:
+                flag_row = (
+                    await rem_db.execute(
+                        select(SystemSettings).where(SystemSettings.key == "remediation_alerts_resolved_20261128")
+                    )
+                ).scalars().first()
+                if not flag_row:
+                    now_utc = datetime.now(timezone.utc)
+                    await rem_db.execute(
+                        update(AdminAlertEvent)
+                        .where((AdminAlertEvent.status != "RESOLVED") | (AdminAlertEvent.status.is_(None)))
+                        .values(
+                            status="RESOLVED",
+                            is_seen=True,
+                            is_read=True,
+                            resolved_at=now_utc,
+                            resolved_by="System Remediation",
+                        )
+                    )
+                    await rem_db.execute(
+                        update(SentinelIncident)
+                        .where((SentinelIncident.status != "RESOLVED") | (SentinelIncident.status.is_(None)))
+                        .values(
+                            status="RESOLVED",
+                            resolved_at=now_utc,
+                            resolved_by="System Remediation",
+                        )
+                    )
+                    wm_row = (
+                        await rem_db.execute(
+                            select(SystemSettings).where(SystemSettings.key == "sentinel_security_watermark")
+                        )
+                    ).scalars().first()
+                    if wm_row:
+                        wm_row.value = now_utc.isoformat()
+                    else:
+                        rem_db.add(
+                            SystemSettings(
+                                key="sentinel_security_watermark",
+                                value=now_utc.isoformat(),
+                                value_type="string",
+                                description="Sentinel security audit log resolved watermark",
+                            )
+                        )
+                    rem_db.add(
+                        SystemSettings(
+                            key="remediation_alerts_resolved_20261128",
+                            value="done",
+                            value_type="string",
+                            description="One-time marker confirming legacy pre-fix alerts were marked resolved",
+                        )
+                    )
+                    await rem_db.commit()
+        except Exception:
+            pass
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"⚠️ [Database] Connection check deferred: {e}")

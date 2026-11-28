@@ -93,7 +93,7 @@ async def require_admin_stepup(
 
     log_security_event(
         event_type="ADMIN_STEPUP_REQUIRED",
-        severity="WARNING",
+        severity="INFO",
         ip_address=request.client.host if request.client else "unknown",
         user_id=str(admin.id),
         details={"email": admin.email, "path": request.url.path},
@@ -302,7 +302,7 @@ async def set_user_admin_status(
 
     log_security_event(
         event_type="ADMIN_ROLE_UPDATED",
-        severity="WARNING" if not payload.is_admin else "INFO",
+        severity="INFO",
         ip_address="internal",
         user_id=str(admin.id),
         details={
@@ -343,7 +343,7 @@ async def revoke_user_sessions(
 
     log_security_event(
         event_type="USER_SESSIONS_REVOKED",
-        severity="WARNING",
+        severity="INFO",
         ip_address="internal",
         user_id=str(admin.id),
         details={"admin_email": admin.email, "target_user": target_user.email, "token_version": target_user.token_version},
@@ -529,7 +529,7 @@ async def disable_admin_mfa(
 
     log_security_event(
         event_type="ADMIN_TOTP_MFA_DISABLED",
-        severity="WARNING",
+        severity="INFO",
         ip_address="internal",
         user_id=str(db_admin.id),
         details={"email": db_admin.email},
@@ -638,10 +638,12 @@ async def acknowledge_admin_alerts(
         updated += 1
 
     await db.commit()
-    if target_status == "RESOLVED" and updated > 0:
+    from backend.services.sentinel import sentinel_service
+
+    if target_status == "RESOLVED" and (updated > 0 or payload.mark_all):
         try:
             from backend.models.sentinel_incident import SentinelIncident
-            from backend.services.sentinel import sentinel_service
+            from backend.models.settings import SystemSettings
 
             resolved_titles = {getattr(r, "title", None) for r in rows if getattr(r, "title", None)}
             try:
@@ -656,7 +658,6 @@ async def acknowledge_admin_alerts(
                 if inc_rows:
                     await db.commit()
             except Exception:
-                # SQLite unit tests without SentinelIncident table still succeed cleanly
                 pass
 
             remaining_rows = (
@@ -670,9 +671,36 @@ async def acknowledge_admin_alerts(
                 if (rem.category in ("SECURITY_THREAT", "SYSTEM_FAILURE", "CELERY_FAILURE"))
             )
             sentinel_service.sync_security_health_after_resolve(remaining_sec)
+
+            if remaining_sec <= 0:
+                try:
+                    wm = (
+                        await db.execute(
+                            select(SystemSettings).where(SystemSettings.key == "sentinel_security_watermark")
+                        )
+                    ).scalars().first()
+                    if wm:
+                        wm.value = now.isoformat()
+                    else:
+                        db.add(
+                            SystemSettings(
+                                key="sentinel_security_watermark",
+                                value=now.isoformat(),
+                                value_type="string",
+                                description="Sentinel security audit log resolved watermark",
+                            )
+                        )
+                    await db.commit()
+                except Exception:
+                    pass
         except Exception:
             pass
-    return {"success": True, "updated": updated, "status": target_status}
+    return {
+        "success": True,
+        "updated": updated,
+        "status": target_status,
+        "sentinel_summary": sentinel_service.get_health_summary(),
+    }
 
 
 @router.post("/broadcast-notice")

@@ -5953,3 +5953,26 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - Local Vite `/login` HTTP check returned **200** (`Invoke-WebRequest`), then Vite daemon (`task-20580`) was stopped cleanly; Chrome DevTools MCP timed out (`context deadline exceeded` waiting for Chrome remote-debugging approval).
 - **Next Safe Step:**
   - Commit & push locally (`git add -A && git commit && git push origin main`), rebuild & recreate `backend`, `celery_worker`, `celery_beat`, and `frontend` on live server, click `Resolve All` in Admin Threats & Logs, transfer Head Admin ownership to personal email, and enable Phone Authenticator MFA.
+
+
+---
+
+### Session Entry 105
+- **Timestamp:** 2026-11-28 16:50:00 IST (11:20:00 UTC)
+- **User Prompt:**
+  `Live Threats & Logs paste (14 Open alerts, Sentinel Health Score 90/100, Fyers Data Socket -99 Token is expired x17 while Fyers Token ACTIVE, ADMIN ROLE UPDATED & USER SESSIONS REVOKED flagged as SECURITY_THREAT, websocket remote host lost, pre-fix SBIN.NS/yfinance/500s) -> "fix this all if not resolved and mark all these as resolved."`
+- **Root Causes Diagnosed & Fixed:**
+  1. **`FyersDataSocket` `-99 Token is expired` (`×17`) while REST showed `ACTIVE` ([fyers_stream.py](file:///d:/Stock%20Prediction%20System/backend/services/fyers_stream.py), [market_data.py](file:///d:/Stock%20Prediction%20System/backend/services/market_data.py))**:
+     - `FyersStreamService._start_internal()` checked stale `.env` `settings.FYERS_ACCESS_TOKEN` before Redis/DB and read DB `SystemSettings` without calling `decrypt_secret()`, passing either stale `.env` tokens or raw `enc:v1:...` cipher strings to Fyers WebSocket (`reconnect=True` retried 17 times).
+     - Fixed credential precedence (Redis -> DB `SystemSettings` + `decrypt_secret()` -> dynamic `.env` -> static `settings`) in both `fyers_stream.py` and `market_data.py:get_fyers_client()`, halted SDK reconnect spam cleanly on `-99`/auth failure in `_on_error()`, and suppressed duplicate failover warnings in `mark_fyers_token_expired()`.
+  2. **False `SECURITY_THREAT` Alerts & Sticky Sentinel `90/100` ([admin.py](file:///d:/Stock%20Prediction%20System/backend/api/admin.py), [sentinel.py](file:///d:/Stock%20Prediction%20System/backend/services/sentinel.py), [logging_config.py](file:///d:/Stock%20Prediction%20System/backend/core/logging_config.py), [AdminPage.tsx](file:///d:/Stock%20Prediction%20System/frontend/src/pages/AdminPage.tsx))**:
+     - Changed intentional Head Admin audit events (`ADMIN_ROLE_UPDATED`, `USER_SESSIONS_REVOKED`, `ADMIN_TOTP_MFA_DISABLED`, `ADMIN_STEPUP_REQUIRED`) from `WARNING` to `INFO` so they remain logged in Security Audit Log without creating threat incidents.
+     - Persisted `sentinel_security_watermark` in DB `SystemSettings` (survives container restarts), loaded DB decrypted token first in `_probe_broker()`, returned `sentinel_summary` from `/alerts-hub/acknowledge` (and consumed it immediately in `AdminPage.tsx`), and filtered transient `websocket` transport drops (`Connection to remote host was lost`) + case-insensitive `yfinance` noise in `AdminErrorLogHandler`.
+  3. **One-Time Legacy DB Alert Resolution ([database.py](file:///d:/Stock%20Prediction%20System/backend/core/database.py))**:
+     - Added an idempotent, strictly one-time remediation in `init_db()` guarded by `SystemSettings(key="remediation_alerts_resolved_20261128")` that marks all pre-upgrade open/acknowledged `admin_alert_events` & `sentinel_incidents` rows as `RESOLVED` and sets `sentinel_security_watermark = now` on first boot after deploy.
+- **Verification Evidence:**
+  - `python -m py_compile` across all modified/new backend Python files: **exit code 0**.
+  - `pytest` across all 14 backend suites (`-k "not suite_execution"`): **117 passed, 1 deselected, 0 failed in 234.70s** (including 9 tests in [test_advanced_security_upgrades.py](file:///d:/Stock%20Prediction%20System/backend/tests/test_advanced_security_upgrades.py) and 13 in [test_fyers_stream.py](file:///d:/Stock%20Prediction%20System/backend/tests/test_fyers_stream.py)).
+  - Frontend: `eslint` **0 errors/warnings**; `vitest --run` **16 passed, 0 failed**; `tsc && vite build` **1,998 modules transformed in 11.79s**.
+- **Next Safe Step:**
+  - Commit/push locally and run on live server: `cd /home/opc/StockAI && git pull origin main && docker compose build backend celery_worker celery_beat frontend && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend`.

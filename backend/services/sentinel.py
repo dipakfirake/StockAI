@@ -195,24 +195,26 @@ class SentinelService:
         from backend.core.encryption import decrypt_secret
         from backend.services.market_data import MarketDataService
 
-        token = (
-            os.getenv("FYERS_ACCESS_TOKEN", "").strip()
-            or (getattr(app_settings, "FYERS_ACCESS_TOKEN", None) or "").strip()
-            or (getattr(MarketDataService, "_last_loaded_token", None) or "").strip()
-        )
+        token = ""
+        try:
+            from backend.models.settings import SystemSettings
+            async with AsyncSessionLocal() as session:
+                row = (
+                    await session.execute(
+                        select(SystemSettings).where(SystemSettings.key == "fyers_access_token")
+                    )
+                ).scalar_one_or_none()
+                if row and row.value:
+                    token = decrypt_secret(row.value).strip()
+        except Exception:
+            pass
+
         if not token or token == "your_fyers_access_token_here":
-            try:
-                from backend.models.settings import SystemSettings
-                async with AsyncSessionLocal() as session:
-                    row = (
-                        await session.execute(
-                            select(SystemSettings).where(SystemSettings.key == "fyers_access_token")
-                        )
-                    ).scalar_one_or_none()
-                    if row and row.value:
-                        token = decrypt_secret(row.value).strip()
-            except Exception:
-                pass
+            token = (
+                (getattr(MarketDataService, "_last_loaded_token", None) or "").strip()
+                or os.getenv("FYERS_ACCESS_TOKEN", "").strip()
+                or (getattr(app_settings, "FYERS_ACCESS_TOKEN", None) or "").strip()
+            )
 
         has_token = bool(token and token != "your_fyers_access_token_here" and len(token) > 10)
         if not has_token and getattr(MarketDataService, "_fyers_token_valid", False):
@@ -275,6 +277,23 @@ class SentinelService:
                 now_utc = datetime.now(timezone.utc)
                 cutoff_utc = now_utc - _timedelta(minutes=30)
                 watermark = getattr(self, "_security_log_watermark", None)
+                if watermark is None:
+                    try:
+                        from backend.models.settings import SystemSettings
+                        async with AsyncSessionLocal() as session:
+                            wm_row = (
+                                await session.execute(
+                                    select(SystemSettings).where(SystemSettings.key == "sentinel_security_watermark")
+                                )
+                            ).scalar_one_or_none()
+                            if wm_row and wm_row.value:
+                                parsed_wm = datetime.fromisoformat(str(wm_row.value).strip().replace("Z", "+00:00"))
+                                if parsed_wm.tzinfo is None:
+                                    parsed_wm = parsed_wm.replace(tzinfo=timezone.utc)
+                                self._security_log_watermark = parsed_wm
+                                watermark = parsed_wm
+                    except Exception:
+                        pass
                 if watermark is not None and watermark > cutoff_utc:
                     cutoff_utc = watermark
 

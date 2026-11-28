@@ -560,13 +560,17 @@ class MarketDataService:
     def mark_fyers_token_expired(cls, reason: str = "Token expired or invalid", cooldown_seconds: float = 300.0) -> None:
         """Flags Fyers as expired and engages the autonomous Yahoo backup engine."""
         import time
+        was_valid = cls._fyers_token_valid
         cls._fyers_token_valid = False
         cls._fyers_token_error_reason = reason
         cls._active_engine = "BACKUP_YAHOO"
         cls._circuit_state = "OPEN"
         cls._fyers_cooldown_until = time.time() + cooldown_seconds
         cls._canary_in_progress = False
-        logger.warning(f"Dual-Engine Failover Engaged: Fyers marked expired ({reason}). Active feed switched to Yahoo Finance Backup.")
+        if was_valid:
+            logger.warning(f"Dual-Engine Failover Engaged: Fyers marked expired ({reason}). Active feed switched to Yahoo Finance Backup.")
+        else:
+            logger.debug(f"Dual-Engine Failover already engaged ({reason}).")
 
     @classmethod
     def record_fyers_rate_limit(cls, reason: str = "Rate limit reached", cooldown_seconds: float = 3.0) -> None:
@@ -674,12 +678,13 @@ class MarketDataService:
         # 1. Check Redis cache ('fyers_creds') first to avoid Neon DB churn every call
         try:
             from backend.core.cache import cache_get
+            from backend.core.encryption import decrypt_secret
             cached = await asyncio.wait_for(cache_get("fyers_creds"), timeout=0.5)
-            if cached:
+            if cached and isinstance(cached, dict):
                 if cached.get("access_token"):
-                    discovered_token = str(cached["access_token"]).strip()
+                    discovered_token = decrypt_secret(str(cached["access_token"])).strip()
                 if cached.get("client_id"):
-                    discovered_client_id = str(cached["client_id"]).strip()
+                    discovered_client_id = decrypt_secret(str(cached["client_id"])).strip()
         except Exception:
             pass
 
@@ -709,16 +714,6 @@ class MarketDataService:
                     discovered_client_id = db_cid
                 if db_tok:
                     discovered_token = db_tok
-            except Exception:
-                pass
-            try:
-                from backend.core.cache import cache_get
-                cached_creds = await asyncio.wait_for(cache_get("fyers_creds"), timeout=0.5)
-                if cached_creds and isinstance(cached_creds, dict):
-                    if cached_creds.get("access_token"):
-                        discovered_token = str(cached_creds["access_token"]).strip()
-                    if cached_creds.get("client_id") and not discovered_client_id:
-                        discovered_client_id = str(cached_creds["client_id"]).strip()
             except Exception:
                 pass
 
@@ -783,15 +778,17 @@ class MarketDataService:
         from backend.models.settings import SystemSettings
         from sqlalchemy import select
         
-        client_id = settings.FYERS_CLIENT_ID
-        access_token = settings.FYERS_ACCESS_TOKEN
+        client_id = None
+        access_token = None
 
         # Fast in-process credential micro-cache (15s) to avoid opening DB connections per stock
         import time as _time_mod
+        from backend.core.encryption import decrypt_secret
         mem_creds = MarketDataService._mem_fyers_creds
         if mem_creds and _time_mod.time() < mem_creds[2]:
-            client_id, access_token = mem_creds[0], mem_creds[1]
-            return MarketDataService._build_cached_fyers_model(client_id, access_token)
+            client_id, access_token = decrypt_secret(mem_creds[0]).strip(), decrypt_secret(mem_creds[1]).strip()
+            if client_id and access_token:
+                return MarketDataService._build_cached_fyers_model(client_id, access_token)
 
         try:
             from backend.core.cache import cache_get, cache_set
@@ -799,17 +796,17 @@ class MarketDataService:
             # Priority 1: Check Redis Cache ('fyers_creds') first to avoid Postgres round-trips per quote/candle
             cached_creds = await cache_get("fyers_creds")
             if cached_creds and cached_creds.get("client_id") and cached_creds.get("access_token"):
-                client_id = str(cached_creds["client_id"]).strip()
-                access_token = str(cached_creds["access_token"]).strip()
-                MarketDataService._mem_fyers_creds = (client_id, access_token, _time_mod.time() + 15.0)
-                return MarketDataService._build_cached_fyers_model(client_id, access_token)
+                client_id = decrypt_secret(str(cached_creds["client_id"])).strip()
+                access_token = decrypt_secret(str(cached_creds["access_token"])).strip()
+                if client_id and access_token:
+                    MarketDataService._mem_fyers_creds = (client_id, access_token, _time_mod.time() + 15.0)
+                    return MarketDataService._build_cached_fyers_model(client_id, access_token)
 
-            # Priority 2: Check PostgreSQL SystemSettings if Redis cache cold
+            # Priority 2: Check PostgreSQL SystemSettings (authoritative persistent token across restarts)
             db = AsyncSessionLocal()
             try:
                 fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
                 fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
-                from backend.core.encryption import decrypt_secret
                 if fyers_client_obj and fyers_client_obj.value:
                     dec_cid = decrypt_secret(fyers_client_obj.value).strip()
                     if len(dec_cid) > 3:
@@ -824,10 +821,11 @@ class MarketDataService:
             if client_id and access_token:
                 await cache_set("fyers_creds", {"client_id": client_id, "access_token": access_token}, ttl=300)
                 MarketDataService._mem_fyers_creds = (client_id, access_token, _time_mod.time() + 15.0)
+                return MarketDataService._build_cached_fyers_model(client_id, access_token)
         except Exception:
             pass
         
-        # Dynamically read latest values from mounted /app/.env if available
+        # Priority 3: Read latest values from mounted /app/.env only if DB/Redis missed
         env_paths = [
             "/app/.env",
             os.path.join(os.getcwd(), ".env"),
@@ -848,12 +846,18 @@ class MarketDataService:
                     MarketDataService._env_mtime = mtime
                 
                 if MarketDataService._env_cache:
-                    if MarketDataService._env_cache.get("FYERS_CLIENT_ID"):
+                    if MarketDataService._env_cache.get("FYERS_CLIENT_ID") and not client_id:
                         client_id = MarketDataService._env_cache["FYERS_CLIENT_ID"]
                     if MarketDataService._env_cache.get("FYERS_ACCESS_TOKEN") and not access_token:
                         access_token = MarketDataService._env_cache["FYERS_ACCESS_TOKEN"]
             except Exception:
                 pass
+
+        # Priority 4: Process environment / startup settings fallback
+        if not client_id:
+            client_id = settings.FYERS_CLIENT_ID
+        if not access_token:
+            access_token = settings.FYERS_ACCESS_TOKEN
         
         if client_id:
             client_id = str(client_id).strip()

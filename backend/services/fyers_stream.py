@@ -375,56 +375,81 @@ class FyersStreamService:
 
         self._loop = asyncio.get_running_loop()
 
-        # Discover credentials from settings, database, or environment
+        # Discover credentials cleanly: Redis -> DB SystemSettings (decrypt) -> dynamic env -> static settings
         from backend.services.market_data import MarketDataService
-        client_id = settings.FYERS_CLIENT_ID
-        access_token = settings.FYERS_ACCESS_TOKEN
+        from backend.core.encryption import decrypt_secret, is_encrypted_secret
+
+        client_id = None
+        access_token = None
+
+        def _unwrap_cred(raw_val: Any) -> str:
+            text = str(raw_val or "").strip()
+            if not text:
+                return ""
+            if is_encrypted_secret(text):
+                return decrypt_secret(text).strip()
+            return text
 
         # Priority 1: Check Redis cache ('fyers_creds') first to avoid Neon DB latency on boot
         try:
             cached_creds = await asyncio.wait_for(cache_get("fyers_creds"), timeout=0.8)
-            if cached_creds:
-                if not client_id and cached_creds.get("client_id"):
-                    client_id = cached_creds["client_id"]
-                if not access_token and cached_creds.get("access_token"):
-                    access_token = cached_creds["access_token"]
+            if cached_creds and isinstance(cached_creds, dict):
+                c_cid = _unwrap_cred(cached_creds.get("client_id"))
+                c_tok = _unwrap_cred(cached_creds.get("access_token"))
+                if len(c_cid) > 3:
+                    client_id = c_cid
+                if len(c_tok) > 10:
+                    access_token = c_tok
         except Exception:
             pass
 
-        # Priority 2: Fallback to PostgreSQL SystemSettings if Redis missed
+        # Priority 2: Fallback to PostgreSQL SystemSettings (decrypting enc:v1: secrets)
         if not access_token or not client_id:
             try:
                 from backend.core.database import AsyncSessionLocal
                 from backend.models.settings import SystemSettings
                 from sqlalchemy import select
 
-                db = AsyncSessionLocal()
-                try:
-                    fyers_client_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
-                    fyers_token_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
-                    if fyers_client_obj and fyers_client_obj.value and len(fyers_client_obj.value.strip()) > 3:
-                        client_id = fyers_client_obj.value.strip()
-                    if fyers_token_obj and fyers_token_obj.value and len(fyers_token_obj.value.strip()) > 10:
-                        access_token = fyers_token_obj.value.strip()
-                finally:
-                    await asyncio.shield(db.close())
+                async def _load_db_creds():
+                    db = AsyncSessionLocal()
+                    try:
+                        c_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_client_id"))).scalar_one_or_none()
+                        t_obj = (await db.execute(select(SystemSettings).where(SystemSettings.key == "fyers_access_token"))).scalar_one_or_none()
+                        db_cid = _unwrap_cred(c_obj.value) if c_obj and c_obj.value else ""
+                        db_tok = _unwrap_cred(t_obj.value) if t_obj and t_obj.value else ""
+                        return db_cid, db_tok
+                    finally:
+                        await asyncio.shield(db.close())
+
+                db_cid, db_tok = await asyncio.wait_for(_load_db_creds(), timeout=1.2)
+                if not client_id and len(db_cid) > 3:
+                    client_id = db_cid
+                if not access_token and len(db_tok) > 10:
+                    access_token = db_tok
             except Exception as e:
                 logger.debug(f"Database settings query skipped: {e}")
 
-        # Check environment dynamic cache
+        # Priority 3: Check environment dynamic cache and startup settings only if DB/Redis missed
         if hasattr(MarketDataService, "_env_cache") and MarketDataService._env_cache:
-            if MarketDataService._env_cache.get("FYERS_CLIENT_ID"):
-                client_id = MarketDataService._env_cache["FYERS_CLIENT_ID"]
-            if MarketDataService._env_cache.get("FYERS_ACCESS_TOKEN") and not access_token:
-                access_token = MarketDataService._env_cache["FYERS_ACCESS_TOKEN"]
+            if not client_id and MarketDataService._env_cache.get("FYERS_CLIENT_ID"):
+                client_id = str(MarketDataService._env_cache["FYERS_CLIENT_ID"]).strip()
+            if not access_token and MarketDataService._env_cache.get("FYERS_ACCESS_TOKEN"):
+                access_token = str(MarketDataService._env_cache["FYERS_ACCESS_TOKEN"]).strip()
+
+        if not client_id:
+            client_id = settings.FYERS_CLIENT_ID
+        if not access_token:
+            access_token = settings.FYERS_ACCESS_TOKEN
 
         if not client_id or not access_token:
             logger.info("Fyers WebSocket stream not started: credentials not configured. Operating in autonomous polling fallback mode.")
             return False
 
-        # Clean tokens
+        # Clean tokens and refresh Redis credential cache if DB succeeded while Redis missed
         client_id = str(client_id).strip()
-        access_token = str(access_token).strip()
+        access_token = _unwrap_cred(access_token)
+        if not client_id or not access_token:
+            return False
         self._client_id = client_id
         self._access_token = access_token
 
@@ -561,16 +586,44 @@ class FyersStreamService:
     def _on_error(self, message: Any) -> None:
         """Callback when Fyers WebSocket encounters an error."""
         self._last_error = str(message)[:200]
-        logger.warning(f"Fyers Data Socket error: {message}")
         if self._handle_invalid_symbol_message(message):
             return
         try:
             from backend.services.market_data import MarketDataService
             msg_str = str(message).lower()
-            if "token" in msg_str or "auth" in msg_str or "expire" in msg_str or "unauthorized" in msg_str:
+            is_auth_err = (
+                (isinstance(message, dict) and message.get("code") in (-99, -15, -16, -17))
+                or "token" in msg_str
+                or "auth" in msg_str
+                or "expire" in msg_str
+                or "unauthorized" in msg_str
+            )
+            if is_auth_err:
+                was_valid = MarketDataService._fyers_token_valid
+                if was_valid:
+                    logger.warning(f"Fyers Data Socket error: {message}")
+                else:
+                    logger.debug(f"Fyers Data Socket error (already failed over): {message}")
                 MarketDataService.mark_fyers_token_expired(f"WebSocket error: {message}")
+                # Halt Fyers SDK reconnect thread spam cleanly until a new token arrives
+                self._is_connected = False
+                self._is_running = False
+                if self._loop and self._loop.is_running():
+                    try:
+                        try:
+                            cur_loop = asyncio.get_running_loop()
+                        except RuntimeError:
+                            cur_loop = None
+                        if cur_loop is self._loop:
+                            self._loop.create_task(self.stop())
+                        else:
+                            asyncio.run_coroutine_threadsafe(self.stop(), self._loop)
+                    except Exception:
+                        pass
+                return
         except Exception:
             pass
+        logger.warning(f"Fyers Data Socket error: {message}")
 
     def _on_tick(self, message: dict) -> None:
         """

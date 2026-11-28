@@ -27,18 +27,35 @@ class AdminErrorLogHandler(logging.Handler):
         # Ignore transient per-symbol third-party Yahoo probes (rate limits / delisted fallbacks)
         if record.name.startswith("yfinance"):
             try:
-                raw_msg = record.getMessage()
+                raw_msg = record.getMessage().lower()
             except Exception:
                 raw_msg = ""
             if any(
                 noise in raw_msg
                 for noise in (
                     "possibly delisted",
-                    "429 Client Error",
-                    "Expecting value",
-                    "Failed to get ticker",
-                    "No data found",
-                    "No timezone found",
+                    "symbol may be delisted",
+                    "429 client error",
+                    "expecting value",
+                    "failed to get ticker",
+                    "no data found",
+                    "no price data found",
+                    "no timezone found",
+                )
+            ):
+                return
+        # Ignore transient third-party websocket-client transport drops (managed cleanly by FyersStreamService)
+        if record.name == "websocket" or record.name.startswith("websocket."):
+            try:
+                ws_msg = record.getMessage().lower()
+            except Exception:
+                ws_msg = ""
+            if any(
+                noise in ws_msg
+                for noise in (
+                    "connection to remote host was lost",
+                    "socket is already closed",
+                    "goodbye",
                 )
             ):
                 return

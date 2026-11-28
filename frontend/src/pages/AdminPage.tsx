@@ -241,7 +241,10 @@ export default function AdminPage() {
 
   const handleAcknowledgeAdminAlert = async (alertId?: string, action: 'ACKNOWLEDGE' | 'RESOLVE' = 'ACKNOWLEDGE', markAll = false) => {
     try {
-      await adminApi.acknowledgeAlertsHub({ alert_id: alertId, action, mark_all: markAll });
+      const res = await adminApi.acknowledgeAlertsHub({ alert_id: alertId, action, mark_all: markAll });
+      if (res.data?.sentinel_summary) {
+        setAlertsHubData((prev: any) => ({ ...prev, sentinel_summary: res.data.sentinel_summary }));
+      }
       await fetchAdminAlertsHub(true);
       window.dispatchEvent(new CustomEvent('stockai:admin-alerts-updated'));
       toast.success(action === 'RESOLVE' ? 'Incident resolved' : 'Incident acknowledged');
