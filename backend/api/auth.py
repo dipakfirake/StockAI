@@ -817,4 +817,185 @@ async def report_client_telemetry(
     }
 
 
+class DeleteAccountRequest(BaseModel):
+    confirm_email: str
+    confirmation: str
+    password: Optional[str] = None
+    totp_code: Optional[str] = None
+
+
+@router.get("/export-data")
+async def export_user_personal_data(
+    req: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export all user-owned account, preference, watchlist, alert, paper-trade, and notification records (DPDPA 2023)."""
+    from datetime import datetime, timezone
+    from backend.models.watchlist import Watchlist
+    from backend.models.alert import Alert
+    from backend.models.paper_trade import PaperTrade
+    from backend.models.user_preference import UserPreference
+    from backend.models.notification import Notification
+    from backend.models.subscription import SubscriptionOrder
+
+    uid = current_user.id
+
+    prefs = (await db.execute(select(UserPreference).where(UserPreference.user_id == uid))).scalars().all()
+    wl = (await db.execute(select(Watchlist).where(Watchlist.user_id == uid))).scalars().all()
+    alerts = (await db.execute(select(Alert).where(Alert.user_id == uid))).scalars().all()
+    trades = (await db.execute(select(PaperTrade).where(PaperTrade.user_id == uid))).scalars().all()
+    notifs = (await db.execute(select(Notification).where(Notification.user_id == uid))).scalars().all()
+    orders = (await db.execute(select(SubscriptionOrder).where(SubscriptionOrder.user_id == uid))).scalars().all()
+
+    log_security_event(
+        event_type="USER_DATA_EXPORTED",
+        severity="INFO",
+        ip_address=_get_client_ip(req),
+        user_id=str(uid),
+        details={"email": current_user.email},
+    )
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "standard": "DPDPA-2023-Personal-Export",
+        "account": {
+            "id": str(uid),
+            "email": current_user.email,
+            "name": current_user.name,
+            "subscription_tier": current_user.subscription_tier,
+            "pro_status": current_user.pro_status,
+            "is_admin": bool(current_user.is_admin),
+            "totp_enabled": bool(getattr(current_user, "totp_enabled", False)),
+            "created_at": current_user.created_at.isoformat() if getattr(current_user, "created_at", None) else None,
+        },
+        "preferences": {p.pref_key: p.get_value() for p in prefs},
+        "watchlists": [
+            {"id": str(w.id), "symbol": w.symbol, "notes": getattr(w, "notes", None)}
+            for w in wl
+        ],
+        "alerts": [
+            {
+                "id": str(a.id),
+                "symbol": a.symbol,
+                "condition_type": a.condition_type,
+                "condition_value": float(a.condition_value),
+                "is_active": bool(a.is_active),
+                "message": a.message,
+            }
+            for a in alerts
+        ],
+        "paper_trades": [
+            {
+                "id": str(t.id),
+                "symbol": t.symbol,
+                "direction": t.direction,
+                "order_type": t.order_type,
+                "product_type": t.product_type,
+                "quantity": t.quantity,
+                "status": t.status,
+                "entry_price": float(t.entry_price) if t.entry_price is not None else None,
+                "exit_price": float(t.exit_price) if t.exit_price is not None else None,
+                "realized_pnl": float(t.realized_pnl) if t.realized_pnl is not None else None,
+                "opened_at": t.opened_at.isoformat() if t.opened_at else None,
+                "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+            }
+            for t in trades
+        ],
+        "notifications_count": len(notifs),
+        "subscription_orders": [
+            {
+                "id": str(o.id),
+                "plan_tier": o.plan_tier,
+                "amount": float(o.amount),
+                "currency": getattr(o, "currency", "INR"),
+                "status": o.status,
+                "payment_reference": o.payment_reference,
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            }
+            for o in orders
+        ],
+    }
+
+
+@router.post("/delete-account")
+async def delete_own_account(
+    payload: DeleteAccountRequest,
+    req: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete the authenticated user's account and purge all associated personal records."""
+    from sqlalchemy import delete as sql_delete
+    from jose import jwt as _jwt
+    from backend.models.watchlist import Watchlist
+    from backend.models.alert import Alert
+    from backend.models.paper_trade import PaperTrade
+    from backend.models.user_preference import UserPreference
+    from backend.models.notification import Notification
+    from backend.models.subscription import SubscriptionOrder
+
+    if (payload.confirmation or "").strip().upper() != "DELETE":
+        raise HTTPException(status_code=400, detail="Type DELETE cleanly in confirmation to permanently delete your account.")
+    if (payload.confirm_email or "").strip().lower() != current_user.email.lower():
+        raise HTTPException(status_code=400, detail="Confirmation email does not match the signed-in account.")
+
+    db_user = (await db.execute(select(User).where(User.id == current_user.id))).scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="Account record not found")
+
+    if bool(db_user.is_admin):
+        active_admins = (
+            await db.execute(select(User).where(User.is_admin == True, User.is_active == True))
+        ).scalars().all()
+        if len(active_admins) <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete the sole active administrator account. Transfer Head Admin role in Admin -> Users first.",
+            )
+
+    if payload.password:
+        if not verify_password(payload.password, db_user.hashed_password):
+            raise HTTPException(status_code=401, detail="Incorrect account password.")
+
+    if bool(getattr(db_user, "totp_enabled", False)) and getattr(db_user, "totp_secret_encrypted", None):
+        code_in = (payload.totp_code or "").strip()
+        secret = decrypt_secret(db_user.totp_secret_encrypted)
+        if not code_in or not (verify_totp_code(secret, code_in) or consume_recovery_code(db_user, code_in)):
+            raise HTTPException(status_code=401, detail="Valid 6-digit authenticator code required to delete a 2FA-protected account.")
+
+    target_uid = db_user.id
+    target_email = db_user.email
+
+    # Explicit child cleanup handles tables without ON DELETE CASCADE safely on Postgres & SQLite
+    for model_cls in (Notification, SubscriptionOrder, PaperTrade, Alert, Watchlist, UserPreference):
+        await db.execute(sql_delete(model_cls).where(model_cls.user_id == target_uid))
+    await db.delete(db_user)
+    await db.commit()
+
+    invalidate_user_auth_cache(target_uid)
+    jwt_token = extract_request_jwt(req, token)
+    if jwt_token:
+        try:
+            claims = _jwt.decode(jwt_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            await revoke_token_jti(claims.get("jti"), claims.get("exp"))
+        except Exception:
+            pass
+
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+    response.delete_cookie(key=CSRF_COOKIE_NAME, path="/")
+
+    log_security_event(
+        event_type="ACCOUNT_DELETED_BY_USER",
+        severity="INFO",
+        ip_address=_get_client_ip(req),
+        user_id=str(target_uid),
+        details={"email": target_email},
+    )
+    return {"status": "deleted", "email": target_email}
+
+
+
 

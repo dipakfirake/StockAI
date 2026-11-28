@@ -419,6 +419,54 @@ export default function AdminPage() {
         error: err.response?.data?.detail || err.message,
       }));
     }
+    fetchDrStatus();
+  };
+
+  const [drStatus, setDrStatus] = useState<any>(null);
+  const [drBusy, setDrBusy] = useState<'backup' | 'verify' | null>(null);
+
+  const fetchDrStatus = async () => {
+    try {
+      const res = await adminApi.getDrStatus();
+      setDrStatus(res.data || null);
+    } catch {
+      // Optional DR card
+    }
+  };
+
+  const handleCreateDrBackup = async () => {
+    setDrBusy('backup');
+    try {
+      const res = await adminApi.createDrBackup();
+      const snap = res.data?.snapshot;
+      toast.success('Database Backup Created', `${snap?.filename || 'Snapshot'} (${snap?.total_rows ?? 0} rows verified)`);
+      await fetchDrStatus();
+    } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({ title: 'Verify Authenticator for DR Backup', run: handleCreateDrBackup });
+      } else {
+        toast.error('Backup Failed', err?.response?.data?.detail || err.message);
+      }
+    } finally {
+      setDrBusy(null);
+    }
+  };
+
+  const handleVerifyDrDrill = async () => {
+    setDrBusy('verify');
+    try {
+      const res = await adminApi.verifyDrBackup();
+      toast.success('DR Restore Drill Passed', `Restored & verified ${res.data?.restored_rows ?? 0} rows in isolated sandbox`);
+      await fetchDrStatus();
+    } catch (err: any) {
+      if (isStepUpRequiredError(err)) {
+        setPendingStepUpAction({ title: 'Verify Authenticator for DR Restore Drill', run: handleVerifyDrDrill });
+      } else {
+        toast.error('DR Drill Failed', err?.response?.data?.detail || err.message);
+      }
+    } finally {
+      setDrBusy(null);
+    }
   };
 
   const handleCopyText = (text: string, label: string) => {
@@ -3024,6 +3072,83 @@ export default function AdminPage() {
                 <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#4ade80', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <div>Fyers: <span style={{ color: '#4ade80' }}>CLOSED (Nominal)</span></div>
                   <div>Market Data: <span style={{ color: '#4ade80' }}>CLOSED (Nominal)</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* CARD 4: SCHEMA MIGRATIONS, PORTABLE BACKUPS & DISASTER RECOVERY */}
+          <div
+            className="card"
+            style={{
+              padding: 24,
+              borderRadius: 12,
+              background: 'rgba(15, 23, 42, 0.6)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ShieldCheck size={20} color="#38bdf8" />
+                  Alembic Migrations, Automated Backups &amp; DR Drills
+                </h3>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Portable compressed snapshots + SHA-256 verification + isolated SQLite restore test (nightly 02:30 IST).
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={handleCreateDrBackup}
+                  disabled={drBusy !== null}
+                  className="btn btn-primary"
+                  style={{ fontSize: '0.8rem', padding: '7px 14px' }}
+                >
+                  <Download size={14} /> {drBusy === 'backup' ? 'Creating Snapshot...' : 'Create Backup Snapshot'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleVerifyDrDrill}
+                  disabled={drBusy !== null}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.8rem', padding: '7px 14px' }}
+                >
+                  <RefreshCw size={14} className={drBusy === 'verify' ? 'spin' : ''} /> {drBusy === 'verify' ? 'Running Drill...' : 'Run Restore Drill'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 12 }}>
+              <div style={{ padding: 12, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Schema Revision</div>
+                <div className="mono" style={{ fontSize: '1.05rem', fontWeight: 700, color: drStatus?.migrations?.in_sync ? '#4ade80' : '#fbbf24', marginTop: 4 }}>
+                  {drStatus?.migrations?.current_revision || 'Baseline Active'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Status: {drStatus?.migrations?.status || 'Checked'}
+                </div>
+              </div>
+
+              <div style={{ padding: 12, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Stored Snapshots</div>
+                <div className="mono" style={{ fontSize: '1.05rem', fontWeight: 700, color: '#38bdf8', marginTop: 4 }}>
+                  {drStatus?.snapshot_count ?? 0} / {drStatus?.retention_count ?? 14} kept
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2, wordBreak: 'break-all' }}>
+                  {drStatus?.latest_snapshot?.filename || 'No snapshot taken yet'}
+                </div>
+              </div>
+
+              <div style={{ padding: 12, borderRadius: 8, background: 'rgba(0, 0, 0, 0.25)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>Last Restore Drill</div>
+                <div className="mono" style={{ fontSize: '1.05rem', fontWeight: 700, color: drStatus?.last_verified_drill?.drill_passed ? '#4ade80' : '#94a3b8', marginTop: 4 }}>
+                  {drStatus?.last_verified_drill?.drill_passed ? 'PASSED' : 'Pending'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {drStatus?.last_verified_drill
+                    ? `${drStatus.last_verified_drill.restored_rows} rows verified`
+                    : 'Click Run Restore Drill to test'}
                 </div>
               </div>
             </div>

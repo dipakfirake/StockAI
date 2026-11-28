@@ -54,6 +54,8 @@ audits/lighthouse*
 audits/**/*.xlsx
 !audits/**/.gitkeep
 *.xlsx
+backups/
+*.backup.json.gz*
 
 # Security, Keys, Credentials & Dumps (Never upload to Git)
 *.key

@@ -53,7 +53,8 @@ export default function PricingPage() {
       const res = await subscriptionApi.checkout({
         payment_method: payMethod,
         payment_reference: payRef.trim(),
-        amount: 29.0,
+        amount: 2499.0,
+        currency: 'INR',
       });
       setSuccess(res.data.message || 'Payment verified! Upgraded to PRO.');
       setShowPayModal(false);

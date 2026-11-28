@@ -16,8 +16,8 @@ class SubscriptionOrder(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     plan_tier: Mapped[str] = mapped_column(String(50), default="PRO")
-    amount: Mapped[float] = mapped_column(Float, default=29.0)
-    currency: Mapped[str] = mapped_column(String(10), default="USD")
+    amount: Mapped[float] = mapped_column(Float, default=2499.0)
+    currency: Mapped[str] = mapped_column(String(10), default="INR")
     payment_method: Mapped[str] = mapped_column(String(50), default="UPI_CARD")  # UPI, CARD, ADMIN_OVERRIDE
     payment_reference: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(50), default="PENDING")  # PENDING, SUCCESS, FAILED, ADMIN_APPROVED, REJECTED

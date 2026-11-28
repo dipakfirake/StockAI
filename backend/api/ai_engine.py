@@ -79,8 +79,13 @@ async def ai_chat(
 
     result = await rag_service.process_chat_query(
         message=request.message.strip(),
-        symbol_hint=request.symbol.strip() if request.symbol else None
+        symbol_hint=request.symbol.strip() if request.symbol else None,
+        user_id=str(getattr(current_user, "id", "") or ""),
+        user_tier=str(getattr(current_user, "subscription_tier", "PRO") or "PRO"),
+        is_admin=bool(getattr(current_user, "is_admin", False)),
     )
+    if result.get("source") == "quota_guardrail":
+        raise HTTPException(status_code=429, detail=result.get("reply") or "Daily AI quota reached")
     return {
         "reply": result.get("reply", ""),
         "response": result.get("response", ""),
@@ -92,5 +97,6 @@ async def ai_chat(
         "cached": result.get("cached", False),
         "tokens_used": result.get("tokens_used"),
         "latency_ms": result.get("latency_ms"),
+        "quota": result.get("quota"),
         "type": "text"
     }

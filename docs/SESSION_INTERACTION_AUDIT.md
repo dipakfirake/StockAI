@@ -6019,3 +6019,56 @@ PermissionError: [Errno 13] Permission denied: '/etc/nginx/conf.d/stockai.conf'"
   - `npm --prefix frontend run build` (`tsc && vite build`): **2,000 modules transformed, 0 TypeScript errors, built in `15.36s`**.
 - **Next Safe Step:**
   - Commit & push locally (`git add -A && git commit && git push origin main`), then run on live server: `cd /home/opc/StockAI && git pull origin main && docker compose build frontend && docker compose up -d --no-build --force-recreate frontend`.
+
+---
+
+### Session Entry 108
+- **Timestamp:** 2026-11-28 21:36:00 IST (16:06:00 UTC)
+- **User Prompt:**
+  `Pasted Celery Flower Workers summary (celery@stockcelery Online, Active 0, Processed 25565, Failed 79, Succeeded 25472, Retried 0) -> "why there are always 79 failed process from yesterday in celery flower ?"`
+- **Root Cause Diagnosis (Read-Only Investigation):**
+  1. **Cumulative In-Memory Flower State (`docker-compose.yml`):**
+     - `stockflower` runs without `--persistent=True` (`--db=...`) and stores task events in memory since the last time the `flower` container itself restarted.
+     - Recent deploy commands (`restart/recreate backend celery_worker celery_beat frontend`) never restarted `flower`, and clicking `Resolve All` in Admin Control only updates PostgreSQL `admin_alert_events` / `sentinel_incidents` — not Flower's in-memory `Failed` counter (`79` across `25,565` cumulative tasks).
+  2. **Which Tasks Can Increment Flower `FAILURE` (`backend/tasks/`, `backend/celery_app.py`):**
+     - Only `evaluate_paper_trades` / `square_off_intraday` (`trading_tasks.py` — unguarded top-level coroutines), `ingest_watchlist_stocks` (`market_tasks.py` — `self.retry(...)` up to `max_retries=3`), or abrupt worker exits propagate `FAILURE` to Flower (most other Beat tasks catch `Exception` and return `{"error": ...}`).
+     - Prior `AI_HANDOFF.md` (`2026-11-26`) recorded `56` consecutive `evaluate_paper_trades` `Too many open files` failures fixed via `backend/core/celery_async.py`. Because live container inspection / remote commands are disallowed (`AGENTS.md`), user should inspect timestamps/tracebacks at `/flower/tasks?state=FAILURE` (or Admin `Threats & Logs -> Celery Task Crashes`), paste any recent (`>= 2026-11-27`) failure if present, or restart `flower` (`docker compose restart flower`) to reset stale historical counts.
+- **Next Safe Step:**
+  - User checks `/flower/tasks?state=FAILURE` timestamps/errors or resets stale Flower memory via `docker compose restart flower` (and deploys pending frontend changes when ready).
+
+---
+
+### Session Entry 109
+- **Timestamp:** 2026-11-28 22:05:00 IST (16:35:00 UTC)
+- **User Prompt:**
+  `Uploaded 12-page PDF ("103 Things Developers Should Know Before Shipping to Production" by VikasBuilds) -> "Analyze this full pdf and tell me how many things we made in our system and how much remaining from it and is all really needed or we have advanced system than this and what to do next suggest me ?"`
+- **Code-Verified Gap Audit Summary (58 Done / 19 Partial / 26 Missing or Not Needed = 103):**
+  - **100% Built or More Advanced Than PDF:** Security (`11/11`: HttpOnly JWT, Double-Submit CSRF, Redis Lua rate limiting & brute-force lockout, Fernet `enc:v1:` secrets, `pyotp` TOTP MFA + recovery + Step-Up, `token_version` + `jti` revocation, GeoIP/fraud velocity, disposable-email intelligence, CSP), Reliability (`9/11`: Hystrix Circuit Breakers, Fyers->Yahoo failover, Groq->Deterministic Quant RAG fallback, 24/7 Sentinel Watchdog, Prometheus `/metrics`, Idempotency keys, L1+L2 Redis Single-Flight cache, Correct-by-Construction quant AI grounding).
+  - **Only Truly High-Value Gaps Left to Address Next:**
+    1. **Automated PostgreSQL `pg_dump` Backups & Verified Restore Script** (Items `#6`, `#7`, `#103`) — currently missing from repo.
+    2. **React `<ErrorBoundary>` + Route `React.lazy()` Code Splitting** (Items `#39`, `#33`) — prevents blank UI screens on widget runtime errors and trims initial ~625 KB JS chunk.
+    3. **Clean Alembic Initial Baseline Migration (`backend/alembic/versions/`)** (Items `#4`, `#5`) — currently `versions/` is empty and schema relies on `create_db_tables()` `ALTER TABLE` blocks.
+    4. **External Uptime Ping + Prompt-Injection/Output Filter on Groq Chat + `currency="INR"` consistency check in `/api/subscription/checkout`** (`subscription.py:130` vs `PricingPage`).
+    5. *(Optional SaaS / Public Launch Only)*: Real Razorpay/Stripe webhook billing (`#77–82`), self-serve account deletion/export (`#84–85`), standalone Privacy/Terms pages (`#86`), and `sitemap.xml` (`robots.txt` references it, missing in `frontend/public/`).
+- **Next Safe Step:**
+  - User decides which of the Top 3–4 practical gaps (Automated DB Backup+Restore, React `<ErrorBoundary>` + `lazy()`, Alembic baseline, `/privacy` + account deletion) they want implemented next.
+
+---
+
+### Session Entry 110
+- **Timestamp:** 2026-11-28 22:37:00 IST (17:07:00 UTC)
+- **User Prompt:**
+  `"do from this whatever best from this but more advanced version of it so in future we cannot need to migerate again and again in some basis."`
+- **Implemented Future-Proof Architecture:**
+  1. **Zero-Drift Alembic Baseline + Portable DR Snapshot/Restore Engine ([migrations.py](file:///d:/Stock%20Prediction%20System/backend/core/migrations.py), [20261128_0001_initial_schema_baseline.py](file:///d:/Stock%20Prediction%20System/backend/alembic/versions/20261128_0001_initial_schema_baseline.py), [backup_dr.py](file:///d:/Stock%20Prediction%20System/backend/core/backup_dr.py), [maintenance_tasks.py](file:///d:/Stock%20Prediction%20System/backend/tasks/maintenance_tasks.py), [admin.py](file:///d:/Stock%20Prediction%20System/backend/api/admin.py))**:
+     - Added Alembic baseline migration auto-stamping inside `create_db_tables()`, engine-agnostic gzip snapshot + SHA-256 verification (plus optional `pg_dump`), zero-dependency stdlib `sqlite3` DR restore drill execution (`PG_JSONB`/`PG_UUID` compilers), Celery Beat `02:30 IST` nightly DR job, `./backups` mount in `docker-compose.yml`, and Admin Ops DR card (`GET /api/admin/dr/status`, `POST /api/admin/dr/backup`, `POST /api/admin/dr/verify`).
+  2. **AI Prompt-Injection Firewall, Daily Per-User Quota & Secret Sanitizer ([ai_guardrails.py](file:///d:/Stock%20Prediction%20System/backend/core/ai_guardrails.py), [rag_service.py](file:///d:/Stock%20Prediction%20System/backend/services/rag_service.py), [ai_engine.py](file:///d:/Stock%20Prediction%20System/backend/api/ai_engine.py))**:
+     - Added injection/exfiltration blocking, `<user_query>` delimiters, Redis daily request budgets (`15/200/500`), and credential/JWT output redaction.
+  3. **Frontend `<ErrorBoundary>`, `React.lazy()` Splitting, DPDPA Self-Serve Data/Deletion, Legal Pages & `INR` Billing ([ErrorBoundary.tsx](file:///d:/Stock%20Prediction%20System/frontend/src/components/ErrorBoundary.tsx), [LegalPage.tsx](file:///d:/Stock%20Prediction%20System/frontend/src/pages/LegalPage.tsx), [App.tsx](file:///d:/Stock%20Prediction%20System/frontend/src/App.tsx), [SettingsPage.tsx](file:///d:/Stock%20Prediction%20System/frontend/src/pages/SettingsPage.tsx), [auth.py](file:///d:/Stock%20Prediction%20System/backend/api/auth.py), [subscription.py](file:///d:/Stock%20Prediction%20System/backend/api/subscription.py), [sitemap.xml](file:///d:/Stock%20Prediction%20System/frontend/public/sitemap.xml), [dependabot.yml](file:///d:/Stock%20Prediction%20System/.github/dependabot.yml))**:
+     - Cut initial entry JS bundle `625.58 KB -> 151.88 KB` via route-level `lazy()`, added `<ErrorBoundary>` wrappers, cleaned push links, added `/privacy` + `/terms` + `sitemap.xml` + Dependabot, built `GET /api/auth/export-data` & `POST /api/auth/delete-account` (with sole-admin protection & explicit child table cleanup), and aligned billing checkout defaults to `2499.0 INR`.
+- **Verification Evidence:**
+  - `python -m py_compile` & `alembic heads`: **exit code 0**.
+  - `venv\Scripts\python.exe -m pytest` across 8 backend suites ([test_future_proof_foundation.py](file:///d:/Stock%20Prediction%20System/backend/tests/test_future_proof_foundation.py) `[4 tests]`, `test_groq_and_rag_service.py`, `test_auth_pro_access.py`, `test_advanced_security_upgrades.py`, `test_security_fixes_and_alerts_hub.py`, `test_cybersecurity.py`, `test_notifications_and_admin_hub.py`, `test_sentinel_watchdog.py`): **56 passed, 0 failed in `212.13s`**.
+  - Frontend: `eslint` **0 errors/warnings**; `vitest --run` **5 files, 25 passed (`4.42s`)**; `tsc && vite build` **2,002 modules (`22.35s`)**.
+- **Next Safe Step:**
+  - Commit & push locally (`git add -A && git commit && git push origin main`), then deploy on live server (`cd /home/opc/StockAI && git pull origin main && docker compose build backend celery_worker celery_beat frontend && docker compose up -d --no-build --force-recreate backend celery_worker celery_beat frontend flower`).

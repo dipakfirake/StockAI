@@ -26,6 +26,7 @@ celery_app = Celery(
         "backend.tasks.alert_tasks",
         "backend.tasks.trading_tasks",
         "backend.tasks.swing_audit_tasks",
+        "backend.tasks.maintenance_tasks",
     ],
 )
 
@@ -100,6 +101,11 @@ celery_app.conf.beat_schedule = {
     "sync-swing-trade-audits": {
         "task": "backend.tasks.swing_audit_tasks.sync_swing_trade_audits",
         "schedule": crontab(hour=10, minute=15, day_of_week="1-5"),
+    },
+    # Nightly Portable Database Snapshot + Automated DR Restore Drill: 02:30 IST (21:00 UTC)
+    "nightly-db-backup-and-dr-drill": {
+        "task": "backend.tasks.maintenance_tasks.run_nightly_backup_and_dr_check",
+        "schedule": crontab(hour=21, minute=0),
     },
 }
 

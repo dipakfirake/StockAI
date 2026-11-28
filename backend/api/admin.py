@@ -735,3 +735,54 @@ async def admin_broadcast_system_notice(
     )
     return {"success": True, "recipients": sent_count}
 
+
+@router.get("/dr/status")
+async def get_disaster_recovery_status(admin: User = Depends(require_admin)):
+    """Inspect Alembic schema migration sync, snapshots, and latest DR restore drill."""
+    from backend.core.backup_dr import get_dr_status
+    return await get_dr_status()
+
+
+@router.post("/dr/backup")
+async def create_dr_snapshot(admin: User = Depends(require_admin_stepup)):
+    """Trigger an immediate portable database backup snapshot with SHA-256 verification."""
+    from backend.core.backup_dr import create_database_snapshot, verify_backup_snapshot
+
+    snapshot = await create_database_snapshot(include_candles=False)
+    verify = verify_backup_snapshot(snapshot["path"])
+    log_security_event(
+        event_type="ADMIN_DR_BACKUP_CREATED",
+        severity="INFO",
+        user_id=str(admin.id),
+        details={"admin_email": admin.email, "filename": snapshot["filename"], "rows": snapshot["total_rows"]},
+    )
+    return {"snapshot": snapshot, "verification": verify}
+
+
+@router.post("/dr/verify")
+async def run_dr_verification_drill(admin: User = Depends(require_admin_stepup)):
+    """Execute a non-destructive Disaster Recovery restore drill against an isolated sandbox DB."""
+    from backend.core.backup_dr import (
+        list_snapshots,
+        create_database_snapshot,
+        run_restore_drill,
+        record_verified_drill,
+    )
+
+    snapshots = list_snapshots()
+    if not snapshots:
+        created = await create_database_snapshot(include_candles=False)
+        target_path = created["path"]
+    else:
+        target_path = snapshots[0]["path"]
+
+    drill = await run_restore_drill(target_path)
+    record_verified_drill(drill)
+    log_security_event(
+        event_type="ADMIN_DR_DRILL_PASSED",
+        severity="INFO",
+        user_id=str(admin.id),
+        details={"admin_email": admin.email, "filename": drill["filename"], "restored_rows": drill["restored_rows"]},
+    )
+    return drill
+

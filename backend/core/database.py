@@ -190,6 +190,13 @@ async def create_db_tables():
                 # Depending on the DB, this might fail if Timescale isn't installed.
                 pass
 
+            # Stamp/reconcile Alembic schema baseline so future versioned migrations never collide
+            try:
+                from backend.core.migrations import ensure_baseline_stamped_or_upgraded
+                await ensure_baseline_stamped_or_upgraded(conn)
+            except Exception:
+                pass
+
         # One-time idempotent remediation closing pre-upgrade admin alerts/sentinel incidents cleanly
         try:
             from datetime import datetime, timezone

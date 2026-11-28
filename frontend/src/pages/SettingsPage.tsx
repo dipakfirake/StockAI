@@ -10,20 +10,67 @@ import {
   TrendingUp,
   Cookie,
   FileSpreadsheet,
+  Download,
+  Trash2,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { settingsApi } from '../services/api'
+import { settingsApi, authApi } from '../services/api'
 import { useAuth } from '../AuthContext'
+import { toast } from '../components/Toast'
 import AdminStepUpModal from '../components/AdminStepUpModal'
 
 export default function SettingsPage() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   const isAdmin = Boolean(user?.is_admin)
 
   const [settings, setSettings] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [stepUpOpen, setStepUpOpen] = useState(false)
+  const [exportingData, setExportingData] = useState(false)
+  const [showDeleteBox, setShowDeleteBox] = useState(false)
+  const [deleteForm, setDeleteForm] = useState({ confirmEmail: '', confirmation: '', password: '', totpCode: '' })
+  const [deletingAccount, setDeletingAccount] = useState(false)
+
+  async function handleExportMyData() {
+    setExportingData(true)
+    try {
+      const res = await authApi.exportData()
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `stockai_personal_data_${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success('Data Exported', 'Personal JSON archive downloaded cleanly.')
+    } catch (err: any) {
+      toast.error('Export Failed', err?.response?.data?.detail || err?.message || 'Unable to export account data.')
+    } finally {
+      setExportingData(false)
+    }
+  }
+
+  async function handleDeleteOwnAccount(e: React.FormEvent) {
+    e.preventDefault()
+    setDeletingAccount(true)
+    try {
+      await authApi.deleteAccount({
+        confirm_email: deleteForm.confirmEmail.trim(),
+        confirmation: deleteForm.confirmation.trim(),
+        password: deleteForm.password || undefined,
+        totp_code: deleteForm.totpCode.trim() || undefined,
+      })
+      toast.success('Account Deleted', 'Your account and associated records have been permanently removed.')
+      logout()
+    } catch (err: any) {
+      toast.error('Account Deletion Blocked', err?.response?.data?.detail || err?.message || 'Unable to delete account.')
+    } finally {
+      setDeletingAccount(false)
+    }
+  }
 
   useEffect(() => {
     fetchSettings()
@@ -464,6 +511,110 @@ export default function SettingsPage() {
           >
             Cookie Settings
           </button>
+        </div>
+
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>Your Data Rights &amp; Legal Notices (DPDPA 2023)</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                Download all your account records as JSON or review our privacy and disclaimer terms.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Link to="/privacy" className="btn btn-secondary" style={{ fontSize: 12, textDecoration: 'none' }}>
+                Privacy Policy
+              </Link>
+              <Link to="/terms" className="btn btn-secondary" style={{ fontSize: 12, textDecoration: 'none' }}>
+                Terms of Use
+              </Link>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ fontSize: 12 }}
+                onClick={handleExportMyData}
+                disabled={exportingData}
+              >
+                <Download size={13} /> {exportingData ? 'Preparing JSON...' : 'Export My Data'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: 12, borderColor: 'rgba(239, 68, 68, 0.45)', color: 'var(--color-bearish)' }}
+                onClick={() => setShowDeleteBox(v => !v)}
+              >
+                <Trash2 size={13} /> Delete Account
+              </button>
+            </div>
+          </div>
+
+          {showDeleteBox && (
+            <form
+              onSubmit={handleDeleteOwnAccount}
+              style={{
+                marginTop: 14,
+                padding: 14,
+                borderRadius: 8,
+                background: 'rgba(239, 68, 68, 0.06)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--color-bearish)' }}>
+                Permanent Account Deletion (Irreversible)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 10 }}>
+                <input
+                  type="email"
+                  required
+                  className="input"
+                  placeholder={`Confirm email (${user?.email || ''})`}
+                  value={deleteForm.confirmEmail}
+                  onChange={e => setDeleteForm(f => ({ ...f, confirmEmail: e.target.value }))}
+                />
+                <input
+                  type="text"
+                  required
+                  className="input"
+                  placeholder='Type DELETE to confirm'
+                  value={deleteForm.confirmation}
+                  onChange={e => setDeleteForm(f => ({ ...f, confirmation: e.target.value }))}
+                />
+                <input
+                  type="password"
+                  className="input"
+                  placeholder="Account password (if email login)"
+                  value={deleteForm.password}
+                  onChange={e => setDeleteForm(f => ({ ...f, password: e.target.value }))}
+                />
+                {user?.totp_enabled && (
+                  <input
+                    type="text"
+                    required
+                    className="input mono"
+                    placeholder="6-digit 2FA / recovery code"
+                    value={deleteForm.totpCode}
+                    onChange={e => setDeleteForm(f => ({ ...f, totpCode: e.target.value }))}
+                  />
+                )}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button type="button" className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => setShowDeleteBox(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={deletingAccount}
+                  className="btn"
+                  style={{ fontSize: 12, background: '#ef4444', color: '#ffffff', border: 'none' }}
+                >
+                  {deletingAccount ? 'Deleting...' : 'Permanently Delete My Account'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
 

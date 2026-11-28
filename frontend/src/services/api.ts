@@ -364,6 +364,13 @@ export const authApi = {
   getWsTicket: () => api.post<{ ws_ticket: string; expires_in: number }>('/auth/ws-ticket'),
   me: () => api.get('/auth/me'),
   upgrade: () => api.post('/auth/upgrade'),
+  exportData: () => api.get('/auth/export-data'),
+  deleteAccount: (data: {
+    confirm_email: string
+    confirmation: string
+    password?: string
+    totp_code?: string
+  }) => api.post('/auth/delete-account', data),
 }
 
 // ===== User Preferences endpoints =====
@@ -378,7 +385,7 @@ export const preferencesApi = {
 export const subscriptionApi = {
   getStatus: () => api.get('/subscription/status'),
   requestPro: (note?: string) => api.post('/subscription/request-pro', { note }),
-  checkout: (data: { payment_method: string; payment_reference: string; amount?: number }) =>
+  checkout: (data: { payment_method: string; payment_reference: string; amount?: number; currency?: string }) =>
     api.post('/subscription/checkout', data),
 }
 
@@ -411,6 +418,9 @@ export const adminApi = {
   }) => api.post('/admin/alerts-hub/acknowledge', data),
   broadcastNotice: (data: { title: string; message: string; priority?: string }) =>
     api.post('/admin/broadcast-notice', data),
+  getDrStatus: () => api.get('/admin/dr/status'),
+  createDrBackup: () => api.post('/admin/dr/backup'),
+  verifyDrBackup: () => api.post('/admin/dr/verify'),
 }
 
 // ===== Sentinel Watchdog endpoints =====

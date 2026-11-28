@@ -23,7 +23,8 @@ class ProRequestSchema(BaseModel):
 class CheckoutSchema(BaseModel):
     payment_method: str = Field(default="UPI", description="UPI, CARD, NETBANKING")
     payment_reference: str = Field(default="", description="Transaction ID or payment receipt reference")
-    amount: float = Field(default=29.0)
+    amount: float = Field(default=2499.0)
+    currency: str = Field(default="INR")
 
 
 @router.get("/status")
@@ -127,7 +128,7 @@ async def checkout_payment(
         user_id=current_user.id,
         plan_tier="PRO",
         amount=req.amount,
-        currency="USD",
+        currency=(req.currency or "INR").upper()[:10],
         payment_method=req.payment_method.upper(),
         payment_reference=ref,
         status="SUCCESS",

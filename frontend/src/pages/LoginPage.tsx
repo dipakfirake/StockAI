@@ -576,10 +576,16 @@ export default function LoginPage() {
           </span>
         </p>
 
-        {/* Trust badge */}
-        <div style={{ marginTop: '1.2rem', textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-          <ShieldCheck size={14} color="#10b981" />
-          <span>Real-time Anti-Bot & Email Authenticity Protected</span>
+        {/* Trust badge & Legal */}
+        <div style={{ marginTop: '1.2rem', textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+            <ShieldCheck size={14} color="#10b981" />
+            <span>Real-time Anti-Bot &amp; Email Authenticity Protected</span>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <a href="/privacy" style={{ color: 'var(--color-text-secondary)', textDecoration: 'underline' }}>Privacy Policy</a>
+            <a href="/terms" style={{ color: 'var(--color-text-secondary)', textDecoration: 'underline' }}>Terms of Use</a>
+          </div>
         </div>
       </div>
     </div>

@@ -1,21 +1,7 @@
+import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import NavBar from './components/NavBar'
-import Dashboard from './pages/Dashboard'
-import ChartPage from './pages/ChartPage'
-import AlertsPage from './pages/AlertsPage'
-import PaperTradingPage from './pages/PaperTradingPage'
-import BacktestPage from './pages/BacktestPage'
-import PortfolioPage from './pages/PortfolioPage'
-import ScannerPage from './pages/ScannerPage'
-import HeatmapPage from './pages/HeatmapPage'
-import OptionsChainPage from './pages/OptionsChainPage'
-import SMCWatchlist from './pages/SMCWatchlist'
-import LoginPage from './pages/LoginPage'
-import PricingPage from './pages/PricingPage'
-import SettingsPage from './pages/SettingsPage'
-import SwingScreenerPage from './pages/SwingScreenerPage'
-import AdminPage from './pages/AdminPage'
-import SentinelMonitorPage from './pages/SentinelMonitorPage'
+import ErrorBoundary from './components/ErrorBoundary'
 import { AuthProvider } from './AuthContext'
 import { ThemeProvider } from './ThemeContext'
 import { PresenceProvider } from './PresenceContext'
@@ -27,7 +13,32 @@ import ProtectedRoute from './components/ProtectedRoute'
 import CookieConsentBanner from './components/CookieConsentBanner'
 import { alertWebSocket } from './services/websocket'
 import { triggerDesktopPushNotification } from './utils/notificationSound'
-import { useEffect } from 'react'
+
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const ChartPage = lazy(() => import('./pages/ChartPage'))
+const AlertsPage = lazy(() => import('./pages/AlertsPage'))
+const PaperTradingPage = lazy(() => import('./pages/PaperTradingPage'))
+const BacktestPage = lazy(() => import('./pages/BacktestPage'))
+const PortfolioPage = lazy(() => import('./pages/PortfolioPage'))
+const ScannerPage = lazy(() => import('./pages/ScannerPage'))
+const HeatmapPage = lazy(() => import('./pages/HeatmapPage'))
+const OptionsChainPage = lazy(() => import('./pages/OptionsChainPage'))
+const SMCWatchlist = lazy(() => import('./pages/SMCWatchlist'))
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const PricingPage = lazy(() => import('./pages/PricingPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+const SwingScreenerPage = lazy(() => import('./pages/SwingScreenerPage'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
+const SentinelMonitorPage = lazy(() => import('./pages/SentinelMonitorPage'))
+const LegalPage = lazy(() => import('./pages/LegalPage'))
+
+function PageLoadFallback() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '42vh', color: 'var(--color-text-muted)', fontSize: 13 }}>
+      Loading module...
+    </div>
+  )
+}
 
 export default function App() {
   useEffect(() => {
@@ -40,7 +51,7 @@ export default function App() {
           body: n.message || '',
           severity: n.priority || 'INFO',
           tag: `notif-${n.id}`,
-          url: n.metadata?.link || '/alerts?tab=INBOX',
+          url: n.metadata?.link || '/alerts',
         })
         window.dispatchEvent(new CustomEvent('stockai:notifications-updated', { detail: n }))
         return
@@ -53,7 +64,7 @@ export default function App() {
           body: a.detail || '',
           severity: a.severity || 'CRITICAL',
           tag: `admin-alert-${a.id}`,
-          url: '/admin?tab=threats',
+          url: '/admin',
         })
         if (a.severity === 'CRITICAL') {
           toast.error(`🚨 ${a.title}`, (a.detail || '').slice(0, 140))
@@ -103,35 +114,43 @@ export default function App() {
           <ReconnectingBanner />
           <NavBar />
           <main className="main-content">
-            <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-              <Route path="/chart" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
-              <Route path="/chart/:symbol" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
-              <Route path="/screener" element={<ProtectedRoute><SwingScreenerPage /></ProtectedRoute>} />
-              <Route path="/scanner" element={<ProtectedRoute><ScannerPage /></ProtectedRoute>} />
-              <Route path="/heatmap" element={<ProtectedRoute><HeatmapPage /></ProtectedRoute>} />
-              <Route path="/options" element={<ProtectedRoute><OptionsChainPage /></ProtectedRoute>} />
-              <Route path="/options/:symbol" element={<ProtectedRoute><OptionsChainPage /></ProtectedRoute>} />
-              <Route path="/smc-watchlist" element={<ProtectedRoute><SMCWatchlist /></ProtectedRoute>} />
-              <Route path="/alerts" element={<ProtectedRoute><AlertsPage /></ProtectedRoute>} />
-              <Route path="/paper-trading" element={<ProtectedRoute><PaperTradingPage /></ProtectedRoute>} />
-              <Route path="/backtest" element={<ProtectedRoute><BacktestPage /></ProtectedRoute>} />
-              <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
-              <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-              <Route path="/pricing" element={<PricingPage />} />
-              <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
-              <Route path="/admin/sentinel" element={<ProtectedRoute adminOnly><SentinelMonitorPage /></ProtectedRoute>} />
-              <Route path="/login" element={<LoginPage />} />
-              {/* AI Forecast & Prediction Route Aliases */}
-              <Route path="/predictions" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
-              <Route path="/prediction" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
-              <Route path="/forecast" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
-              {/* Catch-all fallback so unmatched routes never show a blank screen */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
+            <ErrorBoundary sectionLabel="Workspace View">
+              <Suspense fallback={<PageLoadFallback />}>
+                <Routes>
+                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                  <Route path="/chart" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+                  <Route path="/chart/:symbol" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+                  <Route path="/screener" element={<ProtectedRoute><SwingScreenerPage /></ProtectedRoute>} />
+                  <Route path="/scanner" element={<ProtectedRoute><ScannerPage /></ProtectedRoute>} />
+                  <Route path="/heatmap" element={<ProtectedRoute><HeatmapPage /></ProtectedRoute>} />
+                  <Route path="/options" element={<ProtectedRoute><OptionsChainPage /></ProtectedRoute>} />
+                  <Route path="/options/:symbol" element={<ProtectedRoute><OptionsChainPage /></ProtectedRoute>} />
+                  <Route path="/smc-watchlist" element={<ProtectedRoute><SMCWatchlist /></ProtectedRoute>} />
+                  <Route path="/alerts" element={<ProtectedRoute><AlertsPage /></ProtectedRoute>} />
+                  <Route path="/paper-trading" element={<ProtectedRoute><PaperTradingPage /></ProtectedRoute>} />
+                  <Route path="/backtest" element={<ProtectedRoute><BacktestPage /></ProtectedRoute>} />
+                  <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
+                  <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+                  <Route path="/pricing" element={<PricingPage />} />
+                  <Route path="/privacy" element={<LegalPage mode="privacy" />} />
+                  <Route path="/terms" element={<LegalPage mode="terms" />} />
+                  <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+                  <Route path="/admin/sentinel" element={<ProtectedRoute adminOnly><SentinelMonitorPage /></ProtectedRoute>} />
+                  <Route path="/login" element={<LoginPage />} />
+                  {/* AI Forecast & Prediction Route Aliases */}
+                  <Route path="/predictions" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+                  <Route path="/prediction" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+                  <Route path="/forecast" element={<ProtectedRoute><ChartPage /></ProtectedRoute>} />
+                  {/* Catch-all fallback so unmatched routes never show a blank screen */}
+                  <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                </Routes>
+              </Suspense>
+            </ErrorBoundary>
           </main>
-          <AIAssistantWidget />
+          <ErrorBoundary sectionLabel="Market Assistant">
+            <AIAssistantWidget />
+          </ErrorBoundary>
           <ToastContainer />
           <CookieConsentBanner />
         </div>
